@@ -180,6 +180,13 @@ static void view_start(Player *p, const char *path, int found) {
         fprintf(stderr, "adx: player %d: %s counts as %d blanks (this copy's file: %d)\n", (int)(p - sPlayers), path, blanks, own);
     }
 }
+#ifdef PORT_VITA /* the streams' starts and the voices' changes in the log (the fighters' intro lines) */
+extern void Vita_Log(const char *fmt, ...);
+static unsigned sAdxLogN;
+#define ADX_LOG(...) do { if (sAdxLogN < 400) { sAdxLogN++; Vita_Log(__VA_ARGS__); } } while (0)
+#else
+#define ADX_LOG(...) ((void)0)
+#endif
 static SDL_AudioDeviceID sDevice;
 static int sMono, sTried;
 static unsigned sFeedCalls; /* callbacks from SDL so far (BT3_SND_VERBOSE prints it at a stop) */
@@ -526,6 +533,9 @@ static void stop(Player *p) {
         PortMa_Stop(p->ma);
         p->ma = NULL;
     }
+    if (p->stream != NULL && p - sPlayers >= 4) {
+        ADX_LOG("adx: player %d stopped at %.1f s of %.1f, status %d (frame %u)\n", (int)(p - sPlayers), (double)p->pos / (double)p->rate, (double)p->total / (double)p->rate, p->stat, gGsFrame);
+    }
     if (p->stream != NULL) {
         SDL_DestroyAudioStream(p->stream); /* waits for a running callback */
         p->stream = NULL;
@@ -600,6 +610,19 @@ static void start(Player *p, const char *path) {
     if (!device()) {
         return;
     }
+#ifdef PORT_VITA /* the archives are read as they are on the disc: no file of its own to open (vita_file.c) */
+    {
+        extern void *Vita_LoadWhole(const char *path, uint32_t *size);
+        (void)fp; (void)size;
+        p->size = 0;
+        p->file = Vita_LoadWhole(path, &p->size);
+        if (p->file == NULL) {
+            fprintf(stderr, "bt3: sound file not found: %s\n", path);
+            ADX_LOG("adx: player %d: %s not read\n", (int)(p - sPlayers), path);
+            return;
+        }
+    }
+#else
     fp = fopen(path, "rb");
     if (fp == NULL) {
         fprintf(stderr, "bt3: sound file not found: %s\n", path);
@@ -635,9 +658,13 @@ static void start(Player *p, const char *path) {
     p->file = malloc((size_t)size);
     p->size = (uint32_t)fread(p->file, 1, (size_t)size, fp);
     fclose(fp);
+#endif
     if (p->size < 0x40 || be16(p->file) != 0x8000 || p->file[4] != 3 || p->file[5] != FRAME || p->file[6] != 4 ||
         p->file[7] < 1 || p->file[7] > 2 || (p->file[0x13] & 8)) {
         fprintf(stderr, "bt3: %s is not an ADX file of the kind the game uses\n", path);
+        ADX_LOG("adx: player %d: %s is not an ADX file of the kind the game uses (%u bytes: %02x %02x %02x %02x %02x %02x %02x %02x)\n", (int)(p - sPlayers), path, p->size,
+                p->size > 0 ? p->file[0] : 0, p->size > 1 ? p->file[1] : 0, p->size > 4 ? p->file[4] : 0, p->size > 5 ? p->file[5] : 0,
+                p->size > 6 ? p->file[6] : 0, p->size > 7 ? p->file[7] : 0, p->size > 0x12 ? p->file[0x12] : 0, p->size > 0x13 ? p->file[0x13] : 0);
         free(p->file);
         p->file = NULL;
         return;
@@ -677,6 +704,7 @@ static void start(Player *p, const char *path) {
     p->stream = SDL_CreateAudioStream(&spec, NULL);
     if (p->stream == NULL) {
         fprintf(stderr, "bt3: sound stream: %s\n", SDL_GetError());
+        ADX_LOG("adx: player %d: no stream for %s\n", (int)(p - sPlayers), path);
         return;
     }
     p->stN = 0;
@@ -686,6 +714,8 @@ static void start(Player *p, const char *path) {
         extern int Port_Setting(const char *name, int def); /* plat_settings.c */
         gPortMusicFollows = Port_Setting("music_follows_speed", 0) != 0;
     }
+    ADX_LOG("adx: player %d plays %s: %u ch, %u Hz, %.1f s, loop %d, volume %d, paused %d (frame %u)\n", (int)(p - sPlayers), path, p->channels, p->rate,
+            (double)p->total / (double)p->rate, p->loop, p->vol, p->paused, gGsFrame);
     if (getenv("BT3_SND_VERBOSE") != NULL) {
         fprintf(stderr, "adx: player %d: start %s: %u ch, %u Hz, %.1f s, loop %d, volume %d (0.1 dB), paused %d, pan %d/%d\n", (int)(p - sPlayers), path,
                 p->channels, p->rate, (double)p->total / (double)p->rate, p->loop, p->vol, p->paused,p->pan[0],p->pan[1]);
@@ -757,6 +787,8 @@ void ADXT_StartAfs(void *adxt, int patid, int fid) {
             extern void PortA11y_StreamStart(const char *path); /* a11y_game.c: a voice with its line shown as text */
             start(adxt, path);
             PortA11y_StreamStart(path);
+        } else {
+            ADX_LOG("adx: player %d: archive %d file %d not found\n", (int)((Player *)adxt - sPlayers), patid, fid);
         }
         if (found || (by_ticks() && Port_NetActive() && disc_blanks(path) != 0)) { /* (a match: counted even when this copy lacks the file) */
             view_start(adxt, path, found);
@@ -795,6 +827,9 @@ void ADXT_Pause(void *adxt, int sw) {
     if (getenv("BT3_SND_VERBOSE") != NULL && p->paused != (sw != 0)) {
         fprintf(stderr, "adx: player %d pause %d\n", (int)(p - sPlayers), sw);
     }
+    if (p - sPlayers >= 4 && p->paused != (sw != 0)) {
+        ADX_LOG("adx: player %d pause %d (frame %u)\n", (int)(p - sPlayers), sw, gGsFrame);
+    }
     if (p->ma != NULL) {
         p->paused = sw != 0;
         PortMa_Pause(p->ma, p->paused);
@@ -817,6 +852,9 @@ void ADXT_SetOutVol(void *adxt, int vol) {
     if (p != NULL) {
         if (getenv("BT3_SND_VERBOSE") != NULL && p->vol != vol) {
             fprintf(stderr, "adx: player %d volume %d\n", (int)(p - sPlayers), vol);
+        }
+        if (p - sPlayers >= 4 && p->vol != vol) {
+            ADX_LOG("adx: player %d volume %d (frame %u)\n", (int)(p - sPlayers), vol, gGsFrame);
         }
         p->vol = vol;
         gPortAdxView[p - sPlayers].vol = vol;

@@ -33,9 +33,17 @@ extern uint32_t gGsPageGen[512]; /* bumped whenever an upload writes into that 8
 extern unsigned gGsFrame;
 
 uint32_t Gs_PageHash(uint32_t page); /* content hash of an 8 KB page of GS memory */
+#ifdef PORT_VITA
+/* PS Vita: uploads are not written into GS memory until something reads them (gs_core.c). The content of a
+   rectangle of a buffer as a number, and a counter of every change (a key made at one count holds for it). */
+uint32_t Gs_RectId(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h);
+extern unsigned gGsEpoch;
+#endif
 uint32_t Gs_VramRead(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x, uint32_t y);
 /* The 256-byte block of GS memory that holds the pixel (x, y) of that buffer (formats 0x00, 0x13, 0x14). */
 const uint8_t *Gs_BlockPtr(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x, uint32_t y);
+void Gs_VramReadRect(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t w, uint32_t h, uint32_t *out);
+int Gs_VramReadIdx8(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t w, uint32_t h, uint8_t *out, uint32_t stride);
 extern unsigned gGsFbUploads;
 void GsGpu_FbUpload(int second);
 int Gs_PsmBits(uint32_t psm);
@@ -81,8 +89,12 @@ extern int gPortResim;
 extern int gGsResim;
 /* The frame being computed is not shown because the machine is behind (gs_draw.c: frame skipping). Its drawing
    is left out the way a re-run frame's is; the game itself (and its sound) go on as always. */
+#ifdef PORT_VITA /* (the Vita: no rollback, and a frame it leaves out is gs_core.c's own gVitaGsSkip) */
+#define GS_NO_PICTURE 0
+#else
 extern int gsSkipFrame;
 #define GS_NO_PICTURE (gGsResim || gsSkipFrame)
+#endif
 
 /* gs_core.c: with the render thread (BT3_GS_THREAD), waits until it has finished the list it runs, before the
    game's thread touches what the thread uses (GS memory and registers, the back end). At once without it, or on

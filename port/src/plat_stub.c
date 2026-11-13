@@ -365,6 +365,27 @@ static void late_wait(void) {
         PortInput_Fresh(); /* the controllers and keys as they are now, not as they were when the last picture was shown */
     }
 }
+#ifdef PORT_VITA
+/* (Vita) A vertical blank of the game's: the Vita keeps its own time (port/vita/vita_main.c, Vita_VBlank); no online
+   session, no rollback, no in-between pictures, no script mods. What the game's state needs is kept: the blank's
+   count and the sound players' state by blanks (plat_sndstate.c). */
+void Port_VBlank(void) {
+    gPortVBlanks++;
+    gPortLiveBlanks++;
+    {
+        extern void Vita_VBlank(unsigned vblanks); /* port/vita/vita_main.c: status screen, timing */
+        Vita_VBlank(gPortVBlanks);
+    }
+    {
+        extern void Port_AdxTick(void); /* plat_sndstate.c */
+        Port_AdxTick();
+    }
+    Port_Trace(gPortVBlanks);
+    if (sVsyncHandler != NULL) {
+        sVsyncHandler(0);
+    }
+}
+#else
 void Port_VBlank(void) {
     Port_LagMark('W'); /* (the game has come to wait for a blank) */
     {
@@ -467,6 +488,7 @@ void Port_VBlank(void) {
         sVsyncHandler(0);
     }
 }
+#endif
 int sceGsSyncV() { Port_VBlank(); return 0; }
 
 /* ---- pads ---- */
@@ -474,7 +496,12 @@ int sceDbcInit() { return 1; }
 int scePad2Init() { return 1; }
 static int sPadSockets;
 int scePad2CreateSocket() { return sPadSockets++; }
+#ifdef PORT_VITA /* the second controller is there while a pad is paired for player 2 (PS TV; limeking614-dev's fork) */
+extern int Vita_Pad2Present(void);
+int scePad2GetState(int socket) { return socket == 1 && !Vita_Pad2Present() ? 0 : 1; }
+#else
 int scePad2GetState() { return 1; }            /* connected and ready */
+#endif
 /* A DualShock 2's button profile: every digital button, both sticks, every pressure-sensitive button. */
 int scePad2GetButtonProfile(int socket, unsigned char *profile) {
     (void)socket;
@@ -604,6 +631,12 @@ int sceVibSetActParam(int socket, int profileSize, unsigned char *profile, int d
 PORT_HOST static int sAspectMilli = -1;
 extern int Port_Setting(const char *name, int def); /* plat_settings.c */
 int Port_AspectMilli(void) {
+#ifdef PORT_VITA /* the Vita's own screen, 960 x 544 (wide=0 in bt3.txt: 4:3) */
+    if (sAspectMilli < 0) {
+        extern int gVitaWide;
+        sAspectMilli = gVitaWide ? 1765 : 1333;
+    }
+#endif
     if (sAspectMilli < 0) {
         int a = 0, b = 0, w = 0, h = 0;
         sAspectMilli = Port_Setting("aspect_milli", 1333); /* the saved choice; the variables below win */

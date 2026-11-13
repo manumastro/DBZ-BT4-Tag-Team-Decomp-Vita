@@ -625,14 +625,24 @@ void StgPanBlur_RestoreEnv(void) {
 extern void Port_GsMarker(s32 effect); /* port/src/gs_marker.c */
 #define PORT_GLOW_BEGIN 0x20 /* the PC renderer draws the chain's work pages at the PS2's resolution (gs_draw.c) */
 #define PORT_GLOW_END 0x21
+#ifdef PORT_VITA
+extern void Port_GsMarkerArg(s32 effect, u32 arg); /* (Vita: markers 0x20..0x2F are the ground shadows' slots there,
+                                                      so the PC renderer's glow markers are not sent) */
+#endif
 #endif
 void GfxPost_DrawGlow(s32 passes, u32 color, u32 glow) {
     u64 *p;
     s32 i;
     s32 x;
 
+#ifdef PORT_VITA
+    /* (Vita) the glow drawn natively (port/vita/vita_vgl.c, glow_exec): its passes below are dropped up to the end
+       marker. The chain of work pages costs the Vita's chip a scene per pass (about thirty a picture). */
+    Port_GsMarkerArg(0x40, color);
+    Port_GsMarkerArg(0x41, glow);
+#endif
     passes += passes & 1;
-#ifdef PORT
+#if defined(PORT) && !defined(PORT_VITA)
     Port_GsMarker(PORT_GLOW_BEGIN);
 #endif
     Gfx_AddDefaultEnv();
@@ -1050,7 +1060,9 @@ void GfxPost_DrawGlow(s32 passes, u32 color, u32 glow) {
     p[1] = GS_CLAMP_1;
     p += 2;
     Dma_EndDirect(p);
-#ifdef PORT
+#ifdef PORT_VITA
+    Port_GsMarker(0x42); /* (Vita) the glow's end (port/vita/vita_vgl.c, glow_exec) */
+#elif defined(PORT)
     Port_GsMarker(PORT_GLOW_END);
 #endif
 }
@@ -1721,6 +1733,18 @@ void StgDepthTint_Draw(void) {
         }
     }
     tint = &gStgDepthTint[medium];
+#ifdef PORT_VITA
+    {   /* the film's notes: the medium, and the camera's height against the water's */
+        extern void Vita_FilmTintNote(int medium, int enabled, int additive, int camY16, int waterY16);
+        f32 lv;
+        if (!Battle_IsSplitScreen() && BtlStage_GetWaterLevel(&lv)) {
+            Mtx_InverseRT(&m, &view->world2view2);
+            Vita_FilmTintNote(medium, tint->enabled, tint->additive, (s32)(m.m[3][1] * 16.0f), (s32)(lv * 16.0f));
+        } else {
+            Vita_FilmTintNote(medium, tint->enabled, tint->additive, 0, -1);
+        }
+    }
+#endif
     if (tint->enabled != 0) {
         Gfx_AddDefaultEnv();
         Dma_AddData(tint->tex.upload, 0x10);

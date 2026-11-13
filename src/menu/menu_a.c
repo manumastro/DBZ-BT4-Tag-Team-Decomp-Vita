@@ -587,6 +587,12 @@ void MainMenu_Update(void) {
 
 /* Pad 0: up / down move the cursor (the ring scrolls at the ends), confirm enters a mode, cancel leaves. */
 void MainMenu_Input(s32 *result) {
+#ifdef PORT_VITA
+    { /* (the touch screen's flings wait for the ring to take a press: port/vita/vita_touch.c) */
+        extern int gVitaMenuReady;
+        gVitaMenuReady = (gMainMenu->flash[0].flags & MFLASH_PAD) != 0;
+    }
+#endif
     if (!(gMainMenu->flash[0].flags & MFLASH_PAD)) {
         return;
     }
@@ -639,6 +645,9 @@ void MainMenu_Input(s32 *result) {
             }
         }
     moved:
+#ifdef PORT_VITA
+        { extern int gVitaMenuMoves; gVitaMenuMoves++; } /* (the test runs' log: the moves the menu took) */
+#endif
         MainMenu_PlateGoto(0, "fl_on_start");
         gMainMenu->guide = Rand_Range(4);
         if (MAINMENU_VOICED(MAINMENU_CUR(gMainMenu))) {

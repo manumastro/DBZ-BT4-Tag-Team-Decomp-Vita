@@ -194,6 +194,10 @@ s32 FirstRun_Main(void) {
     BootCard_Run(2);
     res = Sprite_Unpack(MPACK_AT(gMenuArc0, 3), NULL, NULL);
     if (FIRSTRUN_SHOW("skip_logos")) {
+#ifdef PORT_VITA
+        extern int gVitaStartMode; /* (a test run that starts on a given screen skips the logos too) */
+        if (gVitaStartMode <= 0)
+#endif
         Logo_ShowAll(res);
     }
     if (res != NULL) {
@@ -205,6 +209,10 @@ s32 FirstRun_Main(void) {
     }
     FirstRun_WaitPartition(2);
     if (FIRSTRUN_SHOW("skip_intro")) {
+#ifdef PORT_VITA
+        extern int gVitaStartMode; /* a test run that starts on a given screen (bt3.txt startmode=) skips the opening movie */
+        if (gVitaStartMode <= 0)
+#endif
         Movie_PlayOpening();
     }
     PadWatch_SetEnabled(1);

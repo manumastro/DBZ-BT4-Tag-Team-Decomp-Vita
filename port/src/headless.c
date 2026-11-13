@@ -222,10 +222,26 @@ int __wrap_Progress_Main(int arg) {
             return r;
         }
     }
+#ifdef PORT_VITA
+    if (getenv("BT3_SOAK") != NULL && path == NULL) { /* (Vita, the test runs' soak=1) one battle after another, never the end */
+        extern int Port_SoakNext(int first);
+        return Port_SoakNext(sBattles++ == 0);
+    }
+#endif
     if (sBattles++ > 0 && !(getenv("BT4_RENDER_TEST") && getenv("BT4_MEMORY_BATTLES") && sBattles<=atoi(getenv("BT4_MEMORY_BATTLES")))) {
         printf("bt3: battle finished\n");
         exit(0);
     }
+#ifdef PORT_VITA
+    {   /* The third archive (music, the fighters' voices, streamed sound effects) is opened by the first-run
+           sequence of the menus (src/menu/menu_i_c.c FirstRun_Main), which a test fight leaves out: its music and the
+           intros' lines were silent ("archive 2 file ... not found"). Opened here as the menus would. */
+        extern int File_LoadPartitionNw(int pt);
+        extern int File_WaitPartition(int pt);
+        File_LoadPartitionNw(2);
+        File_WaitPartition(2);
+    }
+#endif
     if (path != NULL) {
         static uint8_t buf[REPLAY_FILE_SIZE] __attribute__((aligned(16)));
         FILE *fp = fopen(path, "rb");
@@ -241,6 +257,39 @@ int __wrap_Progress_Main(int arg) {
             exit(2);
         }
         printf("bt3: replay %s\n", path);
+    } else if (getenv("BT3_DEMO_PICK") != NULL && atoi(getenv("BT3_DEMO_PICK")) >= 0 && atoi(getenv("BT3_DEMO_PICK")) <= 8) {
+        /* one of the attract demo's nine pairings, chosen (Demo_SetupBattle in src/battle/view_b_c.c draws it at
+           random, and the game's random numbers start the same every time: always the same pairing) */
+        static const int kPair[9][3] = {{0xA, 0x93, 0x1D}, {0x2A, 0x6C, 6}, {0x19, 0x5C, 2}, {0x27, 0x60, 1}, {0x17, 0x6F, 1},
+                                        {0x49, 0x5B, 0x10}, {0, 0x1E, 0x19}, {0x32, 0x72, 5}, {5, 0x25, 1}};
+        extern unsigned Rand_Range(unsigned n);
+        extern void BattleSetup_SetRule(int screenMode, int mode, int bgm, int timeLimit, int announcer, int stage, int unk10);
+        extern void BattleSetup_SetSide(int sideNo, int control, int pad, int memberCount, int unk1FC, int unk200, int lead, void *bits);
+        extern void BattleSetup_SetMember(int sideNo, int idx, int chara, int costume, int variant, int cpuLevel, float health, void *items);
+        extern void BattleSetup_Finish(void);
+        extern int CpuLevel_FromSetting(unsigned setting);
+        int pick = atoi(getenv("BT3_DEMO_PICK")), i;
+        int bgm = (int)Rand_Range(9) + 8;
+        /* BT3_DEMO_STAGE=<id>: on that stage instead; BT3_DEMO_CHARA1 / 2=<id>: those fighters;
+           BT3_DEMO_DUEL=1: as the Duel menu's COM against COM (mode 0: the fighters' intros, the announcer) */
+        int stage = getenv("BT3_DEMO_STAGE") != NULL ? atoi(getenv("BT3_DEMO_STAGE")) : kPair[pick][2];
+        int chara[2] = {getenv("BT3_DEMO_CHARA1") != NULL ? atoi(getenv("BT3_DEMO_CHARA1")) : kPair[pick][0],
+                        getenv("BT3_DEMO_CHARA2") != NULL ? atoi(getenv("BT3_DEMO_CHARA2")) : kPair[pick][1]};
+        int duel = getenv("BT3_DEMO_DUEL") != NULL && atoi(getenv("BT3_DEMO_DUEL")) != 0;
+
+        Battle_ClearWork();
+        if (duel) {
+            BattleSetup_SetRule(0, 0, bgm, 0, 1, stage, 1);
+        } else {
+            BattleSetup_SetRule(0, 7, bgm, 5, 4, stage, 0);
+        }
+        BattleSetup_SetSide(0, 2, 0, 1, 1, 1, 0, NULL);
+        BattleSetup_SetSide(1, 2, 1, 1, 1, 1, 0, NULL);
+        for (i = 0; i < 2; i++) {
+            BattleSetup_SetMember(i, 0, chara[i], 0, 0, CpuLevel_FromSetting(2), 100.0f, NULL);
+        }
+        BattleSetup_Finish();
+        printf("bt3: %s battle, pairing %d (characters %d and %d, stage %d)\n", duel ? "COM against COM duel" : "attract-demo", pick, chara[0], chara[1], stage);
     } else {
         Demo_SetupBattle();
         if(getenv("BT4_STORY_BATTLE_TEST")) {
@@ -293,6 +342,94 @@ int __wrap_Progress_Main(int arg) {
     fflush(stdout);
     return 0;
 }
+
+#ifdef PORT_VITA
+/* The test runs' soak (bt3.txt soak=1, the development build): battles without end, to find what goes wrong after a
+   long time (the attract demo's rule: no menu between them). In turn a COM against COM duel and a team battle of
+   three against three with a quarter of the health,
+   whose fighters are knocked out and replaced quickly (a new model loaded each time), over the attract demo's
+   characters, those with a seam (Videl, the Great Saiyaman, Hercule and others) and the demo's stages. */
+int gVitaAbSide = -1; /* the soak's A/B side (soakab=1): 0 A, 1 B; -1 no A/B */
+int Port_SoakNext(int first) {
+    static const int kChara[] = {0xA, 0x93, 0x38, 0x2A, 0x6C, 0x37, 0x19, 0x5C, 0x39, 0x27, 0x60, 0x6E, 0x17, 0x6F, 0x86,
+                                 0x49, 0x5B, 0, 0x1E, 0x32, 0x72, 5, 0x25};
+    static const int kStage[] = {0x1D, 6, 2, 1, 0x10, 0x19, 5};
+    static int n;
+    extern unsigned Rand_Range(unsigned n);
+    extern void BattleSetup_SetRule(int screenMode, int mode, int bgm, int timeLimit, int announcer, int stage, int unk10);
+    extern void BattleSetup_SetSide(int sideNo, int control, int pad, int memberCount, int unk1FC, int unk200, int lead, void *bits);
+    extern void BattleSetup_SetMember(int sideNo, int idx, int chara, int costume, int variant, int cpuLevel, float health, void *items);
+    extern void BattleSetup_Finish(void);
+    extern int CpuLevel_FromSetting(unsigned setting);
+    extern void Vita_Log(const char *fmt, ...);
+    /* bt3.txt soakstages=<ids and ranges>: these stages in turn instead of the demo's (a speed survey of the stages);
+       soakduel=1: duels only, so that every stage is measured with the same work */
+    static int sStages[64], sStageN = -1;
+    const int nc = (int)(sizeof(kChara) / sizeof(kChara[0]));
+    int duelOnly = getenv("BT3_SOAK_DUEL") != NULL && atoi(getenv("BT3_SOAK_DUEL")) != 0;
+    /* bt3.txt soakab=1: each battle twice in a row, the same stage and fighters, the second time with the settings
+       given the value 2 on (gVitaAbSide 1; fehelper=2, ...): a change measured against itself in one run */
+    int ab = getenv("BT3_SOAK_AB") != NULL && atoi(getenv("BT3_SOAK_AB")) != 0;
+    int team, members, stage, i, k, n0 = n;
+    extern int gVitaAbSide;
+
+    if (sStageN < 0) {
+        const char *s = getenv("BT3_SOAK_STAGES");
+        char *e;
+        sStageN = 0;
+        while (s != NULL && *s != '\0' && sStageN < 64) {
+            long a = strtol(s, &e, 0), b = a;
+            if (e == s) {
+                break;
+            }
+            if (*e == '-') {
+                const char *t = e + 1;
+                b = strtol(t, &e, 0);
+                if (e == t) {
+                    b = a;
+                }
+            }
+            for (; a <= b && sStageN < 64; a++) {
+                sStages[sStageN++] = (int)a;
+            }
+            s = e;
+            while (*s == ',' || *s == ' ') {
+                s++;
+            }
+        }
+    }
+    if (ab) { /* (A first in one round of the stages, B first in the next: the second battle on a stage starts with what
+                  the first left, and a B always second measured that too) */
+        n = n0 / 2;
+        gVitaAbSide = (n0 & 1) ^ ((n / (sStageN > 0 ? sStageN : (int)(sizeof(kStage) / sizeof(kStage[0])))) & 1);
+    }
+    team = duelOnly ? 0 : n & 1;
+    members = team ? 3 : 1;
+    stage = sStageN > 0 ? sStages[n % sStageN] : kStage[n % (int)(sizeof(kStage) / sizeof(kStage[0]))];
+
+    if (first) {
+        extern int File_LoadPartitionNw(int pt);
+        extern int File_WaitPartition(int pt);
+        File_LoadPartitionNw(2);
+        File_WaitPartition(2);
+    }
+    Battle_ClearWork();
+    /* (the attract demo's rule, mode 7: a fight that ends by itself and goes back without the end-of-fight menu; mode 0
+       stopped there, waiting for a press) */
+    BattleSetup_SetRule(0, 7, (int)Rand_Range(9) + 8, 5, 4, stage, 0);
+    for (i = 0; i < 2; i++) {
+        BattleSetup_SetSide(i, 2, i, members, 1, 1, 0, NULL);
+        for (k = 0; k < members; k++) {
+            BattleSetup_SetMember(i, k, kChara[(n * 5 + i * 3 + k * 7) % nc], 0, 0, CpuLevel_FromSetting(2), team ? 25.0f : 40.0f, NULL);
+        }
+    }
+    BattleSetup_Finish();
+    Vita_Log("soak: battle %d, %s on stage %d: %d against %d%s\n", n0, team ? "three against three" : "a duel", stage,
+             kChara[(n * 5) % nc], kChara[(n * 5 + 3) % nc], !ab ? "" : gVitaAbSide ? " (side B: the settings of value 2 on)" : " (side A: the settings of value 2 off)");
+    n = n0 + 1;
+    return 0;
+}
+#endif
 
 /* Overlay_Load reads the menu overlay to its PS2 address: there is nothing to read on PC (size 0). */
 int sceOpen(char *name, int flags) { (void)name; (void)flags; return 3; }
@@ -782,6 +919,7 @@ void Port_Trace(unsigned vblanks) {
     }
     /* BT3_AT=<tick>[,<tick>...]: when the battle clock first shows one of these tick counts, print the fight state
        and write the heap to port/build/heap_<tick>.bin (to compare with console save states made at those ticks). */
+#ifndef PORT_VITA /* the dumps below write memory at the PS2's addresses, where the PC builds have the heap */
     if ((sBattles != 0 || sFromMenu) && gBtlSeq != NULL && gBtlSeq->state >= 2 && getenv("BT3_AT") != NULL) {
         static unsigned last = 0xFFFFFFFFu;
         unsigned now = (unsigned)BtlSeq_GetClock()[0];
@@ -846,6 +984,7 @@ void Port_Trace(unsigned vblanks) {
             exit(0);
         }
     }
+#endif
     if(getenv("BT4_RENDER_TEST") && getenv("BT4_TAUNT_AUDIT") && gBtlSeq && gBtlSeq->state==3){
         extern unsigned char GAME_PTR BtlChar_Get(int);
         static int lastAction[2]={-1,-1};int i;

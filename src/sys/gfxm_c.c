@@ -698,6 +698,12 @@ void FlashSlot_Draw(FlashSlot *slot, FlashProp *parent, Flash *flash) {
             }
             prev = part >= 0 ? Port_MenuPart(part) : 0;
 #endif
+#ifdef PORT_VITA
+        { /* where the menus' items are on the screen, for the touch screen (port/vita/vita_touch.c) */
+            extern void Vita_FlashClipBegin(const void *clip, const void *flash);
+            Vita_FlashClipBegin(clip, flash);
+        }
+#endif
         if (!(clip->flags & 0x10)) FlashTl_Draw(&clip->tl, &prop);
         if (clip->drawOver != NULL) {
             clip->drawOver(clip->overArg, &prop);
@@ -705,6 +711,9 @@ void FlashSlot_Draw(FlashSlot *slot, FlashProp *parent, Flash *flash) {
         if (clip->postDraw != NULL) {
             clip->postDraw(clip->postArg);
         }
+#ifdef PORT_VITA
+        { extern void Vita_FlashClipEnd(void); Vita_FlashClipEnd(); }
+#endif
 #ifdef PORT
             if (part >= 0) {
                 Port_MenuPart(prev);
@@ -921,6 +930,9 @@ void FlashDraw_Quad(FlashTex *tex, FlashQuad *q) {
         return;
     }
 #endif
+#ifdef PORT_VITA
+    { extern void Vita_FlashQuad(const float *pt, unsigned flags, int alpha); Vita_FlashQuad(&q->pt[0][0], q->flags, q->rgba[3]); }
+#endif
     if (tex != NULL) {
         tex0 = FlashDraw_UploadTex(tex, q->uv.tex, 0x3000);
         Dma_AddTexFlush();
@@ -1125,6 +1137,9 @@ void Flash_Create(Flash *flash, u8 *file, FlashTex **tex) {
 
 /* Frees everything Flash_Create allocated. */
 void Flash_Destroy(Flash *flash) {
+#ifdef PORT_VITA
+    { extern void Vita_FlashGone(const void *flash); Vita_FlashGone(flash); }
+#endif
     if (flash->shapes != NULL) {
         FlashShapePool_Term(flash->shapes);
         if (flash->shapes != NULL) {
