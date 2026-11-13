@@ -67,8 +67,18 @@ It installs beside the BT3 port: the two keep their files apart (`ux0:data/bt3/`
 
 ## Game files
 
-You need a disc image (`.iso`) of **BT4 B14 Rev2**; the English one is the one tested. From the image, copy
-`SLUS_219.78` and the `BIN` and `DATA` folders, so that the memory card has:
+You need the disc image (`.iso`) of **Budokai Tenkaichi 4 B14 Rev2**, Team BT4's release, in English: the one this
+port is made and tested with is
+
+| | |
+|---|---|
+| File | `SLUS_219.78.DBZBT4B14REV2ENG.iso` |
+| Size | 5,914,853,376 bytes |
+| MD5 | `27a84d51cbc44252c3aa4e50b604621d` |
+| SHA-1 | `7505d8c3494d0889c8d5d3f493c9f920a9f34d64` |
+
+Other builds of BT4 (earlier betas, the Spanish version) and the original BT3 disc are not supported. From the image,
+copy `SLUS_219.78` and the `BIN` and `DATA` folders, so that the memory card has:
 
 ```
 ux0:data/bt4/disc/SLUS_219.78
@@ -141,7 +151,7 @@ not available.
 
 ## Troubleshooting
 
-- **"The game's files were not found"**: `SLUS_219.78` and the `BIN` and `DATA` folders must be in
+- **"The game's files were not found"**: `SLUS_219.78` and the `BIN` and `DATA` folders of Team BT4's B14 Rev2 must be in
   `ux0:data/bt4/disc/`. An `.iso` cannot be read as it is: extract those three items from it with 7-Zip.
 - **"BT4's archive index was not found"**: `BIN/DBZ4.BIN` is missing from `ux0:data/bt4/disc/`.
 - **The picture fills only part of the screen**: the Sharpscale plugin is set to a resolution other than
