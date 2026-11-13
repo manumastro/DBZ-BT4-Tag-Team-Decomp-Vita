@@ -1,126 +1,190 @@
-<div align="center">
-  <img src="docs/presentation/bt4-intro-hq.gif" width="800" alt="Dragon Ball Z Budokai Tenkaichi 4 Tag Team opening animation">
-  <h1>BT4decomp</h1>
-  <p><strong>Budokai Tenkaichi 4 B14 Rev2. Native desktop runtime. Simultaneous team battles.</strong></p>
-  <p>Online Tag Team, tournaments, spectator rooms and proximity voice, built on Tenkaichi3Decomp.</p>
-  <p><strong><a href="https://discord.gg/EBhh5ef3T6">Join the official Discord community</a></strong> for matchmaking, project news and support.</p>
-  <p>
-    <a href="https://github.com/NauTaro/DBZ-BT4-Tag-Team-Decomp/releases/latest"><img src="https://img.shields.io/badge/Download-Latest%20release-ef8b24?style=flat-square" alt="Download the latest published release"></a>
-    <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-1f6feb?style=flat-square" alt="Windows, Linux and macOS">
-    <img src="https://img.shields.io/badge/upstream-0.1.39.5-7c3aed?style=flat-square" alt="Tenkaichi3Decomp engine 0.1.39.5">
-    <a href="https://ko-fi.com/nautaro"><img src="https://img.shields.io/badge/Ko--fi-Support%20NauTaro-ff5e5b?style=flat-square&amp;logo=ko-fi&amp;logoColor=white" alt="Support NauTaro on Ko-fi"></a>
-  </p>
-  <p><strong><a href="https://github.com/NauTaro/DBZ-BT4-Tag-Team-Decomp/releases/latest">Download</a> &nbsp; · &nbsp; <a href="#installation">Install</a> &nbsp; · &nbsp; <a href="docs/README.md">Documentation</a> &nbsp; · &nbsp; <a href="https://github.com/NauTaro/DBZ-BT4-Tag-Team-Decomp/issues/new/choose">Report an issue</a></strong></p>
-</div>
+# DBZ-BT4-Tag-Team-Decomp for the PS Vita
 
-BT4decomp adapts **BT4 B14 Rev2** for Windows, Linux and Apple Silicon. It runs the game code natively rather than emulating a console. Installation requires your own compatible Spanish or English BT4 ISO; disc images and extracted game data are not distributed here.
+A native PS Vita port of **Budokai Tenkaichi 4** (Team BT4's B14 Rev2 of Dragon Ball Z: Budokai Tenkaichi 3),
+based on NauTaro's [DBZ-BT4-Tag-Team-Decomp](https://github.com/NauTaro/DBZ-BT4-Tag-Team-Decomp) (BT4decomp, built
+on z3xox's [Tenkaichi3Decomp](https://github.com/z3xox/Tenkaichi3Decomp)) and on arielxflores's
+[Tenkaichi3Decomp-Vita](https://github.com/arielxflores/Tenkaichi3Decomp-Vita), the BT3 port for the Vita. The game's
+own code is compiled for the Vita, with the renderer for the Vita's GPU (vitaGL), the sound, touch and controls of
+the BT3 Vita port and all of its speed-ups. It is not an emulator.
 
-> **Windows security review in progress.** Users reported antivirus alerts for the R5 package. See the [investigation and executable hashes](docs/security/windows-antivirus-review.md).
+This repository contains **no game data**. The game's files are copied from your own disc image of BT4 to the memory
+card, see [Game files](#game-files).
 
-## Fight together
+This is an unofficial port. It is not affiliated with BT4decomp, Team BT4, Tenkaichi3Decomp or the BT3 Vita port;
+please report problems with the Vita version here, not upstream.
 
-<img src="docs/presentation/tag-team-battle.jpg" width="960" alt="Simultaneous five-versus-five Tag Team combat with ally health bars, target indicators and radar">
+## What works
 
-| Mode | What it offers |
-| --- | --- |
-| **Tag Team** | Simultaneous battles with up to five fighter slots per team, six-player Free for All, room codes and individual targeting. Tag Team Quick Match gathers four players for 2 vs 2; Create Room offers team and Free for All presets. |
-| **1 vs 1** | Peer rollback netplay, custom rooms with configurable rollback and input delay, and duel Quick Match. |
-| **Tournaments** | Two to eight entrants, automatic byes, a live bracket and match rejoining. |
-| **Spectators** | Join without occupying a fighter slot; follow either side or use a split view. |
+- The game from its opening film through the menus to the fights, saving and loading included: BT4's modes, roster
+  and stages, as its own code has them.
+- The screen effects: the fighters' outlines, ground shadows, glow, blur and the depth tint.
+- Music, voices and sound effects; the opening and ending films.
+- Fights are drawn for the Vita's 16:9 screen without stretching; the menus at the screen's full resolution.
+- The touch screen works in the menus, and the rear touch pad gives the L2, R2, L3 and R3 buttons the Vita lacks.
 
-Game menus support **English and Spanish**, with an optional Brazilian Portuguese pack. Setup supports **English, Spanish and Brazilian Portuguese**. F1 settings support **English, Spanish and Brazilian Portuguese**. **F1 > Spectator** offers free camera, fighter tracking and fight overview, with target, speed, zoom and reset controls. Keyboard and controller camera input replaces local fighter input while the camera is active; Start remains available. Panoramic mode expands menus and HUD across the viewport. Hiding the combat HUD also dismisses the Start pause menu; press Start to open it again.
+Fights run at 30 fps: every one of the 35 stages averages 28.8 to 29.5 pictures a second on a PS Vita 1000 with
+CapUnlocker (a survey of a duel on each, 2026-11-13); moments of heavy effects drop below that.
 
-## Voice and presentation
+**Not available on the Vita** (the PC version has them):
 
-<table>
-  <tr>
-    <td width="48%" valign="top"><img src="docs/presentation/voice-chat-settings.png" width="420" alt="Microphone, voice activation, input level and playback volume settings"></td>
-    <td valign="top">
-      <h3>Proximity voice</h3>
-      <p>Talk across both teams, with volume adjusted by fighter distance. Choose microphone and output devices, voice activation, threshold and playback volume.</p>
-      <h3>Display controls</h3>
-      <p>Windows offers Vulkan, Direct3D 12 and OpenGL. Adjust render scale, aspect ratio, effects and motion presentation independently of combat simulation.</p>
-      <h3>Custom content</h3>
-      <p>Add compatible stages with matching PNG previews, or install custom music. See the <a href="docs/port/adding_stages.md">stage guide</a> and <a href="docs/port/adding_songs.md">music guide</a>.</p>
-    </td>
-  </tr>
-</table>
+- Online play, rooms, tournaments, spectators and voice chat.
+- Tag Team (the simultaneous team battles): it goes through the PC version's network code, which is not in this port
+  yet.
+- The PC version's added songs and stages, its F1 menu (Lua mods, accessibility, HUD editor) and the choice of
+  language: the game is in English.
 
-## Script mods
-
-F1 > Mods manages the included Modern HUD, Modern Camera, Modern Look and Skill List scripts. Mods start disabled. Each player can choose their own presentation settings; existing scripts and settings are preserved by automatic updates. F1 > Controls offers optional right-stick enemy targeting. F1 > Spectator can keep the normal camera during special attacks. See the [Lua mod guide](docs/port/mods.md). F1 > Tech offers optional mechanics adjustments for offline duels; online matches, Tag Team and replays retain their original rules.
+What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
 ## Installation
 
-| System | Package | Requirement |
-| --- | --- | --- |
-| Windows | `BT4decomp-windows-x64.zip` | x64 |
-| Linux | `BT4decomp-linux-x64.zip` | x86-64, glibc 2.35 or later |
-| macOS | `BT4decomp-macos-arm64.zip` | Apple Silicon, macOS 15 or later |
+Requirements:
 
-1. Download your platform's ZIP from the [latest published release](https://github.com/NauTaro/DBZ-BT4-Tag-Team-Decomp/releases/latest) and extract it completely.
-2. Run `BT4decomp-setup.exe` on Windows, or `./BT4decomp-setup` on Linux and macOS.
-3. Select the setup language, game language and your compatible **BT4 B14 Rev2 ISO**.
-4. Start `BT4decomp.exe` on Windows, or `./BT4decomp` on Linux and macOS.
+- A PS Vita running HENkaku / Ensō
+- `libshacccg.suprx` extracted to `ur0:data/` (see
+  [this guide](https://samilops2.gitbook.io/vita-troubleshooting-guide/shader-compiler/extract-libshacccg.suprx))
+- Recommended: the [CapUnlocker](https://github.com/GrapheneCt/CapUnlocker) kernel plugin, which lets the game use
+  the Vita's fourth CPU core. Without it the game runs, but heavy scenes are slower.
+- About 5.5 GB free on `ux0:` for the game files
 
-<details>
-<summary><strong>Language installation and setup preview</strong></summary>
+Steps:
 
-A single-language installation opens directly in that language. Selecting both languages downloads the alternate package from this repository and enables language selection at startup. Public language and HD texture packages download without GitHub sign-in.
+1. Install `BT4-Vita.vpk` from the [releases page](https://github.com/manumastro/DBZ-BT4-Tag-Team-Decomp-Vita/releases)
+   with VitaShell.
+2. Copy the game files to `ux0:data/bt4/disc/` as described below.
+3. Start **Dragon Ball Z: BT4** from the LiveArea.
 
-<p align="center"><img src="docs/presentation/installer-en.png" width="640" alt="English installer with Spanish, English and bilingual installation options"></p>
+It installs beside the BT3 port: the two keep their files apart (`ux0:data/bt3/` and `ux0:data/bt4/`).
 
-For Linux permissions, macOS download handling and source builds, see [native platform setup](docs/port/native_platforms.md). Intel Macs and Linux ARM are not targets of these packages.
+## Game files
 
-</details>
+You need a disc image (`.iso`) of **BT4 B14 Rev2**; the English one is the one tested. From the image, copy
+`SLUS_219.78` and the `BIN` and `DATA` folders, so that the memory card has:
 
-## Automatic updates
+```
+ux0:data/bt4/disc/SLUS_219.78
+ux0:data/bt4/disc/BIN/DBZ4.BIN
+ux0:data/bt4/disc/BIN/DBZP.BIN
+ux0:data/bt4/disc/DATA/PZS4US0.AFS
+ux0:data/bt4/disc/DATA/PZS4US1.AFS
+ux0:data/bt4/disc/DATA/PZS4US2.AFS
+ux0:data/bt4/disc/DATA/PZS4US3.AFS
+ux0:data/bt4/disc/DATA/ZS4USOP.PSS        (and the other files of the DATA folder)
+```
 
-Open **F1 > Updates > Check for updates** to look for a new version. The game also checks this repository automatically for the latest signed package for its platform. It verifies the archive SHA-256 and Ed25519 signature, then asks for a game restart to apply the update at the offline main menu. Saves, settings, installed game data and custom content remain outside the replacement list. Updating does not restart an active battle or online session.
+- **Windows:** open the `.iso` with [7-Zip](https://www.7-zip.org/), select `SLUS_219.78`, `BIN` and `DATA` and
+  extract them into a folder named `disc`.
+- **Linux / macOS:** `7z x -odisc your-image.iso SLUS_219.78 BIN DATA`
 
-Installations that predate the signed updater need one initial package installation. Subsequent published signed updates can install through the launcher.
+Then copy the `disc` folder to `ux0:data/bt4/` with VitaShell (USB or FTP), or put the memory card in a card reader.
+BT4's archives have no file table of their own: the game reads it from `BIN/DBZ4.BIN`, as BT4decomp's installer does.
 
-Revision tags follow the upstream engine version, for example `v0.1.39.5-R1`. A new upstream adaptation starts at R1; subsequent BT4 changes increment the revision. Patch revisions are also supported. All Tag Team participants must use the same room protocol and a compatible published build.
+## Controls
 
-## Source and online compatibility
+The **Normal** control type of the Vita version:
 
-The source integrates **Tenkaichi3Decomp 0.1.39.5**, with BT4 revisions tracked separately as **R1, R2, R3** and onward. The `main` branch can contain changes awaiting release; the Download button points to the published package. See the [changelog](CHANGELOG.md) for source changes and [release notes](https://github.com/NauTaro/DBZ-BT4-Tag-Team-Decomp/releases) for packaged builds.
+| Vita | Action |
+|---|---|
+| Left stick | Move |
+| Square | Fight |
+| Triangle | Ki Blast |
+| Cross | Dash |
+| Circle | Guard |
+| L | Ki Charge |
+| R | Ascend |
+| Rear touch pad, upper left quarter (L2) | Blaster Wave |
+| Rear touch pad, upper right quarter (R2) | Descend |
+| Rear touch pad, lower left / lower right quarter | L3 / R3 |
+| START | Pause |
 
-Use compatible BT4 data and the same published launcher on every participating computer. The selected language does not define the online compatibility family.
+On a PS TV, or with a DualShock paired, the controller's own L2, R2, L3 and R3 buttons are used.
 
-<details>
-<summary><strong>Networking implementation and validation</strong></summary>
+- The rear touch pad's quarters are those of PS4 Remote Play, so the triggers and rear buttons of a grip attachment
+  for it work as L2, R2, L3 and R3.
+- **Options → Controller → Vita Settings** has four settings:
+  - **Touch**: for each of L2, R2, L3 and R3, where it is touched: its quarter of the rear pad, a corner of the
+    front screen (L2 / R2 the bottom corners, L3 / R3 the top ones), or nowhere (Off). SELECT + L / R also give
+    L2 / R2.
+  - **Clashes**: **Square** (the default) wins beam struggles and rush clashes by pressing Square again and again,
+    instead of turning the left stick; **Stick** turns the stick, as on the PS2.
+  - **2nd Pad**: a second controller plays as player 2 (on by default).
+  - **Mods**: the files in `ux0:data/bt4/mods/` are used (on by default; see [Mods](#mods)).
+- **Options → Controller → Control Type → Custom** assigns the actions to other buttons, as on the PS2.
+- In the menus, tap an item to move to it and tap it again to choose it; swipe to scroll, and tap with two
+  fingers to go back. A tap skips a film.
+- Holding START + SELECT for two seconds closes the game (press START on the screen that follows).
 
-1 vs 1 uses the upstream peer rollback path. Lobby matches can relay through the lobby owner when the assigned fighters cannot connect directly.
+## Mods
 
-Rooms and Quick Match use authenticated private Supabase signaling. Tag Team room authority runs on the owner's computer from admission onward; gameplay and voice travel between participants. The default connection no longer uses Cloudflare coordination or a hosted game/audio relay. STUN assists direct connection discovery. Networks that block peer traffic, including some CGNAT configurations, can still prevent a direct connection. No public relay is bundled.
+Files in `ux0:data/bt4/mods/` are used instead of the disc's, laid out as for the BT3 Vita port, with BT4's archive
+names:
 
-The Free signaling project has provider quotas, including concurrent Realtime connection limits. P2P reduces server traffic; it does not provide unlimited hosting capacity. R6 was validated with local native multi-client combat, tournaments and synthetic voice; this is not a cross-ISP or load-capacity benchmark.
+```
+ux0:data/bt4/mods/pzs4us1/00042.bin      file 42 of DATA/PZS4US1.AFS (pzs4us0, pzs4us2, pzs4us3 for the others)
+ux0:data/bt4/mods/disc/DATA/<NAME>       a file of the disc's DATA folder
+ux0:data/bt4/mods/<Pack>/pzs4us1/00042.bin   the same inside a pack of its own (packs in the order of their names;
+                                             one whose name starts with _ is skipped)
+```
 
-The online hub shows an authenticated aggregate of players in the online menus, refreshed every five minutes. Entries expire after a missed refresh. The active route supplies measured ping. A single human fighting CPU uses local input scheduling. If the native coordinator leaves, the round ends; live coordinator migration is not implemented. Geographic routes and network conditions still affect latency.
+Mods that change only data files work. **Vita Settings → Mods** shows what is in use and turns it all off without
+deleting anything (from the next start). The PC version's Lua mods (Modern HUD, Modern Camera and the others) are
+not available.
 
-Voice and gameplay have separate queues. Native packages include the RTC SDK. SDP and ICE negotiation use private Supabase inboxes; Opus audio travels over peer media tracks. The default provider does not relay voice through WebSockets.
+## Troubleshooting
 
-See the [compatibility and validation profile](BT4_PROFILE.md), [signaling architecture](supabase/README.md) and [native SDK build notes](port/release/RTC_SDK.md). Local tests and package builds do not establish performance on every remote PC, router or graphics driver.
+- **"The game's files were not found"**: `SLUS_219.78` and the `BIN` and `DATA` folders must be in
+  `ux0:data/bt4/disc/`. An `.iso` cannot be read as it is: extract those three items from it with 7-Zip.
+- **"BT4's archive index was not found"**: `BIN/DBZ4.BIN` is missing from `ux0:data/bt4/disc/`.
+- **The picture fills only part of the screen**: the Sharpscale plugin is set to a resolution other than
+  "Original"; set it back to Original.
+- **The game stops** (the picture freezes, the music plays on): the game writes `ux0:data/bt4/hang.txt` when its
+  picture stops for a few seconds. Attaching it and `log.txt` to a bug report helps a lot.
 
-</details>
+## Notes
 
-## Development and feedback
+- Saves (a virtual memory card) and settings are kept in `ux0:data/bt4/`: `saves/`, `bt3_settings.txt` (Clashes,
+  2nd Pad, Mods) and `touch.txt` (Touch). `log.txt` there describes the last runs (`log-prev.txt` the ones before).
+- The first start takes a little longer: the shaders are compiled and kept in `ux0:data/bt4/shcache/`.
+- The port runs the Vita at its standard maximum clocks (CPU 444 MHz, GPU 222 MHz); no overclocking plugin is
+  used or needed.
+- Optional settings go in `ux0:data/bt4/bt3.txt`, one per line: `wide=0` shows the PS2's original 4:3 picture,
+  `disc=<folder>` reads the game files from another folder.
 
-Start with the [contribution guide](CONTRIBUTING.md) and [documentation index](docs/README.md). Bug reports should include `BT4_VERSION.txt`, system specifications, game mode, renderer, resolution scale, reproduction steps and relevant excerpts from `bt3_log.txt` or `bt3_crash.txt`.
+## Building
 
-For combat issues, include characters, costumes, stage and player count. Remove credentials and personal information before attaching logs. [Open a bug report](https://github.com/NauTaro/DBZ-BT4-Tag-Team-Decomp/issues/new/choose).
+As the BT3 Vita port: [docs/vita/building.md](docs/vita/building.md) (VitaSDK, vitaGL with this port's changes in
+`port/vita/vitagl`, Python 3 and libclang; no game files are needed to build). On a computer without Linux,
+`port/vita/tools/docker_build.sh` builds in Docker. The build makes BT4 (`-DPORT_VITA_BT4`): the release
+`BT4-Vita.vpk` (title BTFV00010), and with `BT3_VITA_DEV=1` the development build `BT4-Vita-dev.vpk` (BTFV00008, "BT4
+(development)", every test setting of [docs/vita/development.md](docs/vita/development.md), its log
+`ux0:data/bt4/log-vgl.txt`).
 
-## Support development
+The tree is BT4decomp's, with the BT3 Vita port merged in (`port/vita/` and its changes to the shared code, most of
+them inside `#ifdef PORT_VITA`); `port/vita/vita_bt4.c` turns off what the Vita has no use for (the network, the PC's
+windows and menus). BT4decomp's own README is [docs/port/README-BT4decomp.md](docs/port/README-BT4decomp.md); for the
+PC version, use [upstream](https://github.com/NauTaro/DBZ-BT4-Tag-Team-Decomp).
 
-Support work on BT4decomp through [NauTaro's Ko-fi](https://ko-fi.com/nautaro).
+## Credits
 
-<a href="https://ko-fi.com/nautaro"><img src="https://img.shields.io/badge/Support%20BT4decomp-Ko--fi-ff5e5b?style=for-the-badge&amp;logo=ko-fi&amp;logoColor=white" alt="Support BT4decomp on Ko-fi"></a>
+- [NauTaro](https://github.com/NauTaro) for BT4decomp, and Team BT4 for Budokai Tenkaichi 4
+- [z3xox](https://github.com/z3xox) and the contributors of
+  [Tenkaichi3Decomp](https://github.com/z3xox/Tenkaichi3Decomp), and the authors of the BT3-Decompiled
+  decompilation it uses
+- [arielxflores](https://github.com/arielxflores) for [Tenkaichi3Decomp-Vita](https://github.com/arielxflores/Tenkaichi3Decomp-Vita),
+  the BT3 port for the Vita this one is built on, and its contributors
+- Spike, the developer of Dragon Ball Z: Budokai Tenkaichi 3
+- [Rinnegatamante](https://github.com/Rinnegatamante) for vitaGL and vitaShaRK, and [bythos14](https://github.com/bythos14)
+  for SceShaccCgExt
+- [GrapheneCt](https://github.com/GrapheneCt) for CapUnlocker
+- The [VitaSDK](https://vitasdk.org/) team
+- The third-party code and data used by the port are listed in [THIRD_PARTY.md](THIRD_PARTY.md).
 
-## Credits and licenses
+## License
 
-Windows publisher verification is being prepared through a SignPath Foundation application. See the [code signing policy](docs/security/code-signing-policy.md) for its current status, scope and verification process, and the [privacy notice](docs/security/privacy.md) for the online and download services. Existing unsigned files are not represented as Authenticode-signed.
+The port's code is under the [GNU Affero General Public License, version 3](LICENSE), as BT4decomp's and
+Tenkaichi3Decomp's port code; the earlier port code that came under the MIT license keeps its notice in
+[LICENSE-MIT](LICENSE-MIT). `port/vita/vitagl/vitagl.patch` modifies vitaGL and is under vitaGL's license (LGPL-3.0).
 
-The original decompilation and native runtime are developed by the [Tenkaichi3Decomp contributors](https://github.com/z3xox/Tenkaichi3Decomp). BT4decomp adapts that work for BT4 B14 Rev2. [UPSTREAM_LOCK.json](UPSTREAM_LOCK.json) records the exact source revision; [README_UPSTREAM.md](README_UPSTREAM.md) preserves the upstream reference.
-
-BT4 content, artwork and icons retain their respective authors' rights. See [presentation credits](docs/presentation/CREDITS.md), [AGPL](LICENSE), [MIT](LICENSE-MIT) and the bundled third-party notices.
+The game's code in `src/` and `include/` comes from the decompilation: it belongs to the game's rights holders. This
+project is not affiliated with or endorsed by them, and distributes none of the game's data. The LiveArea images are
+drawn for this port (`port/vita/tools/livearea_bt4.py`): text and abstract shapes only. You need your own legally
+obtained copy of the game to use it.
