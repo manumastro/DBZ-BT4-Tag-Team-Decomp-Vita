@@ -35,6 +35,16 @@ CapUnlocker (a survey of a duel on each, 2026-11-13); moments of heavy effects d
 
 What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
+## Screenshots
+
+Taken on a PS Vita 1000 with the release build.
+
+| | |
+|---|---|
+| ![Title screen](docs/screenshots/title.jpg) | ![Dragon History menu](docs/screenshots/menu.jpg) |
+| ![A fight on the arena](docs/screenshots/fight1.jpg) | ![A fight over the sea](docs/screenshots/fight2.jpg) |
+| ![A fight in the city](docs/screenshots/fight3.jpg) | |
+
 ## Installation
 
 Requirements:
@@ -185,6 +195,5 @@ Tenkaichi3Decomp's port code; the earlier port code that came under the MIT lice
 [LICENSE-MIT](LICENSE-MIT). `port/vita/vitagl/vitagl.patch` modifies vitaGL and is under vitaGL's license (LGPL-3.0).
 
 The game's code in `src/` and `include/` comes from the decompilation: it belongs to the game's rights holders. This
-project is not affiliated with or endorsed by them, and distributes none of the game's data. The LiveArea images are
-drawn for this port (`port/vita/tools/livearea_bt4.py`): text and abstract shapes only. You need your own legally
+project is not affiliated with or endorsed by them, and distributes none of the game's data. The LiveArea images and the screenshots show the game itself and belong to its rights holders. You need your own legally
 obtained copy of the game to use it.

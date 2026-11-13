@@ -17,6 +17,7 @@ Vita Settings, mods).
   the key assignment page.
 - Touch: on the controller page a tap on "Vita Settings" chose "Control Type" (the lit row's box covered it).
 - Its own title (BTFV00010, "Dragon Ball Z: BT4") and folder (`ux0:data/bt4/`), beside the BT3 port; LiveArea images
-  of its own.
+  made from the game's title screen (`port/vita/tools/livearea_from_screenshot.py`).
+- Screenshots in the README, taken on the console.
 - Not available: online play, Tag Team's simultaneous battles, the PC version's added songs and stages, its F1 menu
   and the choice of language.
