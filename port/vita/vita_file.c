@@ -242,9 +242,15 @@ static void packs_find(void) {
         snprintf(head, sizeof(head),
                  "These mods in %s were left out:\n\n%s\n"
                  "They change the game's program, which this port has built in\n"
+#ifdef PORT_VITA_BT4
+                 "(BT4 B14 Rev2's): their files are made for their own program\n"
+                 "and do not work without it. Mods that change only the disc's\n"
+                 "DATA files work.\n\n"
+#else
                  "(the USA disc's): their files are made for their own program\n"
                  "and do not work without it. Mods like Budokai Tenkaichi 4 are\n"
                  "of this kind. Mods that change only the disc's DATA files work.\n\n"
+#endif
                  "Put _ in front of a folder's name to leave it out without this\nmessage.",
                  MODS_DIR, sModNotice);
         snprintf(sModNotice, sizeof(sModNotice), "%s", head);
@@ -252,7 +258,11 @@ static void packs_find(void) {
         snprintf(sModNotice, sizeof(sModNotice),
                  "There is an .iso file in %s: a disc image is not read\n"
                  "there. Copy the files of a modded disc into a folder of its\n"
+#ifdef PORT_VITA_BT4
+                 "own instead (mods/<name>/DATA/PZS4US1.AFS and so on).", MODS_DIR);
+#else
                  "own instead (mods/<name>/DATA/PZS3US1.AFS and so on).", MODS_DIR);
+#endif
     }
     Vita_Log("mods: %d pack(s) in use, %d left out\n", sPackN, left);
 }

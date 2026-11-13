@@ -1303,9 +1303,15 @@ static void find_disc(void) {
         }
         sceIoDclose(d);
     }
+#ifdef PORT_VITA_BT4
+    Vita_Fatal("The game's files were not found. From your own disc image\n"
+               "of BT4 B14 Rev2, copy " PORT_VITA_ELF " and the folders\n"
+               "BIN and DATA into\n  %s/\n\n%s%s%s",
+#else
     Vita_Fatal("The game's files were not found. From your own disc of the\n"
                "USA release (SLUS-21678), copy SLUS_216.78 and the folders\n"
                "BIN and DATA into\n  %s/\n\n%s%s%s",
+#endif
                gVitaDisc, n ? "In " HOME " there is:\n" : "", seen,
                iso ? "\nAn .iso can't be read as it is: open it with 7-Zip on\na PC and extract those three items (see the README)." : "");
 }
