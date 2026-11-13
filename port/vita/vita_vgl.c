@@ -177,7 +177,11 @@ static void pace_cb(void *fb), pace_swap(int phase);
 static int sPaceHold; /* (the GPU profile's window: no picture held back, so that none waits for a buffer: pace_swap) */
 static int gVglLean = 1; /* the lean pixel shaders (the colour read in half precision) for everything (an earlier version's GPU profile: 13% of the chip's time less) */
 static GLuint sVsM; /* the GS's vertex shader with the colour's alpha scaled twice: the lean modulate variants (+64) need no multiply for the texture's alpha */
-static struct { const float *src; uint32_t count, sig, at, seen; } sStageCache[16384];
+/* (BT4's stages draw up to about 20000 strips a picture, most of one or two triangles: with 16384 places the
+   table overflowed, each strip pushed out was written to the chip again, and the buffer filled within seconds;
+   then the whole stage went the slow way, at 5-6 pictures a second) */
+#define STAGE_SLOTS 65536
+static struct { const float *src; uint32_t count, sig, at, seen; } sStageCache[STAGE_SLOTS];
 static uint32_t sStageUsed; /* vertices in the chip's buffer */
 #define STAGE_VERTS (STAGE_BYTES / 32)
 static GLuint sProg;
@@ -7482,8 +7486,8 @@ __attribute__((hot)) static int stage_draw(const State *d, const float *v, uint3
     if (Port_DmaInList((uint32_t)(uintptr_t)v) || Port_InSnap(v) || count > 1024) {
         return 0;
     }
-    h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 18;
-    for (k = 0; k < 8; k++, h = (h + 1) & 16383) {
+    h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 16;
+    for (k = 0; k < 8; k++, h = (h + 1) & (STAGE_SLOTS - 1)) {
         if (sStageCache[h].src == NULL || (sStageCache[h].src == v && sStageCache[h].count == count)) {
             break;
         }
@@ -7499,7 +7503,7 @@ __attribute__((hot)) static int stage_draw(const State *d, const float *v, uint3
     if (k == 8 || sStageCache[h].src == NULL || sStageCache[h].sig != sig) {
         uint8_t *map;
         if (k == 8) {
-            h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 18; /* (crowded: the first place is taken over) */
+            h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 16; /* (crowded: the first place is taken over) */
         }
         if (sStageUsed + count > STAGE_VERTS) {
             return 0; /* full: the rest of the stage is drawn the other way */
@@ -7733,12 +7737,12 @@ int Vita_ChipResetDue(void) {
     static int was;
     static unsigned lastFull;
     int now = Vita_InBattle(), r = 0, full = 0;
-    if (now && (sFtUsed > FT_VERTS - FT_VERTS / 8 || sFtIdxUsed > FT_IDX - FT_IDX / 8 || sDpIboUsed > DP_IBO_BYTES - DP_IBO_BYTES / 8) &&
+    if (now && (sFtUsed > FT_VERTS - FT_VERTS / 8 || sStageUsed > STAGE_VERTS - STAGE_VERTS / 8 || sFtIdxUsed > FT_IDX - FT_IDX / 8 || sDpIboUsed > DP_IBO_BYTES - DP_IBO_BYTES / 8) &&
         (lastFull == 0 || gGsFrame - lastFull > 600)) {
         full = 1;
         lastFull = gGsFrame;
-        Vita_Log("vgl: frame %u: the chip's copies nearly full (fighters %u of %u vertices, %u of %u indices; kept parts %u KB): let go\n",
-                 gGsFrame, (unsigned)sFtUsed, (unsigned)FT_VERTS, (unsigned)sFtIdxUsed, (unsigned)FT_IDX, (unsigned)(sDpIboUsed >> 10));
+        Vita_Log("vgl: frame %u: the chip's copies nearly full (stage %u of %u vertices; fighters %u of %u vertices, %u of %u indices; kept parts %u KB): let go\n",
+                 gGsFrame, (unsigned)sStageUsed, (unsigned)STAGE_VERTS, (unsigned)sFtUsed, (unsigned)FT_VERTS, (unsigned)sFtIdxUsed, (unsigned)FT_IDX, (unsigned)(sDpIboUsed >> 10));
     }
     if (((was && !now) || full) && (sStageUsed != 0 || sFtUsed != 0)) {
         memset(sStageCache, 0, sizeof(sStageCache));
@@ -7877,8 +7881,8 @@ int Vita_ChipPlan(int which, int layer, const float *v, uint32_t count, const fl
         return (int)((p->upload ? count * 40 : 0) + ((need * 2 + 3) & ~3u));
     }
     if (which == 4 && sStageProg != 0) {
-        h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 18;
-        for (k = 0; k < 8; k++, h = (h + 1) & 16383) {
+        h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 16;
+        for (k = 0; k < 8; k++, h = (h + 1) & (STAGE_SLOTS - 1)) {
             if (sStageCache[h].src == NULL || (sStageCache[h].src == v && sStageCache[h].count == count)) {
                 break;
             }
@@ -7894,7 +7898,7 @@ int Vita_ChipPlan(int which, int layer, const float *v, uint32_t count, const fl
         p->upload = 0;
         if (k == 8 || sStageCache[h].src == NULL || sStageCache[h].sig != sig) {
             if (k == 8) {
-                h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 18;
+                h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 16;
             }
             if (sStageUsed + count > STAGE_VERTS) {
                 return -1;

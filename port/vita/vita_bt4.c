@@ -120,7 +120,7 @@ void PortA11y_StreamStart(const char *path) {}
 void Port_HudFeed(int kind, int side, int a, int b) {}
 
 /* (port/src/gs/a11y.c) */
-float PortA11y_StreamGain(const void *player) { return 0.0f; }
+float PortA11y_StreamGain(const void *player) { (void)player; return 1.0f; } /* the game's own volume (no accessibility options on the Vita) */
 
 /* (port/src/gs/build_identity.c) */
 void Port_DevRulesEncode(unsigned char out[8]) {}
