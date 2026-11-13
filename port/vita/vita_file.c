@@ -387,6 +387,73 @@ int Port_FilePath(int ptid, int flid, const char *fname, char *out, int size) {
     return 1;
 }
 
+#ifdef PORT_VITA_BT4
+/* (BT4 B14 Rev2) Its archives have no table of their own: the table is in BIN/DBZ4.BIN, a block per archive 16 bytes
+   before its name ("pzs4us1.afs"): {0, 0x11A + count * 2, count, count}, then at 0x11A each member's length in
+   2048-byte sectors, the members one after the other from the archive's start (as BT4decomp's setup reads it,
+   port/setup/native.cpp). The last member may end short of its last sector. */
+static void bt4_table(Partition *pt, const char *path) {
+    char idx[300], want[32];
+    uint8_t *db;
+    SceUID fd;
+    SceOff dbSize, afsSize;
+    uint32_t i, hdr[4], at = 0, found = 0;
+    uint64_t off = 0;
+
+    snprintf(idx, sizeof(idx), "%s/BIN/DBZ4.BIN", gVitaDisc);
+    fd = sceIoOpen(idx, SCE_O_RDONLY, 0);
+    if (fd < 0) {
+        Vita_Fatal("BT4's archive index was not found:\n  %s", idx);
+    }
+    dbSize = sceIoLseek(fd, 0, SCE_SEEK_END);
+    db = malloc((size_t)dbSize);
+    if (db == NULL || dbSize <= 0 || dbSize > 16 * 1024 * 1024 || sceIoPread(fd, db, (SceSize)dbSize, 0) != (int)dbSize) {
+        Vita_Fatal("cannot read BT4's archive index:\n  %s", idx);
+    }
+    sceIoClose(fd);
+    snprintf(want, sizeof(want), "%s.afs", pt->name);
+    for (i = 16; i + strlen(want) < (uint32_t)dbSize; i++) {
+        if (memcmp(db + i, want, strlen(want) + 1) == 0) {
+            at = i - 16;
+            found = 1;
+            break;
+        }
+    }
+    if (found) {
+        memcpy(hdr, db + at, 16);
+    }
+    if (!found || hdr[0] != 0 || hdr[2] == 0 || hdr[3] != hdr[2] || hdr[1] != 0x11A + hdr[2] * 2 || at + hdr[1] > (uint32_t)dbSize) {
+        Vita_Fatal("BT4's archive index has no table for\n  %s", path);
+    }
+    afsSize = sceIoLseek(pt->fd, 0, SCE_SEEK_END);
+    pt->count = hdr[2];
+    pt->table = malloc((size_t)pt->count * 8);
+    if (pt->table == NULL) {
+        Vita_Fatal("out of memory");
+    }
+    for (i = 0; i < pt->count; i++) {
+        uint16_t sectors;
+        uint64_t bytes;
+        memcpy(&sectors, db + at + 0x11A + i * 2, 2);
+        bytes = (uint64_t)sectors * SECTOR;
+        if (off + bytes > (uint64_t)afsSize) {
+            if (i != pt->count - 1 || off >= (uint64_t)afsSize || off + bytes - (uint64_t)afsSize >= SECTOR) {
+                Vita_Fatal("BT4's archive is shorter than its index says:\n  %s", path);
+            }
+            bytes = (uint64_t)afsSize - off;
+        }
+        pt->table[i * 2] = (uint32_t)off;
+        pt->table[i * 2 + 1] = (uint32_t)bytes;
+        off += (uint64_t)sectors * SECTOR;
+    }
+    free(db);
+    {
+        extern void Vita_Log(const char *fmt, ...);
+        Vita_Log("vita: %s: %u files, by BT4's index (BIN/DBZ4.BIN)\n", pt->name, (unsigned)pt->count);
+    }
+}
+#endif
+
 int ADXF_LoadPartitionNw(int ptid, char *fname, void *dir, void *ptinfo) {
     Partition *pt = &sPart[ptid & 7];
     char path[300];
@@ -414,6 +481,12 @@ int ADXF_LoadPartitionNw(int ptid, char *fname, void *dir, void *ptinfo) {
             mods_scan_archive(pt->name, ptid & 7);
         }
     }
+#ifdef PORT_VITA_BT4
+    if (sceIoPread(pt->fd, head, 8, 0) == 8 && memcmp(head, "AFS\0", 4) != 0) {
+        bt4_table(pt, path);
+        return 0;
+    }
+#endif
     if (sceIoPread(pt->fd, head, 8, 0) != 8 || memcmp(head, "AFS\0", 4) != 0 || head[1] == 0 || head[1] > 0x100000) {
         Vita_Fatal("not an AFS archive:\n  %s", path);
     }
