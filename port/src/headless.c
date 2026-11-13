@@ -431,6 +431,19 @@ int Port_SoakNext(int first) {
 }
 #endif
 
+#ifdef PORT_VITA
+/* (vita_main.c, bt3.txt soaksec=<s>) a soak fight ended: side 1's fighter knocked out, its health 0 (the gauge block's
+   first word, include/battle/btl_char_fx.h FxGauge), and the fight ends as a knock-out does */
+void Port_SoakEndFight(void) {
+    extern void *BtlChar_FindBySide(int side);
+    extern int *BtlMember_GetActiveGauge(void *chr);
+    void *chr = BtlChar_FindBySide(1);
+    if (chr != NULL) {
+        BtlMember_GetActiveGauge(chr)[0] = 0;
+    }
+}
+#endif
+
 /* Overlay_Load reads the menu overlay to its PS2 address: there is nothing to read on PC (size 0). */
 int sceOpen(char *name, int flags) { (void)name; (void)flags; return 3; }
 int sceLseek(int fd, int offset, int whence) { (void)fd; (void)offset; (void)whence; return 0; }

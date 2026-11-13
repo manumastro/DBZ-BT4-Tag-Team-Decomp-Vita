@@ -7,7 +7,7 @@ law for using it (its `serve` must run for the whole session; a person approves 
 
     python3 port/vita/tools/vita_agent_run.py --settings F --seconds N [--eboot] [--shots K] [--out DIR]
 
-    --settings  a bt3.txt for this run, put in ux0:data/bt3/bt3.txt (the console's is downloaded first and put back
+    --settings  a bt3.txt for this run, put in ux0:data/bt4/bt3.txt (the console's is downloaded first and put back
                 after; if there was none, the run's is moved to the plugin's trash). exitafter=N is added to it, so
                 the game ends itself and writes the line the run waits for.
     --seconds   the run's length (default 300)
@@ -15,12 +15,12 @@ law for using it (its `serve` must run for the whole session; a person approves 
                 overwrite leaves a full hidden copy of the old file that no command can free (vita-agent-use's upload
                 storage): send it only when it changed, and watch ux0's free space
     --shots     screenshots taken during the run, evenly spaced (default 6; 0 none)
-    --title     default BTTD00008, the development build
+    --title     default BTFV00008, the development build
     --out       default port/build/runs/agent-<date-time>
     env VITA_AGENT             the vita-agent launcher (default: vita-agent on the PATH)
         VITA_AGENT_CONFIG_DIR  the directory chosen in vita-agent-use's bootstrap
 
-Leaves in --out: log.txt (this run's part of ux0:data/bt3/log-vgl.txt), shots/*.jpg, run.json and run_status.json,
+Leaves in --out: log.txt (this run's part of ux0:data/bt4/log-vgl.txt), shots/*.jpg, run.json and run_status.json,
 events.jsonl (the run's events: performance samples, crash dumps, dialogs), hang.txt if any, perfsum.txt.
 Runs over an hour (vita-agent-use's run timeout) are launched and watched without a run (no run-owned metrics).
 """
@@ -35,8 +35,8 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-LOG = "ux0:data/bt3/log-vgl.txt"
-SETTINGS = "ux0:data/bt3/bt3.txt"
+LOG = "ux0:data/bt4/log-vgl.txt"
+SETTINGS = "ux0:data/bt4/bt3.txt"
 TERMINAL = {"completed", "cancelled", "failed", "connection_lost"}
 
 
@@ -82,7 +82,7 @@ def main():
     ap.add_argument("--seconds", type=int, default=300)
     ap.add_argument("--eboot", action="store_true")
     ap.add_argument("--shots", type=int, default=6)
-    ap.add_argument("--title", default="BTTD00008")
+    ap.add_argument("--title", default="BTFV00008")
     ap.add_argument("--out", type=pathlib.Path)
     o = ap.parse_args()
     out = o.out or ROOT / "port/build/runs" / ("agent-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
@@ -176,8 +176,8 @@ def main():
 
     # the log, the watchdog's file, the settings put back
     agent("fs", "download", LOG, out / "log-all.txt")
-    if exists("ux0:data/bt3/hang-vgl.txt"):
-        agent("fs", "download", "ux0:data/bt3/hang-vgl.txt", out / "hang.txt")
+    if exists("ux0:data/bt4/hang-vgl.txt"):
+        agent("fs", "download", "ux0:data/bt4/hang-vgl.txt", out / "hang.txt")
     if had:
         upload(out / "bt3.console.txt", SETTINGS, out, overwrite=True)
     else:

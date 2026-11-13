@@ -60,6 +60,9 @@ static const int kDemoPick = -1; /* the demo's pairing (0..8), or -1: each run t
 /* the sweep: in the demo fight, after this many seconds of fighting the program starts itself again
    (the next pairing: demo_next.txt), so that one test run sees several pairings; 0: off (bt3.txt: sweep=<s>) */
 static int sSweepSec = 32;
+/* the soak's fights ended after this many seconds of fighting (bt3.txt soaksec=<s>; 0: they end by themselves), so
+   that a survey of the stages gives each the same time (port/src/headless.c Port_SoakEndFight) */
+static int sSoakSec;
 volatile int gVitaShotReq; /* the drawing thread takes two pictures for the log (vita_vgl.c) */
 extern int gVitaGsFixedSkip;
 extern unsigned gVitaGsDrawn, gVitaGsLastDrawMs, gVitaGsSkipNow;
@@ -588,6 +591,23 @@ void Vita_VBlank(unsigned vblanks) {
         }
     }
 #endif
+    {   /* the soak's fight ended after sSoakSec seconds of fighting (state 3) */
+        static unsigned long long sSoakT;
+        static int sSoakDone;
+        if (sSoakSec > 0 && getenv("BT3_SOAK") != NULL) {
+            if (state != 3) {
+                sSoakT = 0;
+                sSoakDone = 0;
+            } else if (sSoakT == 0) {
+                sSoakT = t;
+            } else if (!sSoakDone && t - sSoakT > (unsigned long long)sSoakSec * 1000000ull) {
+                extern void Port_SoakEndFight(void);
+                sSoakDone = 1;
+                logf_("vita: soak: the fight has lasted %d s; side 1's fighter knocked out\n", sSoakSec);
+                Port_SoakEndFight();
+            }
+        }
+    }
     {   /* the sweep (sSweepSec) */
         static unsigned long long sFightT;
         static int sSweepDone, sShots;
@@ -1326,6 +1346,8 @@ static void read_settings(void) {
             gVitaGsFixedSkip = atoi(eq);
         } else if (strcmp(line, "mode") == 0) {
             sMode = strcmp(eq, "demo") == 0;
+        } else if (strcmp(line, "soaksec") == 0) {
+            sSoakSec = atoi(eq);
         } else if (strcmp(line, "sweep") == 0) {
             sSweepSec = atoi(eq);
             sweepSet = 1;
