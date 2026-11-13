@@ -1346,6 +1346,8 @@ static void read_settings(void) {
             gVitaGsFixedSkip = atoi(eq);
         } else if (strcmp(line, "mode") == 0) {
             sMode = strcmp(eq, "demo") == 0;
+        } else if (strcmp(line, "artdump") == 0) { /* the menus' packs written out (vita_optart.c art_dump) */
+            setenv("BT3_ARTDUMP", eq, 1);
         } else if (strcmp(line, "soaksec") == 0) {
             sSoakSec = atoi(eq);
         } else if (strcmp(line, "sweep") == 0) {

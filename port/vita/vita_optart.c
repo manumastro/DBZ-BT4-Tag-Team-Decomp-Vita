@@ -24,6 +24,33 @@
 
 extern void Vita_Log(const char *fmt, ...);
 
+#ifndef PORT_VITA_RELEASE
+#include <stdio.h>
+#include <stdlib.h>
+#include "vita_paths.h"
+/* (development build, bt3.txt artdump=1) a screen's pack as unpacked, up to the end of section `last`, written to
+   PORT_VITA_HOME/artdump_<name>.bin: what tools/gen_patches.py makes the changes from, for a disc whose art is not the
+   USA release's (BT4decomp's). The files are the player's disc's: they stay on the console or under port/build/. */
+static void art_dump(const char *name, void *res, unsigned last) {
+    uint32_t *w = (uint32_t *)res, n;
+    char path[200];
+    FILE *f;
+    if (getenv("BT3_ARTDUMP") == NULL || res == NULL || w[0] <= last) {
+        return;
+    }
+    n = w[last + 1] & ~3u;
+    snprintf(path, sizeof(path), PORT_VITA_HOME "/artdump_%s.bin", name);
+    f = fopen(path, "wb");
+    if (f != NULL) {
+        fwrite(res, 1, n, f);
+        fclose(f);
+        Vita_Log("artdump: %s, %u bytes\n", path, (unsigned)n);
+    }
+}
+#else
+#define art_dump(name, res, last) ((void)0)
+#endif
+
 static uint8_t *pack_at(void *res, int n) {
     uint32_t *w = (uint32_t *)res;
     return (uint8_t *)res + ((w[n] >> 2) << 2);
@@ -108,6 +135,7 @@ static int sCapSet;
 
 void Vita_OptionArt(void *res) {
     unsigned done, lines = 0, k;
+    art_dump("opt", res, 33);
     sCapSec = NULL;
     if (res == NULL || ((uint32_t *)res)[0] < 38) {
         Vita_Log("optart: not the options screen's pack, left alone\n");
@@ -143,16 +171,23 @@ void Vita_OptionArt(void *res) {
 
 void Vita_VersusArt(void *res) {
     unsigned done;
+    art_dump("vs", res, 8);
     if (res == NULL || ((uint32_t *)res)[0] < 27) {
         Vita_Log("vsart: not the versus menu's pack, left alone\n");
         return;
     }
+#ifdef NO_VSART
+    (void)done;
+    Vita_Log("vsart: this disc's versus menu is left as it is\n");
+#else
     done = apply(res, (const ArtSection *)kVsArtSections, sizeof(kVsArtSections) / sizeof(kVsArtSections[0]), kVsArtRuns, kVsArtBytes, "vsart");
     Vita_Log("vsart: %u of 1 picture changed for the Vita\n", done);
+#endif
 }
 
 void Vita_IconArt(void *boot) {
     unsigned done;
+    art_dump("boot", boot, 8);
     if (boot == NULL || ((uint32_t *)boot)[0] < 9) {
         Vita_Log("iconart: not the boot file, left alone\n");
         return;

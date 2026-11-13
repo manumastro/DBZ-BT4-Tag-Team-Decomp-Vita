@@ -338,12 +338,40 @@ static Hit *hit_find(const void *clip) {
 
 /* the item under a point: of the boxes that hold it, the one it is most central in (the boxes of a list's rows
    overlap: they take in their pictures) */
+/* The item under (x, y). The lit item's box takes in its glow and pictures (BT4decomp's controller page: "Control
+   Type" lit reaches over the row below it), so an item that is not lit and is under the finger is taken first: its box
+   is its plate. */
 static Hit *hit_at(float x, float y) {
     Hit *best = NULL;
     float score = 1e30f;
-    int i;
+    int i, pass;
+    for (pass = 0; pass < 2 && best == NULL; pass++)
     for (i = 0; i < sLastN; i++) {
         Hit *h = &sLast[i];
+        if (pass == 0) { /* (first an item that is not lit, under a lit one of its list whose box reaches over it) */
+            int k, under = 0;
+            if (clip_state(h->clip) == ST_ON) {
+                continue;
+            }
+            for (k = 0; k < sLastN && !under; k++) {
+                const Hit *l = &sLast[k];
+                under = l != h && l->flash == h->flash && clip_state(l->clip) == ST_ON && same_family(l->clip, h->clip) &&
+                        x >= l->x0 && x <= l->x1 && y >= l->y0 && y <= l->y1 &&
+                        h->x0 >= l->x0 && h->x1 <= l->x1 && h->y0 >= l->y0 && h->y1 <= l->y1; /* (all of it inside the lit one's box) */
+            }
+            /* only in a list whose items lie apart (a column of plates), not in one whose items overlap one another
+               (the main menu's ring, where the lit one's box is where it is drawn) */
+            for (k = 0; k < sLastN && under; k++) {
+                const Hit *m = &sLast[k];
+                if (m != h && m->flash == h->flash && clip_state(m->clip) != ST_ON && same_family(m->clip, h->clip) &&
+                    m->x0 < h->x1 && h->x0 < m->x1 && m->y0 < h->y1 && h->y0 < m->y1) {
+                    under = 0;
+                }
+            }
+            if (!under) {
+                continue;
+            }
+        }
         if (x >= h->x0 && x <= h->x1 && y >= h->y0 && y <= h->y1) {
             float w = h->x1 - h->x0 + 1.0f, hh = h->y1 - h->y0 + 1.0f;
             float dx = x - (h->x0 + h->x1) * 0.5f, dy = y - (h->y0 + h->y1) * 0.5f;
@@ -600,7 +628,19 @@ static void seek_tick(void) {
         axis = list_axis(t, &sign);
         if (axis < 0) { /* two items: from their top left corners (the lit one's box grows right and down) */
             float ddx = t->x0 - on->x0, ddy = t->y0 - on->y0;
-            axis = (ddy < 0 ? -ddy : ddy) >= (ddx < 0 ? -ddx : ddx);
+            float lx = (t->x1 < on->x1 ? t->x1 : on->x1) - (t->x0 > on->x0 ? t->x0 : on->x0);
+            float lw = (t->x1 - t->x0) < (on->x1 - on->x0) ? (t->x1 - t->x0) : (on->x1 - on->x0);
+            float ly = (t->y1 < on->y1 ? t->y1 : on->y1) - (t->y0 > on->y0 ? t->y0 : on->y0);
+            float lh = (t->y1 - t->y0) < (on->y1 - on->y0) ? (t->y1 - t->y0) : (on->y1 - on->y0);
+            if (lx > lw * 0.5f && !(ly > lh * 0.5f)) {
+                axis = 1; /* one above the other */
+            } else if (ly > lh * 0.5f && !(lx > lw * 0.5f)) {
+                axis = 0; /* side by side */
+            } else if (lx > lw * 0.5f && t->x0 >= on->x0 && t->x1 <= on->x1 && (t->x1 - t->x0) > 2.0f * (t->y1 - t->y0)) {
+                axis = 1; /* (a row plate inside the lit one's grown box: BT4decomp's controller page) */
+            } else {
+                axis = (ddy < 0 ? -ddy : ddy) >= (ddx < 0 ? -ddx : ddx);
+            }
             sign = ((axis ? ddy : ddx) >= 0) == (delta > 0) ? 1 : -1;
         }
         if (sSeek.steps == 0) {
