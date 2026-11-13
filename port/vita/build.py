@@ -13,6 +13,7 @@ Environment:
                        fights, statistics in the log), see docs/vita/development.md
     BT3_INCREMENTAL=1  reuse objects newer than their source (headers are not tracked)
     BT3_VITA_TITLE_ID, BT3_VITA_TITLE, BT3_VITA_VPK
+    BT3_JOBS=<n>       compiles at once (default: the processors; fewer where memory is short, a Docker VM)
                        another title ID, name and package file, so that the build is installed beside another one
                        (it reads the same ux0:data/bt3: the disc, the saves, bt3.txt)
 
@@ -62,12 +63,15 @@ COMMON = ["-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-w", "-DPOR
 NOBUILTIN = ["-fno-builtin-" + n for n in "sinf cosf tanf asinf acosf atanf atan2f sqrtf powf floorf ceilf fabsf fmodf expf logf sin cos tan sqrt "
              "pow floor ceil fabs abs labs rand srand printf sprintf snprintf fprintf vsprintf puts putchar fputs fwrite strcpy strncpy strcat "
              "strncat strlen strcmp strncmp strchr strrchr strstr malloc calloc realloc free exit abort atoi memcmp memmove".split()]
-GAME = [P + "gcc", "-std=gnu89", "-c", "-fcommon"] + COMMON + ABI + NOBUILTIN + \
+# (gnu99 with the C89 meaning of `inline`: BT4decomp's game files declare variables in their for loops, which clang
+# takes in C89 as an extension and gcc does not; the decompilation's own files mean the same either way. -fpermissive:
+# a library function called without its declaration stays a warning, as C89 had it)
+GAME = [P + "gcc", "-std=gnu99", "-fgnu89-inline", "-fpermissive", "-c", "-fcommon"] + COMMON + ABI + NOBUILTIN + \
        ["-include", "port_libm.h", "-Iinclude", "-Iport/include", "-Iport/vita", "-include", "port_compat.h"]
 
 # The game's compiler evaluates call arguments from right to left and the game's code depends on it in places; gcc
 # for ARM goes left to right. The preprocessed text is rewritten as in the 64-bit PC build (ptr32.r2l, libclang).
-R2L_ARGS = ["-x", "cpp-output", "--target=arm-none-eabi", "-mfloat-abi=soft", "-std=gnu89", "-fsigned-char", "-fno-short-enums", "-w",
+R2L_ARGS = ["-x", "cpp-output", "--target=arm-none-eabi", "-mfloat-abi=soft", "-std=gnu99", "-Wno-error=implicit-function-declaration", "-Wno-error=implicit-int", "-fsigned-char", "-fno-short-enums", "-w",
             "-Wno-error=return-type", "-Wno-error=return-mismatch"]
 
 
@@ -236,7 +240,7 @@ def cc_libm(f):
 def float_expected():
     """vita_float_expected.h: the reference sums of the float self-test (vita_float.c), computed on the host."""
     ren = [f"-D__{n}=PortX_{n}" for n in X_DEFS] + [f"-D{a}={b}" for a, b in RENAME_SOFTFLOAT.items()]
-    cc = ["gcc", "-O2", "-w", "-Iinclude", "-Iport/include", "-Iport/vita"]
+    cc = ["gcc", "-O2", "-w", "-Iinclude", "-Iport/include", "-Iport/src", "-Iport/vita"]
     for src, extra, o in (("port/src/softfloat_ps2.c", ren, "ft_soft.o"), ("src/port/vu0_a.c", ["-DREF_VU0_EXTERN_ARITH"], "ft_vu0.o"),
                           ("port/vita/floattest.c", [], "ft_main.o")):
         subprocess.run(cc + extra + ["-c", src, "-o", str(GEN / o)], cwd=ROOT, check=True)
@@ -251,7 +255,7 @@ def compile_all():
         raise SystemExit(f"{SAMPLES}: the vitasdk samples are needed (git clone https://github.com/vitasdk/samples; VITA_SAMPLES=<folder>)")
     float_expected()
     data = data_tables()
-    with concurrent.futures.ProcessPoolExecutor(os.cpu_count() or 4) as ex:
+    with concurrent.futures.ProcessPoolExecutor(int(os.environ.get("BT3_JOBS") or 0) or os.cpu_count() or 4) as ex:
         res = list(ex.map(cc_game, portsrc.sources()))
         res += list(ex.map(cc_libm, sorted((ROOT / "port/third_party/newlib_libm").glob("*.c"))))
         res += list(ex.map(cc_port, port_sources()))

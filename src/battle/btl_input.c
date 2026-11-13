@@ -10,6 +10,9 @@ extern s32 TagBattle_IsActorLoading(s32 actor);
 extern s32 TagBattle_Count(void);
 extern void TagBattle_CycleTarget(s32 actor);
 #include <stdio.h>
+#ifdef PORT_VITA
+#include <stdlib.h> /* (getenv: the BT4 test switches; gcc takes no implicit declarations) */
+#endif
 
 /*
  * Per-fighter battle input: 0x1D3B40..0x1D60A0.

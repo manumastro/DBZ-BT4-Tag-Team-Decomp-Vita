@@ -36,6 +36,10 @@ typedef float f32;
 extern unsigned char gPortHw[], gPortGsReg[];
 #define PORT_HW(a) ((a) >= 0x12000000u ? (unsigned)gPortGsReg + ((a) - 0x12000000u) : (unsigned)gPortHw + ((a) - 0x10000000u))
 #endif
+#ifdef PORT_VITA
+/* BT4decomp's game files read test switches with getenv without <stdlib.h>: gcc (C99) takes no implicit declaration */
+extern char *getenv(const char *name);
+#endif
 
 /* C library calls of the game that must not go to the host's versions (see port/src/plat_mem.c). */
 #define malloc Port_Malloc

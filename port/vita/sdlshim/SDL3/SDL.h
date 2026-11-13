@@ -26,4 +26,13 @@ bool SDL_LockAudioStream(SDL_AudioStream *stream);
 bool SDL_UnlockAudioStream(SDL_AudioStream *stream);
 bool SDL_ClearAudioStream(SDL_AudioStream *stream);
 void SDL_DestroyAudioStream(SDL_AudioStream *stream);
+/* (BT4decomp's sound code: milliseconds since the start, for its logs) */
+#include <psp2/kernel/processmgr.h>
+static inline uint64_t SDL_GetTicks(void) { return sceKernelGetProcessTimeWide() / 1000u; }
+/* (BT4decomp's recording of its own mix for tests: not on the Vita) */
+typedef void (SDLCALL *SDL_AudioPostmixCallback)(void *userdata, const SDL_AudioSpec *spec, float *buffer, int buflen);
+static inline bool SDL_SetAudioPostmixCallback(SDL_AudioDeviceID dev, SDL_AudioPostmixCallback cb, void *userdata) {
+    (void)dev; (void)cb; (void)userdata;
+    return false;
+}
 #endif
