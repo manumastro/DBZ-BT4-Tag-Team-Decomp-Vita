@@ -17,6 +17,7 @@
  *                      below: test fights, renderer switches, statistics; see docs/vita/development.md.
  *   log.txt            written by every run (log-vgl.txt by the development build), kept across runs
  */
+#include "vita_paths.h"
 #include <psp2/ctrl.h>
 #include <psp2/display.h>
 #include <psp2/io/dirent.h>
@@ -35,7 +36,7 @@
 #include <malloc.h>
 #include "debugScreen.h"
 
-#define HOME "ux0:data/bt3"
+#define HOME PORT_VITA_HOME ""
 #ifdef PORT_VITA_SFX /* the development build has its own log, so that its runs and the release's can be kept side by side */
 #define SFX PORT_VITA_SFX
 #else
@@ -1223,7 +1224,7 @@ void __wrap_exit(int code) {
 static int has_slus(const char *dir) {
     char path[300];
     SceIoStat st;
-    snprintf(path, sizeof(path), "%s/SLUS_216.78", dir);
+    snprintf(path, sizeof(path), "%s/" PORT_VITA_ELF, dir);
     return sceIoGetstat(path, &st) >= 0 && !SCE_S_ISDIR(st.st_mode);
 }
 

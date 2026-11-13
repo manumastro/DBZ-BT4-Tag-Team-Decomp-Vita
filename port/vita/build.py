@@ -37,9 +37,11 @@ OUT = ROOT / ("port/build/vita" + TAG)
 GEN = ROOT / ("port/build/gen/vita" + TAG)
 SCE_SYS = ROOT / "port/vita/sce_sys"
 SAMPLES = pathlib.Path(os.environ.get("VITA_SAMPLES", SDK.parent / "samples"))  # debugScreen.c (CC0): the start-up text screen
-TITLE_ID = os.environ.get("BT3_VITA_TITLE_ID") or ("BTTD00008" if DEV else "BTTD00010")
-TITLE = os.environ.get("BT3_VITA_TITLE") or ("BT3 (development)" if DEV else "Dragon Ball Z: BT3")
-VPK = os.environ.get("BT3_VITA_VPK") or ("Tenkaichi3Decomp-Vita-dev.vpk" if DEV else "Tenkaichi3Decomp-Vita.vpk")
+# BT4decomp's Vita build: the Budokai Tenkaichi 4 mod (B14 Rev2), its own title and folder (ux0:data/bt4), so that it
+# sits beside the BT3 port and never touches its files or saves
+TITLE_ID = os.environ.get("BT3_VITA_TITLE_ID") or ("BTFV00008" if DEV else "BTFV00010")
+TITLE = os.environ.get("BT3_VITA_TITLE") or ("BT4 (development)" if DEV else "Dragon Ball Z: BT4")
+VPK = os.environ.get("BT3_VITA_VPK") or ("BT4-Vita-dev.vpk" if DEV else "BT4-Vita.vpk")
 APP_VER = "01.10"  # the version the LiveArea and VitaShell show (README "Changes")
 
 # A few names exist both in the game's side and in the SDK's libraries with other meanings: the internals of the
@@ -57,7 +59,8 @@ RENAME_SOFTFLOAT = {"RefVu0_AddBits": "PortX_VuAdd", "RefVu0_MulBits": "PortX_Vu
 ABI = ["-fsigned-char", "-fno-short-enums", "-fsigned-bitfields"]
 COMMON = ["-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-w", "-DPORT_VITA=1", "-DPORT_VITA_FIXED=1",
           '-DPORT_VITA_SFX="-vgl.txt"' if DEV else '-DPORT_VITA_SFX=".txt"', "-DPORT_VITA_GFX=1", "-DPORT_VITA_VGL=1",
-          "-DMPEG2_PLAYER=1", "-DPORT_VITA_SOUND=1", "-DPORT_VITA_NATIVE=1"] + ([] if DEV else ["-DPORT_VITA_RELEASE=1"])
+          "-DMPEG2_PLAYER=1", "-DPORT_VITA_SOUND=1", "-DPORT_VITA_NATIVE=1",
+          "-DPORT_VITA_BT4=1", '-DPORT_VITA_HOME="ux0:data/bt4"', '-DPORT_VITA_ELF="SLUS_219.78"'] + ([] if DEV else ["-DPORT_VITA_RELEASE=1"])
 # As in the PC build, no call of the C library is replaced by the compiler's own idea of it; the memory functions are
 # allowed (small memcpy / memset calls become inline code).
 NOBUILTIN = ["-fno-builtin-" + n for n in "sinf cosf tanf asinf acosf atanf atan2f sqrtf powf floorf ceilf fabsf fmodf expf logf sin cos tan sqrt "
@@ -194,7 +197,8 @@ def port_sources():
     out = [(ROOT / "src/port/vu0_a.c", "vu0"), (ROOT / "src/port/vu0_b.c", "vu0")]
     # of port/src: everything but the PC's memory, files, crash report and maths bridge (vita_*.c take their place)
     for n in ("gs_marker", "headless", "mathf_pc", "plat_gs", "plat_mc", "plat_movie", "plat_mpeg2",
-              "plat_settings", "plat_stub", "plat_sys", "softfloat_ps2", "port_fast", "port_vufast"):
+              "plat_settings", "plat_stub", "plat_sys", "softfloat_ps2", "port_fast", "port_vufast",
+              "bt3_gameplay_rules", "bt3_zcounter2", "bt3_bombardment", "plat_sndstate"):  # (the last four: BT4decomp's)
         out.append((S / (n + ".c"), "gs" if n in ("plat_movie", "plat_mpeg2") else "ee"))
     out += [(V / "vita_mem.c", "hard"), (V / "vita_file.c", "hard"), (V / "vita_main.c", "hard"), (V / "vita_float.c", "hard"),
             (GEN / "vita_dat.c", "hard"), (S / "gs/gs_sony.c", "hard"),
@@ -202,7 +206,10 @@ def port_sources():
             (V / "vita_gfx.c", "hard"), (S / "gs/gs_core.c", "gs"), (S / "gs/gs_vu1.c", "gs"),
             (V / "vita_perf.c", "hard"), (V / "vita_vgl.c", "hard"), (V / "vita_touch.c", "hard"), (V / "vita_optart.c", "hard"),
             (V / "vita_text.c", "hard"), (V / "vita_audio.c", "gs"), (S / "gs/snd_adx.c", "gs"), (S / "gs/snd_se.c", "gs"),
-            (V / "vita_vufast_wrap.c", "hard")]
+            (V / "vita_vufast_wrap.c", "hard"),
+            # BT4decomp: the presentation switches and the fighters' sounds by distance as on PC; what its other PC files
+            # give the game, answered as the game without them (online play, Tag Team rooms, the F1 window: vita_bt4.c)
+            (S / "gs/presentation.c", "gs"), (S / "gs/snd_spatial.c", "gs"), (V / "vita_bt4.c", "hard")]
     return out
 
 

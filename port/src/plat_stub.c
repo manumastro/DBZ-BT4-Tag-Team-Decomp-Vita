@@ -42,6 +42,11 @@ int func_00296B48() { return 0; }      /* sceSdRemoteCallbackInit */
 static int (*sVsyncHandler)(int);
 void sceGsResetGraph() {}
 void sceGsResetPath() {}
+#ifdef PORT_VITA /* (the Vita: the fight's scenes' cross-fade is drawn by its renderer, marker 0x50; no read-back) */
+void sceGsSetDefStoreImage() {}
+int sceGsExecStoreImage() { return 0; }
+int sceGsSyncPath() { return 0; }
+#else
 /* Reading pixels back from the GS (the screen cross-fade of the fight's scenes reads the frame being shown: stg_b.c).
    SetDef says what: the place in GS memory (in 64-pixel units), the size; Exec delivers it, 3 bytes a pixel. */
 static int sStoreBp, sStoreW, sStoreH;
@@ -63,6 +68,7 @@ int sceGsSyncPath(int mode, int timeout) {
     (void)timeout;
     return Gs_SyncPath(mode != 0);
 }
+#endif
 void *sceGsSyncVCallback(int (*handler)(int)) { void *old = (void *)sVsyncHandler; sVsyncHandler = handler; return old; }
 /* One vertical blank: runs the game's VBlank handler, as the interrupt would. */
 extern void Port_Trace(unsigned vblanks);

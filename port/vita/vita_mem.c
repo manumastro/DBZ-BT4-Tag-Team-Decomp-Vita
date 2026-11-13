@@ -13,6 +13,8 @@
  * number or keeps a flag in its top bit would show here first. heap=cdram (bt3.txt) asks for the heap in the
  * graphics memory area instead, which lies lower; an experiment for that case, not a fix.
  */
+#include <malloc.h>
+#include "vita_paths.h"
 #include <psp2/io/fcntl.h>
 #include <psp2/kernel/sysmem.h>
 #include <stdint.h>
@@ -107,7 +109,7 @@ void Vita_LoadGameData(const char *disc) {
     uint64_t hash = 0xCBF29CE484222325ull;
     uint32_t i, k;
 
-    snprintf(path, sizeof(path), "%s/SLUS_216.78", disc);
+    snprintf(path, sizeof(path), "%s/" PORT_VITA_ELF, disc);
     elf = read_file(path, &elfSize);
     if (elf == NULL || elfSize < 0x34 || memcmp(elf, "\177ELF", 4) != 0) {
         Vita_Fatal("the game's program was not found:\n  %s\nCopy the files of your own disc there (see the README).", path);
@@ -153,9 +155,52 @@ void Vita_LoadGameData(const char *disc) {
     free(src[0]);
     free(src[1]);
     if (hash != gPortDatChecksum) {
+#ifdef PORT_VITA_BT4
+        /* (BT4decomp: the tables' sum is the release's of one language; the English and the Spanish B14 Rev2 discs
+           differ in them, and BT4decomp's PC build too accepts both, after checking the programs another way) */
+        extern void Vita_Log(const char *fmt, ...);
+        Vita_Log("vita: the data tables' sum is %016llx, not the list's %016llx (the other language's BT4 disc, or another one)\n",
+                 (unsigned long long)hash, (unsigned long long)gPortDatChecksum);
+#else
         Vita_Fatal("SLUS_216.78 / BIN/DBZP.BIN in\n  %s\nare not the unmodified USA release (SLUS-21678).", disc);
+#endif
     }
 }
+
+/* (BT4decomp) Blocks the game takes outside its heap (Port_GameBigAlloc): each fighter's tables BT4 keeps once
+   per fighter (src/battle/bobj_a.c), a Tag Team's files and pool. From the C library's heap (_newlib_heap_size_user),
+   each with a header in front saying it is one, so that Heap_Free (src/sys/heap.c), which asks Port_GameBigFree
+   first about every block it frees, gives it back here; an address inside the game heap is the heap's at once. */
+#define BIG_MAGIC 0xB16B7A4Cu
+unsigned Port_GameBigAlloc(int size) {
+    uint8_t *p = memalign(64, (size_t)(size > 0 ? size : 0) + 64);
+    if (p == NULL) {
+        Vita_Fatal("out of memory: %d bytes outside the game heap", size);
+    }
+    ((uint32_t *)p)[0] = BIG_MAGIC;
+    ((uint32_t *)p)[1] = (uint32_t)(uintptr_t)p ^ BIG_MAGIC;
+    return (unsigned)(uintptr_t)(p + 64);
+}
+int Port_GameBigFree(unsigned addr) {
+    uint32_t *h;
+    if (addr == 0 || (addr >= gVitaHeapBase && addr < gVitaHeapBase + HEAP_SIZE) || addr < 64) {
+        return 0;
+    }
+    h = (uint32_t *)(uintptr_t)(addr - 64);
+    if (h[0] != BIG_MAGIC || h[1] != ((uint32_t)(uintptr_t)h ^ BIG_MAGIC)) {
+        return 0;
+    }
+    h[0] = 0;
+    free(h);
+    return 1;
+}
+
+/* Which game the shared code runs (include/port_variant.h): 1, the Budokai Tenkaichi 4 mod, in BT4decomp's build */
+#ifdef PORT_VITA_BT4
+int gPortVariant = 1;
+#else
+int gPortVariant = 0;
+#endif
 
 /* The program's end address on the PS2: a table of the PS2's C library points at it; nothing reads it here
    (src/sys/heap.c takes the number itself in this build). */

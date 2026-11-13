@@ -29,6 +29,11 @@ void SDL_DestroyAudioStream(SDL_AudioStream *stream);
 /* (BT4decomp's sound code: milliseconds since the start, for its logs) */
 #include <psp2/kernel/processmgr.h>
 static inline uint64_t SDL_GetTicks(void) { return sceKernelGetProcessTimeWide() / 1000u; }
+/* (BT4decomp's fighters' sounds by distance, gs/snd_spatial.c) */
+typedef uint64_t Uint64;
+typedef int SDL_SpinLock;
+static inline void SDL_LockSpinlock(SDL_SpinLock *l) { while (__atomic_exchange_n(l, 1, __ATOMIC_ACQUIRE)) {} }
+static inline void SDL_UnlockSpinlock(SDL_SpinLock *l) { __atomic_store_n(l, 0, __ATOMIC_RELEASE); }
 /* (BT4decomp's recording of its own mix for tests: not on the Vita) */
 typedef void (SDLCALL *SDL_AudioPostmixCallback)(void *userdata, const SDL_AudioSpec *spec, float *buffer, int buflen);
 static inline bool SDL_SetAudioPostmixCallback(SDL_AudioDeviceID dev, SDL_AudioPostmixCallback cb, void *userdata) {

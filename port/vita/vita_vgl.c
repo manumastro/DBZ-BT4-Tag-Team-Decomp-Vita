@@ -21,6 +21,7 @@
  * GS does with S, T, Q. GS depth grows towards the viewer: depth = z / zmax with GEQUAL / GREATER.
  * The shaders are compiled at run time (libshacccg.suprx) once and kept in ux0:data/bt3/shcache.
  */
+#include "vita_paths.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -433,8 +434,8 @@ static int sh_cached(GLuint sh, const char *src, GLint len) {
             Vita_Log("vgl: start: the first pixel shader from the card\n");
         }
     }
-    sceIoMkdir("ux0:data/bt3/shcache", 0777);
-    snprintf(path, sizeof(path), "ux0:data/bt3/shcache/f%08x%08x.gxp", (unsigned)(h >> 32), (unsigned)h);
+    sceIoMkdir(PORT_VITA_HOME "/shcache", 0777);
+    snprintf(path, sizeof(path), PORT_VITA_HOME "/shcache/f%08x%08x.gxp", (unsigned)(h >> 32), (unsigned)h);
     if (!(gVglSafe2 & 32768) && (fd = sceIoOpen(path, SCE_O_RDONLY, 0)) >= 0) {
         int n = sceIoRead(fd, sShBin, sizeof(sShBin));
         sceIoClose(fd);

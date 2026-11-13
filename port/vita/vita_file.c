@@ -24,6 +24,7 @@
  * a pack with its own, changed copy of it (Budokai Tenkaichi 4 and other mods of the program) is left out, and the
  * start tells of it (Vita_ModsStart).
  */
+#include "vita_paths.h"
 #include <ctype.h>
 #include <psp2/io/dirent.h>
 #include <psp2/io/fcntl.h>
@@ -57,7 +58,7 @@ typedef struct PortFile {
 static Partition sPart[8];
 
 /* ---- mods ---- */
-#define MODS_DIR "ux0:data/bt3/mods"
+#define MODS_DIR PORT_VITA_HOME "/mods"
 #define MOD_DIRS 96
 #define MOD_PACKS 24
 typedef struct ModFile { uint16_t ptid, dir; uint32_t flid; char name[48]; } ModFile; /* a member (ptid < 8) or a DATA file (ptid 8), in folder `dir` */
@@ -167,7 +168,7 @@ static const char *pack_program(const char *pack, char *what, size_t size) {
                 continue;
             }
             snprintf(a, sizeof(a), "%s/%s", pack, e.d_name);
-            snprintf(b, sizeof(b), "%s/SLUS_216.78", gVitaDisc);
+            snprintf(b, sizeof(b), "%s/" PORT_VITA_ELF, gVitaDisc);
             if (!same_file(a, b)) {
                 snprintf(what, size, "%s", e.d_name);
                 bad = what;
