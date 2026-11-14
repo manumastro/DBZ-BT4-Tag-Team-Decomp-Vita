@@ -2,6 +2,17 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## v1.1.1 (2026-11-14)
+
+From arielxflores's BT3 Vita port, v1.2.1:
+
+- BT4's files are also found where the BT3 Vita port keeps them (`ux0:data/bt3/bt4/` and its `es/`), in `ux0:bt4/`
+  and in `ux0:bt3/bt4/`, unpacked or as the `.iso`: one copy of the image serves both apps.
+- The start's steps and the taiHEN plugins (from `ur0:tai` and `ux0:tai` `config.txt`) in `log.txt`, written line
+  by line until the game starts, so that a start that closes the game says where.
+- README: the image is over FAT32's 4 GB a file (copy the unpacked files, or use exFAT).
+- (His fix for music mods' songs that played once, ADX version 3 loops, was already in BT4decomp's sound code.)
+
 ## v1.1 (2026-11-14)
 
 - **Team BT4's Spanish B14 Rev2** ([#1](https://github.com/manumastro/DBZ-BT4-Tag-Team-Decomp-Vita/issues/1)): its

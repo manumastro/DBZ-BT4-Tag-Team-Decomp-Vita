@@ -105,6 +105,11 @@ as it is to `ux0:data/bt4/` with VitaShell (USB or FTP), under any name ending i
 ux0:data/bt4/SLUS_219.78.DBZBT4B14REV2ENG.iso
 ```
 
+The image is also found where the BT3 Vita port keeps it (`ux0:data/bt3/bt4/`, its Spanish one in
+`ux0:data/bt3/bt4/es/`), in `ux0:bt4/` and in `ux0:bt3/bt4/`, unpacked or as the `.iso`: one copy serves both apps.
+The image is about 6 GB, more than one file can be on a memory card formatted as FAT32 (common with SD2Vita): on
+such a card copy the unpacked files instead (each of them is smaller), or format the card as exFAT.
+
 The game reads its files from the image (arielxflores's reader, from his BT3 Vita port's v1.2). Or copy only
 `SLUS_219.78` and the `BIN` and `DATA` folders from the image, so that the memory card has:
 
