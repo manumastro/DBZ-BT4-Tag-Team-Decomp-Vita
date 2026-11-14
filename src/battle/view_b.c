@@ -413,6 +413,10 @@ void Bt4Costume_AttachCaption(Flash *flash, FlashRef *ref, s32 number, s32 total
         TextBox_AttachString(flash, ref, 0, 0, caption->line, (TextBox *)storage);
         TB(storage)->draw.align = 1;  /* (centred on the arrows' middle, 22 units right of the clip) */
         TB(storage)->draw.x += 22;
+        {   /* a long name ("Battle Damaged (Topless)") shrunk sideways to the box, as TextBox_SetMaxWidth does */
+            s32 w = Font_GetWidth(caption->line);
+            if (w > 184) TB(storage)->draw.scaleX *= 184.0f / (f32)w;
+        }
         return;
     }
 #endif
