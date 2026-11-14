@@ -2,7 +2,7 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
-## Unreleased
+## v0.2 (2026-11-14)
 
 From the BT3 Vita port (its `optimized` branch, merged in as before), the same as there:
 
