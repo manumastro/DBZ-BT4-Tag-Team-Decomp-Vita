@@ -2,6 +2,14 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## v1.3 (2026-11-14)
+
+- **Unlock All from the menus**: hold SELECT for two seconds in the menus and the same screen shows over the game,
+  which waits; CROSS gives the save in use everything at once (save in Options, or after a fight, to keep it), and
+  the game goes on where it was.
+- **SELECT at the start is seen at any moment**: a thread of its own looks at it every 16 ms from the program's first
+  steps, so a short press counts (v1.2.2 still missed a quick press between two of the start's steps).
+
 ## v1.2.2 (2026-11-14)
 
 - Unlock All's screen shows when SELECT was down at any step of the start, not only at the moment the screen would
