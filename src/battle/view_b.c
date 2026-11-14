@@ -284,6 +284,9 @@ typedef struct Bt4CostumeCaption {
     unsigned stamp;
     s32 number, total;
     char name[128];
+#ifdef PORT_VITA
+    u16 line[160]; /* (the Vita: the caption in the game's own letters, TextBox_AttachString) */
+#endif
 } Bt4CostumeCaption;
 /* The caller's storage is an active TextBox, not spare callback memory.
  * Never overwrite its resource pointer or retain a label from its file. */
@@ -394,6 +397,25 @@ void Bt4Costume_AttachCaption(Flash *flash, FlashRef *ref, s32 number, s32 total
         }
         Bt4Costume_Utf8(caption->name,name);
     }
+#ifdef PORT_VITA
+    /* The Vita has no TrueType line renderer (PortTbo_TextId): the caption in the game's own letters on the costume
+       box, as BT4's own helper wrote the costume's name: the number and the count between the arrows ("2/4"), the
+       name under them, both centred. */
+    {
+        char head[32];
+        s32 n = 0, k;
+        sprintf(head, caption->name[0] ? "%d/%d\n" : "%d/%d", (int)number, (int)total);
+        for (k = 0; head[k] && n < 159; k++) caption->line[n++] = (u8)head[k];
+        for (k = 0; name != NULL && name[k] && n < 159; k++) {
+            if (name[k] >= 32) caption->line[n++] = name[k];
+        }
+        caption->line[n] = 0;
+        TextBox_AttachString(flash, ref, 0, 0, caption->line, (TextBox *)storage);
+        TB(storage)->draw.align = 1;  /* (centred on the arrows' middle, 22 units right of the clip) */
+        TB(storage)->draw.x += 22;
+        return;
+    }
+#endif
     Flash_ClipSetFlags(flash, ref, 0x800, 1);
     Flash_ClipSetCallbackC(flash, ref, Bt4Costume_DrawCaption, caption);
 }
