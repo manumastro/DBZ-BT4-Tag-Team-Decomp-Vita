@@ -50,8 +50,6 @@ Taken on a PS Vita 1000 with the release build.
 Requirements:
 
 - A PS Vita running HENkaku / Ensō
-- `libshacccg.suprx` extracted to `ur0:data/` (see
-  [this guide](https://samilops2.gitbook.io/vita-troubleshooting-guide/shader-compiler/extract-libshacccg.suprx))
 - Recommended: the [CapUnlocker](https://github.com/GrapheneCt/CapUnlocker) kernel plugin, which lets the game use
   the Vita's fourth CPU core. Without it the game runs, but heavy scenes are slower.
 - About 5.5 GB free on `ux0:` for the game files
@@ -163,7 +161,7 @@ not available.
 
 - Saves (a virtual memory card) and settings are kept in `ux0:data/bt4/`: `saves/`, `bt3_settings.txt` (Clashes,
   2nd Pad, Mods) and `touch.txt` (Touch). `log.txt` there describes the last runs (`log-prev.txt` the ones before).
-- The first start takes a little longer: the shaders are compiled and kept in `ux0:data/bt4/shcache/`.
+- The game's shaders come already compiled in the package (`shbank.bin`): `libshacccg.suprx` is not needed.
 - The port runs the Vita at its standard maximum clocks (CPU 444 MHz, GPU 222 MHz); no overclocking plugin is
   used or needed.
 - Optional settings go in `ux0:data/bt4/bt3.txt`, one per line: `wide=0` shows the PS2's original 4:3 picture,
