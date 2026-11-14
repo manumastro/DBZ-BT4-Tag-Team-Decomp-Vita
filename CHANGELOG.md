@@ -2,6 +2,11 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## v1.2.2 (2026-11-14)
+
+- Unlock All's screen shows when SELECT was down at any step of the start, not only at the moment the screen would
+  show: letting SELECT go a little early no longer misses it.
+
 ## v1.2.1 (2026-11-14)
 
 - The `.iso` is also found one folder down in `ux0:data/bt4/`, as an archive unpacks it: Team BT4's own archive

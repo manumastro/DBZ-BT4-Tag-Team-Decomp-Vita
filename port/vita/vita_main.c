@@ -1763,6 +1763,7 @@ static void read_settings(void) {
    puts that copy back. */
 #define UNLOCK_BACKUP HOME "/saves/unlock_backup.bin"
 static int sUnlock; /* 1 unlock, 2 undo: done to the save the game loads next */
+static int sSelectSeen; /* SELECT down at one of the start's steps (start_step): it need not be held to the screen */
 
 static int file_there(const char *path) {
     SceIoStat st;
@@ -1779,7 +1780,7 @@ static void unlock_menu(void) {
         es = !gVitaBt4English;
     }
 #endif
-    if (!(buttons() & SCE_CTRL_SELECT)) {
+    if (!sSelectSeen && !(buttons() & SCE_CTRL_SELECT)) {
         return;
     }
     there = file_there(UNLOCK_BACKUP);
@@ -2078,6 +2079,7 @@ static int game_thread(SceSize args, void *argp) {
    lose the last lines before a crash). arielxflores's, from his v1.2.1 (882e0fe). */
 static void start_step(const char *what) {
     logf_("vita: start: %s\n", what);
+    sSelectSeen |= (buttons() & SCE_CTRL_SELECT) != 0; /* (Unlock All: SELECT pressed at any step of the start counts) */
 }
 
 /* The plugins taiHEN loads (their file names, from ur0:tai and ux0:tai config.txt), in the log: a start that fails on
