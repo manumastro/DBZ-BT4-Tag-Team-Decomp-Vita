@@ -22,6 +22,8 @@ From the BT3 Vita port (its `optimized` branch, merged in as before), the same a
     the log with the picture rate, the memory and the texture tables;
   - profile-guided builds (`BT3_PGO=gen` / `use`, [docs/vita/building.md](docs/vita/building.md));
   - `fightres=720` / `960` in `bt3.txt` draws the fights at that size always (640 x 368 by default).
+- New LiveArea, laid out as the BT3 port's: the key art as the LiveArea's page with the logo as its start button, the
+  cover in the bubble (`port/vita/tools/livearea_from_art.py`, which replaces `livearea_from_screenshot.py`).
 - BT4's music no longer hashes the whole song to look for the PC version's lossless copy (none on the Vita): the
   song is read while it plays.
 
