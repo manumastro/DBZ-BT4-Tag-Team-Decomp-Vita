@@ -312,7 +312,7 @@ void MainMenu_Init(s32 section) {
             continue;
         }
         gMainMenu->items[gMainMenu->itemCount++] = i;
-#ifdef PORT
+#if defined(PORT) && !defined(PORT_VITA) /* (the Vita: no online play, and no TrueType lines for its label) */
         if (i == 3) {
             gMainMenu->items[gMainMenu->itemCount++] = MAINMENU_TBO;
         }
@@ -325,7 +325,9 @@ void MainMenu_Init(s32 section) {
         PortMainMenu_WriteRuns(gMainMenu->tex[12] + 0x40, 3, sPortTboOn, sizeof(sPortTboOn) / sizeof(sPortTboOn[0]));
     }
 #endif
+#ifndef PORT_VITA
     if(gProgress->mainMenuItem==4)gProgress->mainMenuItem=MAINMENU_TBO;
+#endif
     gMainMenu->top = gMainMenu->itemCount - 1;
     for (i = 0; i < gMainMenu->itemCount; i++) {
         if (gMainMenu->items[i] == gProgress->mainMenuItem) {

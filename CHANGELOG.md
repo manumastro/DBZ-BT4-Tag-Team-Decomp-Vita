@@ -25,6 +25,8 @@ From the BT3 Vita port (its `optimized` branch, merged in as before), the same a
 - **The outfit's number and name** in the character selects' Outfit Select ("2/6" between the arrows, the name
   under them): BT4decomp writes them with the PC's TrueType line renderer, which the Vita has not; written here
   with the game's own letters.
+- The main menu no longer lists the PC's online entry under Duel Mode: its label is a TrueType line (blank on the
+  Vita: only its icon showed) and it led to the PC's online screens.
 - New LiveArea, laid out as the BT3 port's: the key art as the LiveArea's page with the logo as its start button, the
   cover in the bubble (`port/vita/tools/livearea_from_art.py`, which replaces `livearea_from_screenshot.py`).
 - BT4's music no longer hashes the whole song to look for the PC version's lossless copy (none on the Vita): the
