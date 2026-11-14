@@ -89,7 +89,11 @@ int Port_TagNetwork(void) { return 0; }
 void Port_TagMenuSet(int a, int b) { (void)a; (void)b; }
 void Port_UiSaving(int state) { (void)state; }
 void Ui_LanguageChosen(const char *locale) { (void)locale; }
-int Port_GameProfileEnglish(void) { return 1; } /* the English B14 Rev2 disc */
+/* Which of Team BT4's two B14 Rev2 releases the disc is: 1 English, 0 Spanish. Vita_LoadGameData (vita_mem.c) sets it
+   from the size of SLUS_219.78, as BT4decomp's own table of the two releases has them (port/include/
+   bt4_online_compat.h: 2,115,696 bytes the English one's, 2,115,688 the Spanish one's). */
+int gVitaBt4English = 1;
+int Port_GameProfileEnglish(void) { return gVitaBt4English; }
 
 /* ---- voice chat, the screen reader ---- */
 int PortVoice_TestRun(void) { return 0; }
@@ -126,9 +130,9 @@ float PortA11y_StreamGain(const void *player) { (void)player; return 1.0f; } /* 
 void Port_DevRulesEncode(unsigned char out[8]) {}
 
 /* (port/src/gs/game_profile.c) */
-int Port_GameProfileAvailable(int language) { return language == 1; }
+int Port_GameProfileAvailable(int language) { return language == gVitaBt4English; } /* (the one disc there is) */
 int Port_GameProfileChoose(int english) { return 0; }
-int Port_GameProfileLanguage(void) { return 1; /* English (0 Spanish, 1 English, 2 Brazilian Portuguese) */ }
+int Port_GameProfileLanguage(void) { return gVitaBt4English; /* 0 Spanish, 1 English (2, Brazilian Portuguese, is a PC pack) */ }
 int Port_GameProfileMenuActive(void) { return 0; }
 int Port_GameProfilePrompt(void) { return 0; }
 void Port_GameProfileMenuSet(int active,int choice,int alpha) {}

@@ -2,6 +2,15 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## v1.1 (2026-11-14)
+
+- **Team BT4's Spanish B14 Rev2** ([#1](https://github.com/manumastro/DBZ-BT4-Tag-Team-Decomp-Vita/issues/1)): its
+  disc image is used as the English one's, in `ux0:data/bt4/` as it is or unpacked; the game tells the two apart by
+  the size of `SLUS_219.78` (BT4decomp's own table of the two releases) and runs in the disc's language, with the
+  Spanish release's texts and music (the anime's soundtrack, players say). The Vita's own changes to the menus'
+  lettering ("Vita Settings", "Multiplayer") are made for the English disc and are left out on the Spanish one (its
+  rows keep their own names and do what the English ones do). Not tested on a Vita yet.
+
 ## v1.0 (2026-11-14)
 
 This fork's own:

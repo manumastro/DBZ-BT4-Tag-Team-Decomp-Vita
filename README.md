@@ -59,7 +59,7 @@ CapUnlocker (a survey of a duel on each, 2026-11-13); moments of heavy effects d
 - Tag Team (the simultaneous team battles): it goes through the PC version's network code, which is not in this port
   yet.
 - The PC version's added songs and stages, its F1 menu (Lua mods, accessibility, HUD editor) and the choice of
-  language: the game is in English.
+  language in the game: the game is in the language of the disc image you copy, English or Spanish.
 
 What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
@@ -85,8 +85,9 @@ the same speed-ups as this port, see my BT3 fork's releases:
 
 ## Game files
 
-You need the disc image (`.iso`) of **Budokai Tenkaichi 4 B14 Rev2**, Team BT4's release, in English: the one this
-port is made and tested with is
+You need the disc image (`.iso`) of **Budokai Tenkaichi 4 B14 Rev2**, Team BT4's release, in English or in Spanish.
+The game finds out which of the two it is (from the size of `SLUS_219.78`) and runs in its language (the Spanish
+release, players say, has the anime's soundtrack). The English one, which this port is made and tested with, is
 
 | | |
 |---|---|
@@ -95,7 +96,9 @@ port is made and tested with is
 | MD5 | `27a84d51cbc44252c3aa4e50b604621d` |
 | SHA-1 | `7505d8c3494d0889c8d5d3f493c9f920a9f34d64` |
 
-Other builds of BT4 (earlier betas, the Spanish version) and the original BT3 disc are not supported. Copy the image
+The Spanish release's image (Team BT4's `NTSC SPANISH`) is used the same way; it has not been tested on a Vita by
+this port yet, so reports are welcome ([issues](https://github.com/manumastro/DBZ-BT4-Tag-Team-Decomp-Vita/issues)).
+Other builds of BT4 (Beta X, earlier betas) and the original BT3 disc are not supported. Copy the image
 as it is to `ux0:data/bt4/` with VitaShell (USB or FTP), under any name ending in `.iso`:
 
 ```

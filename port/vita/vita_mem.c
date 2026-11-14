@@ -134,6 +134,16 @@ void Vita_LoadGameData(const char *disc) {
         }
         free(elf);
     }
+#ifdef PORT_VITA_BT4
+    {   /* which release of BT4 B14 Rev2: the Spanish one's program is 8 bytes shorter (bt4_online_compat.h); the game's
+           texts that depend on it (Port_GameProfileEnglish, vita_bt4.c) follow */
+        extern int gVitaBt4English;
+        extern void Vita_Log(const char *fmt, ...);
+        gVitaBt4English = elfSize != 2115688u;
+        Vita_Log("vita: BT4 B14 Rev2, the %s release (" PORT_VITA_ELF " of %u bytes)\n", gVitaBt4English ? "English" : "Spanish",
+                 (unsigned)elfSize);
+    }
+#endif
     snprintf(path, sizeof(path), "%s/BIN/DBZP.BIN", disc);
     src[1] = read_file(path, &srcSize[1]);
     if (src[1] == NULL) {
