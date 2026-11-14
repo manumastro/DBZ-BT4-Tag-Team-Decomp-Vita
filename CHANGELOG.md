@@ -2,6 +2,14 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## Unreleased
+
+From the BT3 Vita port (its `optimized` branch), the same as there:
+
+- **The disc image as it is** (arielxflores's reader, from his v1.2): copy your `.iso` to `ux0:data/bt4/`, under
+  any name, and the game reads its files from it; no need to unpack it with 7-Zip any more (the unpacked files still
+  work, and are used first when both are there).
+
 ## v0.2 (2026-11-14)
 
 From the BT3 Vita port (its `optimized` branch, merged in as before), the same as there:

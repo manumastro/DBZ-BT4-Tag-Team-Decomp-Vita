@@ -70,13 +70,13 @@ Requirements:
 - A PS Vita running HENkaku / Ensō
 - Recommended: the [CapUnlocker](https://github.com/GrapheneCt/CapUnlocker) kernel plugin, which lets the game use
   the Vita's fourth CPU core. Without it the game runs, but heavy scenes are slower.
-- About 5.5 GB free on `ux0:` for the game files
+- About 6 GB free on `ux0:` for the game files (the `.iso` as it is, or the files unpacked from it)
 
 Steps:
 
 1. Install `BT4-Vita.vpk` from the [releases page](https://github.com/manumastro/DBZ-BT4-Tag-Team-Decomp-Vita/releases)
    with VitaShell.
-2. Copy the game files to `ux0:data/bt4/disc/` as described below.
+2. Copy your disc image (`.iso`) to `ux0:data/bt4/`, or the files unpacked from it, as described below.
 3. Start **Dragon Ball Z: BT4** from the LiveArea.
 
 It installs beside the BT3 port: the two keep their files apart (`ux0:data/bt3/` and `ux0:data/bt4/`). For BT3 with
@@ -95,8 +95,15 @@ port is made and tested with is
 | MD5 | `27a84d51cbc44252c3aa4e50b604621d` |
 | SHA-1 | `7505d8c3494d0889c8d5d3f493c9f920a9f34d64` |
 
-Other builds of BT4 (earlier betas, the Spanish version) and the original BT3 disc are not supported. From the image,
-copy `SLUS_219.78` and the `BIN` and `DATA` folders, so that the memory card has:
+Other builds of BT4 (earlier betas, the Spanish version) and the original BT3 disc are not supported. Copy the image
+as it is to `ux0:data/bt4/` with VitaShell (USB or FTP), under any name ending in `.iso`:
+
+```
+ux0:data/bt4/SLUS_219.78.DBZBT4B14REV2ENG.iso
+```
+
+The game reads its files from the image (arielxflores's reader, from his BT3 Vita port's v1.2). Or copy only
+`SLUS_219.78` and the `BIN` and `DATA` folders from the image, so that the memory card has:
 
 ```
 ux0:data/bt4/disc/SLUS_219.78
@@ -114,7 +121,8 @@ ux0:data/bt4/disc/DATA/ZS4USOP.PSS        (and the other files of the DATA folde
 - **Linux / macOS:** `7z x -odisc your-image.iso SLUS_219.78 BIN DATA`
 
 Then copy the `disc` folder to `ux0:data/bt4/` with VitaShell (USB or FTP), or put the memory card in a card reader.
-BT4's archives have no file table of their own: the game reads it from `BIN/DBZ4.BIN`, as BT4decomp's installer does.
+Unpacked files are used first when both are there. BT4's archives have no file table of their own: the game reads it
+from `BIN/DBZ4.BIN` (in the image or unpacked), as BT4decomp's installer does.
 
 ## Controls
 
@@ -169,9 +177,13 @@ not available.
 
 ## Troubleshooting
 
-- **"The game's files were not found"**: `SLUS_219.78` and the `BIN` and `DATA` folders of Team BT4's B14 Rev2 must be in
-  `ux0:data/bt4/disc/`. An `.iso` cannot be read as it is: extract those three items from it with 7-Zip.
-- **"BT4's archive index was not found"**: `BIN/DBZ4.BIN` is missing from `ux0:data/bt4/disc/`.
+- **"The game's files were not found"**: the disc image (`.iso`) of Team BT4's B14 Rev2 must be in `ux0:data/bt4/`
+  (or its `disc` or `disk` folder), or `SLUS_219.78` and the `BIN` and `DATA` folders in `ux0:data/bt4/disc/`. The
+  message lists what it found instead. An image of another build, or one that is not a plain ISO 9660 copy of the
+  disc, is not used; earlier versions said "An .iso can't be read as it is": update the game, or extract the three
+  items with 7-Zip.
+- **"BT4's archive index was not found"**: `BIN/DBZ4.BIN` is missing from the unpacked files in `ux0:data/bt4/disc/`
+  (copy the whole `BIN` folder), or the image is not B14 Rev2's.
 - **The picture fills only part of the screen**: the Sharpscale plugin is set to a resolution other than
   "Original"; set it back to Original.
 - **The game stops** (the picture freezes, the music plays on): the game writes `ux0:data/bt4/hang.txt` when its
