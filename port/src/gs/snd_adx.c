@@ -28,6 +28,10 @@
 #include "music_cache.h"
 #include "adx_loop.h"
 #include "spatial_audio.h"
+#ifdef PORT_VITA
+#include <psp2/io/fcntl.h>
+#include "vita_read.h"
+#endif
 
 enum { ADXT_STAT_STOP = 0, ADXT_STAT_PLAYING = 3, ADXT_STAT_PLAYEND = 5 };
 #define MAX_PLAYERS 40
@@ -63,6 +67,13 @@ typedef struct Player {
     int16_t stIn[ST_CAP * 2], stTail[ST_OV_MAX * 2];
     int stN, stHasTail;
     double stSkip;
+#ifdef PORT_VITA
+    /* the file is read piece by piece on the reading thread (vita_read.c) while it plays: `loaded` bytes of it are
+       there; the decoder waits (silence) at a piece not read yet */
+    VitaReadJob job;
+    volatile uint32_t loaded;
+    int own, waiting;
+#endif
 } Player;
 
 static Player sPlayers[MAX_PLAYERS];
@@ -301,6 +312,13 @@ static int decode(Player *p, int16_t *out, int frames) {
             memcpy(p->loopHist, p->hist, sizeof(p->hist));
             p->loopHistSet = 1;
         }
+#ifdef PORT_VITA
+        if (!p->lossless && src + FRAME * p->channels > p->file + __atomic_load_n(&p->loaded, __ATOMIC_ACQUIRE) &&
+            src + FRAME * p->channels <= p->file + p->size) {
+            p->waiting = 1; /* (not read yet) */
+            break;
+        }
+#endif
         if (p->lossless) {
             int16_t raw[64];
             count=(int)(end-p->pos<32?end-p->pos:32);
@@ -477,8 +495,17 @@ static void SDLCALL feed(void *user, SDL_AudioStream *stream, int additional, in
             p->stHasTail = 0;
             continue;
         }
-        int n = decode(p, buf, 16);
+        int n;
+#ifdef PORT_VITA
+        p->waiting = 0;
+#endif
+        n = decode(p, buf, 16);
         if (n == 0) {
+#ifdef PORT_VITA
+            if (p->waiting) {
+                break; /* (the next piece is still being read: silence this time) */
+            }
+#endif
             p->stat = ADXT_STAT_PLAYEND;
             break;
         }
@@ -541,11 +568,39 @@ static void stop(Player *p) {
         p->stream = NULL;
     }
     PortPcm_Close(p->lossless);p->lossless=NULL;
+#ifdef PORT_VITA
+    Vita_ReadCancel(&p->job); /* (the reading thread done with it) */
+    if (p->own) {
+        sceIoClose(p->job.fd);
+        p->own = 0;
+    }
+#endif
     free(p->file);
     p->file = NULL;
     p->stat = ADXT_STAT_STOP;
 }
 
+#ifdef PORT_VITA
+#define ADX_PIECE 0x10000 /* 64 KB: about a second of a stereo song at 48 kHz */
+/* (on the reading thread) a piece is in: the next one, until the file's end; a failed read ends the song there */
+static int adx_piece(VitaReadJob *j, int got) {
+    Player *p = j->user;
+    uint32_t at = (uint32_t)((uint8_t *)j->buf - p->file);
+    if (got != (int)j->len) {
+        p->size = at; /* (the decoder ends where the file stops) */
+        return 0;
+    }
+    __atomic_store_n(&p->loaded, at + (uint32_t)got, __ATOMIC_RELEASE);
+    at += (uint32_t)got;
+    if (at >= p->size) {
+        return 0;
+    }
+    j->off += got;
+    j->buf = p->file + at;
+    j->len = p->size - at < ADX_PIECE ? p->size - at : ADX_PIECE;
+    return 1;
+}
+#endif
 /* An online match computes with the default voice set on both sides (net.c). A player who chose the other one hears
    it all the same: the stream that is PLAYED is the other set's file of the same line, while what the game is told
    about it (how long it lasts: view_start) stays the default file's, so the two copies agree. Ids of partition 2
@@ -611,15 +666,51 @@ static void start(Player *p, const char *path) {
         return;
     }
 #ifdef PORT_VITA /* the archives are read as they are on the disc: no file of its own to open (vita_file.c) */
-    {
-        extern void *Vita_LoadWhole(const char *path, uint32_t *size);
+    {   /* the first piece now (the header and about a second of sound), the rest on the reading thread */
+        SceUID fd;
+        uint32_t base, first;
+        int own;
         (void)fp; (void)size;
         p->size = 0;
-        p->file = Vita_LoadWhole(path, &p->size);
+        p->file = NULL;
+        if (Vita_FileSpan(path, &fd, &base, &p->size, &own)) {
+            first = p->size < ADX_PIECE ? p->size : ADX_PIECE;
+            p->file = malloc(p->size ? p->size : 1);
+            if (p->file != NULL && sceIoPread(fd, p->file, first, base) != (int)first) {
+                free(p->file);
+                p->file = NULL;
+            }
+        }
         if (p->file == NULL) {
+            if (p->size != 0 && own) {
+                sceIoClose(fd);
+            }
             fprintf(stderr, "bt3: sound file not found: %s\n", path);
             ADX_LOG("adx: player %d: %s not read\n", (int)(p - sPlayers), path);
             return;
+        }
+        p->loaded = first;
+        memset(&p->job, 0, sizeof(p->job));
+        p->job.fd = fd;
+        p->own = own;
+        if (first < p->size) {
+            p->job.off = (SceOff)base + first;
+            p->job.buf = p->file + first;
+            p->job.len = p->size - first < ADX_PIECE ? p->size - first : ADX_PIECE;
+            p->job.done = adx_piece;
+            p->job.user = p;
+            if (!Vita_ReadStart(&p->job)) { /* (no reading thread: the rest now) */
+                uint32_t rest = p->size - first;
+                if (sceIoPread(fd, p->file + first, rest, (SceOff)base + first) == (int)rest) {
+                    p->loaded = p->size;
+                } else {
+                    p->size = first;
+                }
+            }
+        }
+        if (own && p->job.done == NULL) { /* (all read) */
+            sceIoClose(fd);
+            p->own = 0;
         }
     }
 #else
@@ -692,12 +783,14 @@ static void start(Player *p, const char *path) {
     memset(p->loopHist, 0, sizeof(p->loopHist));
     p->loopHistSet = 0;
     p->pos = 0;
+#ifndef PORT_VITA /* (no lossless music cache on the Vita, and the song is still being read: its key would hash bytes not there yet) */
     if(p==sPlayers && !getenv("BT4_MUSIC_NO_CACHE")){
         char cached[256];bt4_music_path(cached,sizeof(cached),bt4_music_key(p->file,p->size));
         p->lossless=PortPcm_Open(cached,p->channels,p->rate,p->total);
         p->losslessPos=0;
         if(p->lossless&&getenv("BT3_SND_VERBOSE"))fprintf(stderr,"bt4: lossless music %s (%u Hz, %u channels, unity gain)\n",cached,p->rate,p->channels);
     }
+#endif
     spec.format = SDL_AUDIO_S16;
     spec.channels = 2;
     spec.freq = (int)p->rate;

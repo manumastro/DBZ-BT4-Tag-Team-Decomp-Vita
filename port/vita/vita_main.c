@@ -633,6 +633,10 @@ void Vita_VBlank(unsigned vblanks) {
                 }
                 fflush(stdout);
                 fflush(stderr);
+                {
+                    extern void Vita_PgoDump(const char *why);
+                    Vita_PgoDump("the sweep starts the program again");
+                }
                 r = sceAppMgrLoadExec("app0:eboot.bin", NULL, NULL);
                 logf_("vita: sweep: starting again failed (%08x); this pairing goes on\n", (unsigned)r);
             }
@@ -1202,6 +1206,8 @@ void Vita_VBlank(unsigned vblanks) {
 /* exit(), from anywhere in the port or the game: keep the screen until it has been read. */
 void __wrap_exit(int code) {
     if (!sEnded) {
+        extern void Vita_PgoDump(const char *why);
+        Vita_PgoDump("exit");
         sEnded = 1;
         fflush(stdout);
         fflush(stderr);
@@ -1338,12 +1344,15 @@ static void read_settings(void) {
 #ifdef PORT_VITA_RELEASE
         /* the released program: only the player's settings. The test runs leave theirs in the same file
            (mode=demo, film=...): a game started from its bubble goes to its title screen, not into a test fight */
-        if (strcmp(line, "disc") != 0 && strcmp(line, "heap") != 0 && strcmp(line, "wide") != 0 && strcmp(line, "report") != 0) {
+        if (strcmp(line, "disc") != 0 && strcmp(line, "heap") != 0 && strcmp(line, "wide") != 0 && strcmp(line, "report") != 0 &&
+            strcmp(line, "fightres") != 0) {
             continue;
         }
 #endif
         if (strcmp(line, "disc") == 0) {
             snprintf(gVitaDisc, sizeof(gVitaDisc), "%s", eq);
+        } else if (strcmp(line, "discdir") == 0) { /* (the test runs, whose settings cannot hold a path) disc=<home>/<name> */
+            snprintf(gVitaDisc, sizeof(gVitaDisc), HOME "/%s", eq);
         } else if (strcmp(line, "float") == 0) {
             sFloatChoice = strcmp(eq, "fast") == 0;
         } else if (strcmp(line, "heap") == 0) {
@@ -1359,6 +1368,18 @@ static void read_settings(void) {
         } else if (strcmp(line, "sweep") == 0) {
             sSweepSec = atoi(eq);
             sweepSet = 1;
+        } else if (strcmp(line, "texearly") == 0) { /* 0: a new texture waits for the render thread before its pixels are read (vita_vgl.c) */
+            extern int gVitaTexEarly;
+            gVitaTexEarly = atoi(eq);
+        } else if (strcmp(line, "fxhalf") == 0) { /* 0: the full-screen passes in full precision (vita_vgl.c) */
+            extern int gVitaFxHalf;
+            gVitaFxHalf = atoi(eq) != 0;
+        } else if (strcmp(line, "shbank") == 0) { /* 1: the run's shaders written to ux0:data/bt3/shbank.bin, the bank's making (vita_vgl.c) */
+            extern int gVitaShHarvest;
+            gVitaShHarvest = atoi(eq); /* (2: the bank checked, each program not in it said in the log) */
+        } else if (strcmp(line, "fightres") == 0) { /* the fights drawn at 640 x 368 (default), 720 x 408 or 960 x 544 (vita_vgl.c) */
+            extern int gVitaFightW;
+            gVitaFightW = atoi(eq);
         } else if (strcmp(line, "wide") == 0) {
             extern int gVitaWide;
             gVitaWide = atoi(eq) != 0; /* wide=0: the console's 4:3 picture with bars at the sides */
@@ -1519,13 +1540,19 @@ static void read_settings(void) {
             extern int gVitaDump;
             gVitaDump = atoi(eq);
         } else if (strcmp(line, "demostage") == 0 || strcmp(line, "demochara1") == 0 || strcmp(line, "demochara2") == 0 ||
-                   strcmp(line, "demoduel") == 0 || strcmp(line, "demoxform") == 0) { /* the test fight: stage, fighters, a duel with intros */
+                   strcmp(line, "demoduel") == 0 || strcmp(line, "demoxform") == 0 || strcmp(line, "demosplit") == 0) {
+            /* the test fight: stage, fighters, a duel with intros, the screen split for two players (a second
+               controller that nobody holds: the game wants one there) */
             char env[32];
             snprintf(env, sizeof(env), "BT3_DEMO_%s", line + 4);
             for (char *c = env; *c; c++) {
                 *c = (char)toupper((unsigned char)*c);
             }
             setenv(env, eq, 1);
+            if (strcmp(line, "demosplit") == 0) {
+                extern int gVitaPad2Fake;
+                gVitaPad2Fake = atoi(eq) != 0;
+            }
         } else if (strcmp(line, "soak") == 0) { /* battle after battle, never the end (port/src/headless.c Port_SoakNext) */
             if (atoi(eq) != 0) {
                 setenv("BT3_SOAK", "1", 1);
@@ -1618,6 +1645,23 @@ static void read_settings(void) {
             gVitaDpBank = atoi(eq) != 0;
         } else if (strcmp(line, "soakduel") == 0) { /* 1: the soak's battles all duels (the same work on every stage) */
             setenv("BT3_SOAK_DUEL", eq, 1);
+        } else if (strcmp(line, "pgoname") == 0) { /* (a BT3_PGO=gen build) its counts in pgo/<name>.pgo (vita_pgo.c) */
+            extern char gVitaPgoName[32];
+            int k;
+            for (k = 0; eq[k] != '\0' && k < 31; k++) { /* (letters, digits, '-' and '_' only: a file name) */
+                char c = eq[k];
+                gVitaPgoName[k] = (char)((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' ? c : '_');
+            }
+            gVitaPgoName[k] = '\0';
+        } else if (strcmp(line, "pgodump") == 0) { /* (a BT3_PGO=gen build) its counts written every <seconds> */
+            extern int gVitaPgoEvery;
+            gVitaPgoEvery = atoi(eq);
+        } else if (strcmp(line, "asyncread") == 0) { /* 0: reads on the caller's thread (vita_read.c) */
+            extern int gVitaAsyncRead;
+            gVitaAsyncRead = atoi(eq) != 0;
+        } else if (strcmp(line, "vufquick") == 0) { /* the vector stand-ins' check: 1 short, 0 full (port_vufast.c) */
+            extern int gVitaVufQuick;
+            gVitaVufQuick = atoi(eq) != 0;
         } else if (strcmp(line, "startmode") == 0) { /* the menus start on this screen (62 the options) */
             extern int gVitaStartMode;
             gVitaStartMode = atoi(eq);
@@ -1780,6 +1824,26 @@ static int watchdog_thread(SceSize args, void *argp) {
     (void)argp;
     for (;;) {
         sceKernelDelayThread(500000);
+        {   /* a line a minute for bug reports, in the released program too: the picture rate and the memory in use */
+            static unsigned ticks, drawn0, minutes;
+            extern unsigned gVitaGsDrawn;
+            extern int gVitaInMenus;
+            if (++ticks % 120 == 0 && sLogThreaded) {
+                struct mallinfo mi = mallinfo();
+                unsigned d = gVitaGsDrawn - drawn0;
+                drawn0 = gVitaGsDrawn;
+                minutes++;
+                char tables[200];
+                extern int Vita_VglTables(char *out, int size);
+                Vita_VglTables(tables, sizeof(tables));
+                logf_("vita: minute %u: %u.%u pictures/s, in the %s; heap %u KB; %s\n", minutes, d / 60, (d % 60) * 10 / 60,
+                      gVitaInMenus ? "menus" : "fights", (unsigned)mi.uordblks >> 10, tables);
+            }
+        }
+        {   /* (a BT3_PGO=gen build: its counts so far now and then, vita_pgo.c) */
+            extern void Vita_PgoTick(void);
+            Vita_PgoTick();
+        }
         if (gGsFrame != last) {
             last = gGsFrame;
             still = 0;
@@ -1911,6 +1975,10 @@ int __wrap_main(int argc, char **argv) {
     setenv("BT3_TRACE", "600", 1); /* the fight's state every 600 blanks into out.txt: comparable with a PC run */
 #endif
     read_settings();
+    {   /* (a BT3_PGO=gen build: where its counts go, vita_pgo.c) */
+        extern void Vita_PgoInit(void);
+        Vita_PgoInit();
+    }
     start_screen();
 #ifndef PORT_VITA_RELEASE /* (the released program shows nothing until the game's first picture; an error still shows) */
     psvDebugScreenPrintf("Reading the game's data tables from %s ...\n", gVitaDisc);
