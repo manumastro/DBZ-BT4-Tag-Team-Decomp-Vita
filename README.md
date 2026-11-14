@@ -4,7 +4,7 @@ A native PS Vita port of **Budokai Tenkaichi 4** (Team BT4's B14 Rev2 of Dragon 
 based on NauTaro's [DBZ-BT4-Tag-Team-Decomp](https://github.com/NauTaro/DBZ-BT4-Tag-Team-Decomp) (BT4decomp, built
 on z3xox's [Tenkaichi3Decomp](https://github.com/z3xox/Tenkaichi3Decomp)) and on arielxflores's
 [Tenkaichi3Decomp-Vita](https://github.com/arielxflores/Tenkaichi3Decomp-Vita), the BT3 port for the Vita, through
-[our fork of it](https://github.com/manumastro/Tenkaichi3Decomp-Vita) (its `optimized` branch: the same speed-ups in
+[my fork of it](https://github.com/manumastro/Tenkaichi3Decomp-Vita) (its `optimized` branch: the same speed-ups in
 both). The game's own code is compiled for the Vita, with the renderer for the Vita's GPU (vitaGL), the sound, touch
 and controls of the BT3 Vita port and all of its speed-ups. It is not an emulator.
 
@@ -80,7 +80,7 @@ Steps:
 3. Start **Dragon Ball Z: BT4** from the LiveArea.
 
 It installs beside the BT3 port: the two keep their files apart (`ux0:data/bt3/` and `ux0:data/bt4/`). For BT3 with
-the same speed-ups as this port, see our BT3 fork's releases:
+the same speed-ups as this port, see my BT3 fork's releases:
 [Tenkaichi3Decomp-Vita (optimized)](https://github.com/manumastro/Tenkaichi3Decomp-Vita/releases).
 
 ## Game files
@@ -209,7 +209,7 @@ PC version, use [upstream](https://github.com/NauTaro/DBZ-BT4-Tag-Team-Decomp).
   decompilation it uses
 - [arielxflores](https://github.com/arielxflores) for [Tenkaichi3Decomp-Vita](https://github.com/arielxflores/Tenkaichi3Decomp-Vita),
   the BT3 port for the Vita this one is built on, and its contributors
-- [manumastro/Tenkaichi3Decomp-Vita](https://github.com/manumastro/Tenkaichi3Decomp-Vita), our fork of it, where this port's
+- [manumastro/Tenkaichi3Decomp-Vita](https://github.com/manumastro/Tenkaichi3Decomp-Vita), my fork of it, where this port's
   renderer work is made first and from which it is merged here
 - Spike, the developer of Dragon Ball Z: Budokai Tenkaichi 3
 - [Rinnegatamante](https://github.com/Rinnegatamante) for vitaGL and vitaShaRK, and [bythos14](https://github.com/bythos14)
