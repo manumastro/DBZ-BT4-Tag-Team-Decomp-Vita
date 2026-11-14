@@ -13,6 +13,33 @@ card, see [Game files](#game-files).
 This is an unofficial port. It is not affiliated with BT4decomp, Team BT4, Tenkaichi3Decomp or the BT3 Vita port;
 please report problems with the Vita version here, not upstream.
 
+<p align="center">
+  <img src="docs/screenshots/title.jpg" width="49%">
+  <img src="docs/screenshots/select.jpg" width="49%">
+  <img src="docs/screenshots/fight1.jpg" width="49%">
+  <img src="docs/screenshots/fight2.jpg" width="49%">
+</p>
+
+## What BT4 has that the BT3 port does not
+
+This runs BT4's own executable (`SLUS_219.78`), not a mod of BT3's data on the BT3 port, so everything Team BT4 added
+to the game is there as its code has it:
+
+- **BT4's roster**: the Dragon Ball Super characters, among them Goku Black (Super Saiyan Rosé), Goku with Ultra
+  Instinct, Hit and Cabba, beside the characters of BT3.
+- **Outfit Select**: several outfits for a character, shown with their number and name ("1/4", "Battle Damaged"); the
+  PC version draws this caption with its own text renderer, which the Vita does not have, so here it is written in
+  the game's own letters.
+- **BT4's stages**, 35 of them, the Dragon Ball Super ones included. Those are bigger than BT3's: on the BT3 port's
+  renderer they overflowed a table and went down to 5-6 fps; here every stage averages 28.8 to 29.5 fps.
+- **BT4's menus, title screen and opening film**, and its own music.
+- Its own LiveArea, title (BTFV00010) and save folder, so it installs beside the BT3 port.
+
+<p align="center">
+  <img src="docs/screenshots/menu.jpg" width="49%">
+  <img src="docs/screenshots/livearea.jpg" width="49%">
+</p>
+
 ## What works
 
 - The game from its opening film through the menus to the fights, saving and loading included: BT4's modes, roster
@@ -34,16 +61,6 @@ CapUnlocker (a survey of a duel on each, 2026-11-13); moments of heavy effects d
   language: the game is in English.
 
 What changed in each version: [CHANGELOG.md](CHANGELOG.md).
-
-## Screenshots
-
-Taken on a PS Vita 1000 with the release build.
-
-| | |
-|---|---|
-| ![Title screen](docs/screenshots/title.jpg) | ![Dragon History menu](docs/screenshots/menu.jpg) |
-| ![A fight on the arena](docs/screenshots/fight1.jpg) | ![A fight over the sea](docs/screenshots/fight2.jpg) |
-| ![A fight in the city](docs/screenshots/fight3.jpg) | |
 
 ## Installation
 
@@ -203,5 +220,5 @@ Tenkaichi3Decomp's port code; the earlier port code that came under the MIT lice
 [LICENSE-MIT](LICENSE-MIT). `port/vita/vitagl/vitagl.patch` modifies vitaGL and is under vitaGL's license (LGPL-3.0).
 
 The game's code in `src/` and `include/` comes from the decompilation: it belongs to the game's rights holders. This
-project is not affiliated with or endorsed by them, and distributes none of the game's data. The LiveArea images and the screenshots show the game itself and belong to its rights holders. You need your own legally
+project is not affiliated with or endorsed by them, and distributes none of the game's data. The LiveArea images and the screenshots (taken on a PS Vita 1000 with the release build) show the game itself and belong to its rights holders. You need your own legally
 obtained copy of the game to use it.
