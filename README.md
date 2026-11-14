@@ -41,6 +41,15 @@ to the game is there as its code has it:
   <img src="docs/screenshots/livearea.jpg" width="49%">
 </p>
 
+The Spanish release (Team BT4's Spanish B14 Rev2), read from its `.iso` by the same app:
+
+<p align="center">
+  <img src="docs/screenshots/es_title.jpg" width="49%">
+  <img src="docs/screenshots/es_menu.jpg" width="49%">
+  <img src="docs/screenshots/es_duel.jpg" width="49%">
+  <img src="docs/screenshots/es_select.jpg" width="49%">
+</p>
+
 ## What works
 
 - The game from its opening film through the menus to the fights, saving and loading included: BT4's modes, roster
@@ -96,8 +105,17 @@ release, players say, has the anime's soundtrack). The English one, which this p
 | MD5 | `27a84d51cbc44252c3aa4e50b604621d` |
 | SHA-1 | `7505d8c3494d0889c8d5d3f493c9f920a9f34d64` |
 
-The Spanish release's image (Team BT4's `NTSC SPANISH`) is used the same way; it has not been tested on a Vita by
-this port yet, so reports are welcome ([issues](https://github.com/manumastro/DBZ-BT4-Tag-Team-Decomp-Vita/issues)).
+The Spanish release's image (Team BT4's `NTSC SPANISH`) is used the same way. It has been run on a Vita 1000 from
+its `.iso`, through the menus to the character select (the screenshots above); fights in it have not been played
+through yet, so reports are welcome ([issues](https://github.com/manumastro/DBZ-BT4-Tag-Team-Decomp-Vita/issues)).
+
+| | |
+|---|---|
+| File | `SLUS_219.78.DBZBT4B14REV2.iso` |
+| Size | 5,396,742,144 bytes |
+| MD5 | `4c7fb6375b79fe58e254db9891925f2e` |
+| SHA-1 | `4f44af3a1cf41625955a4b4140ea6918e454bd1c` |
+
 Other builds of BT4 (Beta X, earlier betas) and the original BT3 disc are not supported. Copy the image
 as it is to `ux0:data/bt4/` with VitaShell (USB or FTP), under any name ending in `.iso`:
 
