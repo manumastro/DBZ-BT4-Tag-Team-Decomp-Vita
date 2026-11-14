@@ -2,6 +2,11 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## v1.2.1 (2026-11-14)
+
+- The `.iso` is also found one folder down in `ux0:data/bt4/`, as an archive unpacks it: Team BT4's own archive
+  holds the image in `PS2_NTSC/`, so it can be unpacked into `ux0:data/bt4/` as it is.
+
 ## v1.2 (2026-11-14)
 
 - **Unlock All**: SELECT held while the game starts shows a screen that gives the save everything (every character

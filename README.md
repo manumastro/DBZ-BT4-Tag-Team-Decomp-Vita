@@ -123,6 +123,9 @@ as it is to `ux0:data/bt4/` with VitaShell (USB or FTP), under any name ending i
 ux0:data/bt4/SLUS_219.78.DBZBT4B14REV2ENG.iso
 ```
 
+A folder one level down works too, as an archive unpacks it: Team BT4's own archive holds the image in `PS2_NTSC/`, so
+unpacking it into `ux0:data/bt4/` as it is (`ux0:data/bt4/PS2_NTSC/SLUS_219.78.DBZBT4B14REV2.iso`) is enough.
+
 The image is also found where the BT3 Vita port keeps it (`ux0:data/bt3/bt4/`, its Spanish one in
 `ux0:data/bt3/bt4/es/`), in `ux0:bt4/` and in `ux0:bt3/bt4/`, unpacked or as the `.iso`: one copy serves both apps.
 The image is about 6 GB, more than one file can be on a memory card formatted as FAT32 (common with SD2Vita): on
