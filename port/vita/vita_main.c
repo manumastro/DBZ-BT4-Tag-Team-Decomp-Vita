@@ -52,6 +52,8 @@ static FILE *sLog;
 static int sHeapCdram, sFloatChoice = -1; /* -1: ask */
 static unsigned long long sStart, sBattleStart, sLastDraw;
 static int sTagMenu = 1; /* bt3.txt tagteam=0: no Tag Team entry in the main menu (Vita_TagMenu, below) */
+unsigned gVitaChainMax; /* gs_core.c run_chain: the longest chain of a list since the last report */
+int gVitaAudioCore = 1, gVitaVjCore; /* bt3.txt audiocore, vjcore (vita_audio.c, vita_vgl.c) */
 static int gVitaHangDump; /* bt3.txt hangdump=<s> (development build): a crash dump after that long without a picture */
 static int gVitaExitAfter; /* bt3.txt exitafter=<s> (development build): the program ends itself after that many seconds */
 static unsigned sBattleStartVb, sLastVb, sLastState = 0xFFFFFFFFu;
@@ -347,7 +349,19 @@ static unsigned wait_buttons(unsigned mask) {
     }
 }
 
+/* Leaving: the drawing and render threads stopped first where they touch nothing of the graphics chip's (gs_core.c
+   gr_thread, vita_vgl.c rt_thread). The process ended while the render thread was inside SceGxm, which faulted as its
+   memory went: a crash dump at every exitafter, and at START + SELECT. */
+volatile int gVitaQuitting, gVitaParked;
 static void quit(void) {
+    {
+        int k;
+        gVitaQuitting = 1;
+        __sync_synchronize();
+        for (k = 0; k < 40 && (gVitaParked & 3) != 3; k++) {
+            sceKernelDelayThread(5000);
+        }
+    }
     log_sync();
     if (sLog != NULL) {
         fflush(sLog);
@@ -739,6 +753,8 @@ void Vita_VBlank(unsigned vblanks) {
                                 vgl_bt3_gxm_skipped[0] = vgl_bt3_gxm_skipped[1] = 0;
                                 { extern int gVitaUpProf; extern unsigned gVitaUpCat[8][2], gVitaKeyProf[2]; if (gVitaUpProf) { logf_("vita:   uploads by the way they went (count / us): small same %u/%u, small written %u/%u, large same %u/%u, large by the block %u/%u, large not by the block %u/%u, left out %u/%u, film %u/%u, other %u/%u | texture lookups %u/%u\n", gVitaUpCat[0][0], gVitaUpCat[0][1], gVitaUpCat[1][0], gVitaUpCat[1][1], gVitaUpCat[2][0], gVitaUpCat[2][1], gVitaUpCat[3][0], gVitaUpCat[3][1], gVitaUpCat[4][0], gVitaUpCat[4][1], gVitaUpCat[5][0], gVitaUpCat[5][1], gVitaUpCat[6][0], gVitaUpCat[6][1], gVitaUpCat[7][0], gVitaUpCat[7][1], gVitaKeyProf[0], gVitaKeyProf[1]); memset(gVitaUpCat, 0, sizeof(gVitaUpCat)); memset(gVitaKeyProf, 0, sizeof(gVitaKeyProf)); } }
                                 { extern unsigned gVitaDest[7]; if (gVitaDest[0] | gVitaDest[2] | gVitaDest[3]) { logf_("vita:   uploads' destinations (updest): %u uploads found the same there, rectangles' numbers %u kept, %u worked out; texture keys %u from a destination, %u checked, %u wrong; %u destinations found changed\n", gVitaDest[0], gVitaDest[1], gVitaDest[2], gVitaDest[3], gVitaDest[4], gVitaDest[5], gVitaDest[6]); memset(gVitaDest, 0, sizeof(gVitaDest)); } }
+                                { extern unsigned gVitaChainMax; logf_("vita:   longest DMA chain of a list: %u tags\n", gVitaChainMax); gVitaChainMax = 0; }
+                                { extern unsigned gVitaTexSweep[3], gVitaPalExactN[1]; if (gVitaTexSweep[0] | gVitaPalExactN[0]) { logf_("vita:   texture table full: %u sweeps, %u let go not used for a second, %u not used in this frame; %u palettes known by their colours (palexact)\n", gVitaTexSweep[0], gVitaTexSweep[1], gVitaTexSweep[2], gVitaPalExactN[0]); memset(gVitaTexSweep, 0, sizeof(gVitaTexSweep)); gVitaPalExactN[0] = 0; } }
                                 { extern unsigned gVitaBind[8]; if (gVitaBind[0] | gVitaBind[1] | gVitaBind[6] | gVitaBind[7]) { logf_("vita:   textures bound by their names (texbind): %u found by the names, %u bindings made, %u checked, %u wrong (%u of them other contents); %u destinations unbound by another's write, %u lookups in no destination, %u bindings found lost\n", gVitaBind[0], gVitaBind[1], gVitaBind[2], gVitaBind[3], gVitaBind[4], gVitaBind[5], gVitaBind[6], gVitaBind[7]); memset(gVitaBind, 0, sizeof(gVitaBind)); } }
                                 { extern unsigned gVitaEsDirectN[2]; if (gVitaEsDirectN[0]) { logf_("vita:   the seam's call packets the direct way (esdirect): %u\n", gVitaEsDirectN[0]); memset(gVitaEsDirectN, 0, sizeof(gVitaEsDirectN)); } }
                                 { extern unsigned gVitaSeaVtxN[4]; if (gVitaSeaVtxN[0] | gVitaSeaVtxN[3]) { logf_("vita:   the surfaces' corners once (seavtx): %u triangles from them, %u corners worked out, %u found worked out, %u meshes numbered\n", gVitaSeaVtxN[0], gVitaSeaVtxN[1], gVitaSeaVtxN[2], gVitaSeaVtxN[3]); memset(gVitaSeaVtxN, 0, sizeof(gVitaSeaVtxN)); } }
@@ -1701,6 +1717,19 @@ static void read_settings(void) {
         } else if (strcmp(line, "esdirect") == 0) { /* the seam's call packets of the models' parts done as what they are (their constants into VU memory, the program's registers) instead of read code by code: 0 off (default), 1 on, 2 in the soak's B battles (gs_core.c es_direct) */
             extern int gVitaEsDirect;
             gVitaEsDirect = atoi(eq);
+        } else if (strcmp(line, "audiocore") == 0) { /* the sound thread: 0 on the game's core, 1 on the list reader's (default; vita_audio.c) */
+            extern int gVitaAudioCore;
+            gVitaAudioCore = atoi(eq);
+        } else if (strcmp(line, "vjcore") == 0) { /* the strip thread: 0 where the system puts it (default), 1 on the fourth core (vita_vgl.c) */
+            extern int gVitaVjCore;
+            gVitaVjCore = atoi(eq);
+        } else if (strcmp(line, "palexact") == 0) { /* a palette's identity from its colours, not its GS memory blocks' numbers: 0 off, 1 on (default), 2 in the soak's B battles (vita_vgl.c clut_id) */
+            extern int gVitaPalExact;
+            gVitaPalExact = atoi(eq);
+        } else if (strcmp(line, "maxtex") == 0) { /* the texture table's room, 64..768 (768 by default; vita_vgl.c MAX_TEX) */
+            extern int gVitaMaxTex;
+            int n = atoi(eq);
+            gVitaMaxTex = n < 64 ? 64 : n > 768 ? 768 : n;
         } else if (strcmp(line, "texbind") == 0) { /* native textures, step 3: textures bound by the names of what their destinations hold, a destination unbound at another's write: 0 off, 1 on (default), 2 in the soak's B battles (gs_core.c Gs_TexNames, vita_vgl.c texture_get_k) */
             extern int gVitaTexBind;
             gVitaTexBind = atoi(eq);

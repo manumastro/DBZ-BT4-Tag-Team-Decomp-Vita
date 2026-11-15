@@ -82,6 +82,34 @@ Tag Team runs at 100% on the Vita (`Port_TagRenderActive` 0 there); 114% matters
   online mode's description under it; the results' third choice still reads "Tenkaichi Budokai Online"; the HUD's
   and the selection's words are not drawn (TrueType); 3 vs 3 and up not run; a whole match played by hand.
 
+## Speed-ups for 2 vs 2 (2026-11-15)
+
+Where the time went (the same 2 vs 2 fight against 1 vs 1, per 2 s): the drawing thread (core 2) was full (idle 99
+ms against 189; the average drawn list 40 ms against 33.7), and so was the game's core (game thread and sound, 95%).
+Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_TAG_ACTOR_TEST=4`, stage 4, about
+3.5 minutes each; the fights differ from run to run, the CPUs' choices are random):
+
+| Run | Settings | Speed | 2 s samples under 90% | Pictures a second |
+|---|---|---|---|---|
+| A | all off | 94.3% | 22 of 95 | 25.0 |
+| B | palexact, maxtex=768, audiocore=1, vjcore=1, flname=1 | 96.3% | 11 of 95 | 23.9 |
+| C | B without vjcore | 98.0% | 3 of 96 | 24.8 |
+| E | palexact, maxtex=768, audiocore=1 (4.5 minutes) | 96.2% | 14 of 124 | 24.2 |
+
+- `palexact` (on by default now): the textures made every 2 s went from 180 to 95; the stadium's materials looked
+  right in the pictures.
+- `audiocore=1` (on by default now): the sound thread on the list reader's core; the game's thread got its core.
+- `maxtex=768` (now the default): the table was not full in these runs; room for 3 vs 3 and up.
+- Left out: `vjcore` (the strip thread on the fourth core: interrupted there, its work fell back on the drawing
+  thread; worse), and a quick way kept across GS memory changes by the textures' names (it never applied: the quick
+  way ends for other reasons; removed).
+- Found on the way: the program faulted inside SceGxm at every exit (the render thread still at work as the process
+  ended: `exitafter`, and START + SELECT): the drawing and render threads now stop first (`quit`); no crash dump in run
+  E. One hang in run D (the list reader in the VU1 interpreter for 10 s, inside a DMA chain; a chain is about 4,300
+  tags at most): the chain's limit on the Vita is now 20,000 tags, and one that reaches it is logged.
+- Next, larger: the kept parts' uniform blocks worked out on the render thread; textures made through the render
+  thread's ring without waiting for it; the GIF packets decoded ahead by the list reader (studied, not done).
+
 ## Tools made for it
 
 - `BT4_*` lines of `bt3.txt` go to the game's environment in the development build (`read_settings`).

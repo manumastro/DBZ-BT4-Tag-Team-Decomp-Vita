@@ -129,7 +129,11 @@ SDL_AudioDeviceID SDL_OpenAudioDevice(SDL_AudioDeviceID id, const SDL_AudioSpec 
     {   /* on the fourth core when the system lets it (vita_main.c), else the first */
         extern SceUID Vita_ThreadOnCore3(const char *name, SceKernelThreadEntry entry, int prio, int stack, int fallbackMask);
         (void)Vita_ThreadOnCore3; /* (back on the first core; on the fourth it stopped with the system's shell) */
-        sThread = sceKernelCreateThread("bt3_audio", audio_thread, 100, 0x40000, 0, 0x00010000, NULL);
+        /* bt3.txt audiocore=1 (default): on the list reader's core, not the game's (in Tag Team the game's core was
+           full: the game's thread and the sound took 95% of it, against about 50% for the list reader's; audiocore=0
+           puts it back) */
+        extern int gVitaAudioCore;
+        sThread = sceKernelCreateThread("bt3_audio", audio_thread, 100, 0x40000, 0, gVitaAudioCore == 1 ? 0x00020000 : 0x00010000, NULL);
     }
     /* above the game's thread (160): a late block is heard.
         On the first core, the game's: the drawing thread's core is the one that is short of time now (test

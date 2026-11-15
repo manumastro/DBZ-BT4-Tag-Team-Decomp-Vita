@@ -104,8 +104,11 @@ static inline float fx_px(void) {
     return gPortMenuMode && SCR_W == SCR_W_MENU && gVitaMenuHi ? 1.0f : (float)SCR_W / (float)SCR_W_BASE;
 }
 #define MAX_VERTS 45000
-#define MAX_TEX 384
-#define TEX_BUCKETS 1024
+/* the texture table's room: bt3.txt maxtex=<n> (768 by default, at most MAX_TEX_CAP; was 384; vita_main.c read_settings) */
+#define MAX_TEX_CAP 768
+int gVitaMaxTex = 768;
+#define MAX_TEX gVitaMaxTex
+#define TEX_BUCKETS 2048
 
 /* 32 bytes: the vertices of a fight's picture are 1.3 MB written and copied once more for the chip, and on this
    machine the memory traffic is what that costs. The colour as the GS has it (0x80 = 1; the shader scales). */
@@ -187,7 +190,7 @@ static State sCur;
 static int sMovieDirty;
 static void movie_fill(void);
 static int sHaveState;
-static Tex sTex[MAX_TEX];
+static Tex sTex[MAX_TEX_CAP];
 static int sTexCount;
 static uint16_t sTexBucket[TEX_BUCKETS];
 static Tex *sLast;
@@ -1761,7 +1764,13 @@ int GsGpu_Init(void) {
     }
     if (gVglVuReady && !(gVglSafe & 512)) { /* the strips' vertices on a thread of their own, read where they lie in the list */
         extern int gVitaLazyUnpack;
-        SceUID th = sceKernelCreateThread("bt3_strips", vj_thread, 0x10000100, 0x10000, 0, 0, NULL);
+        /* bt3.txt vjcore=1: on the fourth core (when the system lets it), below the render thread; else where the
+           system puts it (no core of its own) */
+        extern int gVitaVjCore;
+        extern SceUID Vita_ThreadOnCore3(const char *name, SceKernelThreadEntry entry, int prio, int stack, int fallbackMask);
+        SceUID th = gVitaVjCore == 1 ? Vita_ThreadOnCore3("bt3_strips", vj_thread, 96, 0x10000, 0)
+                                     : sceKernelCreateThread("bt3_strips", vj_thread, 0x10000100, 0x10000, 0, 0, NULL);
+        { extern void Vita_WatchThread(int slot, int id, const char *name); Vita_WatchThread(7, th, "strips"); }
         if (th >= 0 && sceKernelStartThread(th, 0, NULL) >= 0) {
             sVjOn = 1;
         }
@@ -1980,6 +1989,30 @@ static int idx_get(uint64_t key, uint32_t gen, uint32_t tbp, uint32_t tbw, uint3
     gVitaPal[0]++;
     return freeK;
 }
+/* the table full, for the report: sweeps, textures let go in the first pass (not used for a second) and the second
+   (not used in this frame) */
+unsigned gVitaTexSweep[3];
+/* bt3.txt palexact: a palette's identity from its own colours (the 16 or 256 entries read from GS memory), not from
+   the number of the GS memory blocks it lies in. A 16-colour palette (8 x 2) fills two rows of its 8 x 8 block, and
+   the block's number covers the other six too, left there by whatever 256-colour palette was written before: the same
+   colours came out as a new palette, and its texture was made again (the stage's materials at 0x2a00 / 0x32c0,
+   2 vs 2: 182 palettes made every 2 s against 41 in 1 vs 1). 0 off, 1 on (default), 2 in the soak's B battles. */
+int gVitaPalExact = 1;
+unsigned gVitaPalExactN[1]; /* palettes' identities worked out from their colours */
+static int palexact_on(void) {
+    extern int gVitaAbSide;
+    return gVitaPalExact == 2 ? gVitaAbSide == 1 : gVitaPalExact != 0;
+}
+static uint32_t clut_id(uint32_t cbp, uint32_t cpsm, uint32_t bits) {
+    uint32_t raw[256], h = 2166136261u, i, w = bits == 8 ? 16 : 8, hgt = bits == 8 ? 16 : 2;
+    Gs_VramReadRect(cbp, 1, cpsm, w, hgt, raw);
+    for (i = 0; i < w * hgt; i++) {
+        h = (h ^ raw[i]) * 16777619u;
+    }
+    gVitaPalExactN[0]++;
+    return h ^ cpsm << 24;
+}
+
 static int pal_get(uint64_t key, uint64_t texa, uint32_t gen, uint32_t cbp, uint32_t cpsm, uint32_t tcc, uint32_t bits) {
     int k, freeK = -1;
     uint32_t i, n = bits == 8 ? 256 : 16, *d;
@@ -2253,7 +2286,9 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
         if (bits <= 8) {
             extern int Gs_DestRect(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t w, uint32_t h, uint32_t *rect);
             uint32_t cr;
-            if (!Gs_DestRect(cbp, 1, cpsm, bits == 8 ? 16 : 8, bits == 8 ? 16 : 2, &cr)) {
+            if (palexact_on()) {
+                cr = clut_id(cbp, cpsm, bits);
+            } else if (!Gs_DestRect(cbp, 1, cpsm, bits == 8 ? 16 : 8, bits == 8 ? 16 : 2, &cr)) {
                 cr = Gs_RectId(cbp, 1, cpsm, 0, 0, bits == 8 ? 16 : 8, bits == 8 ? 16 : 2);
             }
             gen = (gen ^ cr) * 16777619u + cbp;
@@ -2310,9 +2345,11 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
                     sTex[n++] = sTex[k];
                 } else {
                     tex_free(&sTex[k]);
+                    gVitaTexSweep[1 + pass]++;
                 }
             }
             sTexCount = n;
+            gVitaTexSweep[0]++;
         }
         rebuild_buckets();
         sStCacheGen++; /* (states kept from pictures before refer to the table's places) */
@@ -2336,7 +2373,7 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
     if (bits <= 8 && sPalOn) {
         uint32_t n = bits == 8 ? 256 : 16;
         unsigned long long ta = sceKernelGetProcessTimeWide(), tb, tc, td, tr0 = gVitaTexReadUs;
-        uint32_t gi = Gs_RectId(tbp, tbw, psm, 0, 0, tw, th), gc = Gs_RectId(cbp, 1, cpsm, 0, 0, bits == 8 ? 16 : 8, bits == 8 ? 16 : 2);
+        uint32_t gi = Gs_RectId(tbp, tbw, psm, 0, 0, tw, th), gc = palexact_on() ? clut_id(cbp, cpsm, bits) : Gs_RectId(cbp, 1, cpsm, 0, 0, bits == 8 ? 16 : 8, bits == 8 ? 16 : 2);
         int pi, pp;
         tb = sceKernelGetProcessTimeWide();
         pi = idx_get(t0 & ((1ull << 34) - 1), gi, tbp, tbw, psm, tw, th, n, px);
@@ -2985,6 +3022,15 @@ static int rt_thread(SceSize args, void *argp) {
     (void)argp;
     for (;;) {
         uint32_t t = sRtTail;
+        {   /* the program leaving (vita_main.c quit): nothing more given to the chip */
+            extern volatile int gVitaQuitting, gVitaParked;
+            if (gVitaQuitting) {
+                gVitaParked |= 2;
+                for (;;) {
+                    sceKernelDelayThread(1000000);
+                }
+            }
+        }
         if (t == sRtHead) {
             if (gVitaRtCore == 3) { /* (a core of its own: a moment's look before sleeping; nothing longer, the system's work is there too) */
                 int k;
@@ -5216,7 +5262,7 @@ void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri) {
                     sFL.epoch = gGsEpoch;
                     sFL.ctx = ctx;
                     sFL.d = de;
-                    gVitaFl[1]++;
+                                gVitaFl[1]++;
                     gVitaRunEstN++;
                     flm_put(ctx, &de);
                 }

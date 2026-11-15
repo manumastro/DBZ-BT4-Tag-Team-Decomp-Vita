@@ -4542,6 +4542,17 @@ static void *gr_thread(void *arg) {
     }
     for (;;) {
         unsigned h = sGrHead;
+#ifdef PORT_VITA
+        {   /* the program leaving (vita_main.c quit): nothing more drawn */
+            extern volatile int gVitaQuitting, gVitaParked;
+            if (gVitaQuitting) {
+                gVitaParked |= 1;
+                for (;;) {
+                    sceKernelDelayThread(1000000);
+                }
+            }
+        }
+#endif
         if (h == sGrTail) {
             if (idle == 0) {
                 sGrIdleFrom = sceKernelGetProcessTimeWide();
@@ -5445,7 +5456,13 @@ static void run_chain(uint32_t tadr, int tte) {
     }
 #endif
 
+#ifdef PORT_VITA
+    /* (a chain is about 4,300 tags at most in Tag Team; one that went round for 100,000, each with its VU1 calls,
+       held the list reader more than 10 s) */
+    for (guard = 0; guard < 20000; guard++) {
+#else
     for (guard = 0; guard < 100000; guard++) {
+#endif
         const uint32_t *tag = (const uint32_t *)(uintptr_t)tadr;
         uint32_t qwc = tag[0] & 0xFFFF, id = (tag[0] >> 28) & 7, addr = tag[1]; /* a host pointer: all 32 bits */
         const uint32_t *data;
@@ -5554,6 +5571,17 @@ static void run_chain(uint32_t tadr, int tte) {
     }
 #ifdef PORT_VITA
     sCcCap = -1; /* (a call the list left without returning is not kept) */
+    {   /* for the report: the longest chain of a list; and a chain that did not end (a hang in Tag Team: the list
+           reader in the VU1 interpreter for more than 10 s) */
+        extern unsigned gVitaChainMax;
+        extern void Vita_Log(const char *fmt, ...);
+        if ((unsigned)guard > gVitaChainMax) {
+            gVitaChainMax = (unsigned)guard;
+        }
+        if (guard >= 20000) {
+            Vita_Log("gs: list %u: its DMA chain did not end after %d tags (last %08x)\n", sFrame, guard, tadr);
+        }
+    }
 #endif
     if (getenv("BT3_GS_VERBOSE") != NULL && (sFrame < 4 || sFrame % 60 == 0)) {
         fprintf(stderr, "gs: frame %u: %u DMA tags, %u VIF codes, %u DIRECT qwords, %u GIF tags, %u register writes, %u vertices, "
