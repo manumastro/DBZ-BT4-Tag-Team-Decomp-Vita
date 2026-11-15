@@ -131,9 +131,12 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   parts ~5, the picture's end ~4); it runs 0.74 instructions a cycle with 20 instruction-cache misses and 22
   mispredicted branches per 1000 instructions (the game's thread 0.50). `rtswap` (the swap and the next picture's
   clear made by the render thread) took the drawing thread's waits for it from ~80 to ~10 every 2 s but the picture
-  rate only from 26.81 to 26.98 a second: off. Next: a profile-guided build (`BT3_PGO`, already in build.py, never
-  used until now) for the instruction cache and the branches; then the GIF packets decoded ahead by the list reader
-  (which is busy only ~16 of every 33 ms).
+  rate only from 26.81 to 26.98 a second: off. A profile-guided build (`BT3_PGO`: counts from the 2 vs 2 demo fight
+  and a 1 vs 1 soak over 8 stages, 10 minutes) did not help: 26.67 -> 26.38 pictures a second, the drawing thread
+  0.74 -> 0.72 instructions a cycle, its instruction-cache misses 5.7 -> 6.2 per 1000 instructions (the thread's
+  whole-stretch figures; one block's 20 above was a heavy moment); not used. Per drawn list the drawing thread runs
+  ~12.5 million instructions in ~17 million cycles: data-cache refills ~16% of its time, instruction-cache ~10%,
+  mispredicted branches ~6%. Next: the GIF packets decoded ahead by the list reader (busy only ~16 of every 33 ms).
 
 ## Tools made for it
 

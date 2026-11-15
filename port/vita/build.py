@@ -74,6 +74,9 @@ COMMON = ["-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-w", "-DPOR
 # counts only (VitaSDK's libgcov has no value profilers, no atomic updates and no file writing): arcs, with the
 # objects' records in the section gcov_info, which vita_pgo.c walks and writes out itself
 PGO_KIND = ["-fno-profile-values", "-fno-profile-reorder-functions"]
+# objects built without their counts: vita_clib.c's code laid out by them does not assemble (a Thumb-2 literal load
+# whose offset the assembler cannot represent once its blocks are moved)
+PGO_SKIP = {"pc_vita_clib.gcda"}
 if PGO == "gen":
     COMMON += ["-fprofile-generate", "-fprofile-update=single", "-fprofile-info-section=gcov_info", "-DBT3_PGO_GEN=1"] + PGO_KIND
 elif PGO == "use":
@@ -284,7 +287,11 @@ def compile_all():
     data = data_tables()
     if PGO == "use":  # the counts next to the objects, where gcc looks for them (<object>.gcda)
         n = 0
+        for g in OBJ.glob("*.gcda"):  # (an earlier build's, which this profile may not have)
+            g.unlink()
         for g in PGO_DIR.glob("*.gcda"):
+            if g.name in PGO_SKIP:
+                continue
             shutil.copy(g, OBJ / g.name)
             n += 1
         print(f"profile counts: {n} files from {PGO_DIR}")

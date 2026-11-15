@@ -76,6 +76,10 @@ The counts belong to the source they were made from: after larger changes, make 
 changed is built without its counts, with a warning). `BT3_VITA_DEV=1` works the same way with `dev` in place of
 `rel`; a development build's counts serve the release build too.
 
+Measured on the BT4 fork's 2 vs 2 Tag Team fight (2026-11-15, counts from that fight and a 1 vs 1 soak): no gain
+(26.67 -> 26.38 pictures a second), so the releases are not built this way. `vita_clib.c` is always built without
+its counts (`PGO_SKIP` in build.py: laid out by them it does not assemble).
+
 ## vitaGL
 
 `port/vita/vitagl/build_vitagl.sh [work folder]` clones [vitaGL](https://github.com/Rinnegatamante/vitaGL), checks
