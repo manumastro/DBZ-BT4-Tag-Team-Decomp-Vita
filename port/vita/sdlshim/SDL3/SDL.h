@@ -32,7 +32,18 @@ static inline uint64_t SDL_GetTicks(void) { return sceKernelGetProcessTimeWide()
 /* (BT4decomp's fighters' sounds by distance, gs/snd_spatial.c) */
 typedef uint64_t Uint64;
 typedef int SDL_SpinLock;
-static inline void SDL_LockSpinlock(SDL_SpinLock *l) { while (__atomic_exchange_n(l, 1, __ATOMIC_ACQUIRE)) {} }
+/* Not a bare spin: the sound thread (higher priority) taking a lock the game thread holds on the same core spun for
+   ever, the game thread never running again to let it go (a hang in Tag Team, whose extra fighters' voices take it
+   more often). As SDL's own, it gives the processor away after a while. */
+#include <psp2/kernel/threadmgr.h>
+static inline void SDL_LockSpinlock(SDL_SpinLock *l) {
+    int n = 0;
+    while (__atomic_exchange_n(l, 1, __ATOMIC_ACQUIRE)) {
+        if (++n >= 100) {
+            sceKernelDelayThread(20);
+        }
+    }
+}
 static inline void SDL_UnlockSpinlock(SDL_SpinLock *l) { __atomic_store_n(l, 0, __ATOMIC_RELEASE); }
 /* (BT4decomp's recording of its own mix for tests: not on the Vita) */
 typedef void (SDLCALL *SDL_AudioPostmixCallback)(void *userdata, const SDL_AudioSpec *spec, float *buffer, int buflen);
