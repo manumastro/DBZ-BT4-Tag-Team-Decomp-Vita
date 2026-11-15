@@ -16,6 +16,29 @@ int gVitaPerfOn;
    eight) timed by the system's clock instead of the cycle counter: microseconds times 444, so that the log's
    "cycles" read the same. Coarser (a mark costs a system call) but enough to see where a list's time goes. */
 int gVitaZoneT;
+/* bt3.txt gzones=1 (the development build): the game's thread timed by part, a step at a time (Vita_GZ(n) at the
+   end of part n: src/battle/battle.c, src/sys/heap.c's Heap_TagCheck, gs_core.c around snap_make). With libperf the
+   thread's own cycle counter (its waits not counted), else the system's clock (waits counted). The report's "game
+   thread by part" line, ms a step. */
+int gVitaGZOn;
+unsigned long long gVitaGZ[40];
+unsigned gVitaGZSteps;
+static unsigned sGzLast;
+int Vita_PmonGet(int thid, unsigned int counter, unsigned int *value);
+void Vita_GZ(int z) {
+    unsigned now;
+    if (!gVitaGZOn) {
+        return;
+    }
+    Vita_PmonGet(0, 31, &now);
+    if (z == 0) {
+        gVitaGZSteps++; /* (the step's start: what came since the last mark is the end of the step before) */
+        gVitaGZ[39] += now - sGzLast;
+    } else if (z > 0 && z < 39) {
+        gVitaGZ[z] += now - sGzLast;
+    }
+    sGzLast = now;
+}
 extern unsigned long long sceKernelGetProcessTimeWide(void);
 int Vita_PmonGet(int thid, unsigned int counter, unsigned int *value) {
     if (gVitaPerfOn) {

@@ -11,6 +11,10 @@ extern int TagBattle_Active(void);
 #include "sys/game_pad.h"
 #include "menu/port_screen.h"
 #include "menu/tbo_art.h"
+#ifdef PORT_VITA
+extern void Vita_GZ(int z);
+#define VGZ(z) Vita_GZ(z)
+#endif
 
 #include "tag_team_hud.inc"
 #include "tag_team_result.inc"
@@ -241,6 +245,9 @@ s32 Battle_Update(void) {
     singleView = BtlCam_UpdateOverride();
     BtlChars_EndFrame();
     Heap_TagCheck(6);
+#ifdef PORT_VITA
+    VGZ(17); /* (cameras, end of frame) */
+#endif
     BtlObj_UpdateAll();
     if (Battle_IsSplitScreen() && !singleView) {
         for (i = 0; i < 2; i++) {
@@ -254,6 +261,9 @@ s32 Battle_Update(void) {
         BtlObj_FinishVisibility(0);
     }
     BtlScene_SetSingleView(singleView);
+#ifdef PORT_VITA
+    VGZ(18); /* (the objects and their visibility) */
+#endif
     return singleView == 0;
 }
 
@@ -265,8 +275,14 @@ s32 Battle_Draw(void) {
 
     Dbg_ProfMark(prof);
     Gfx_MarkPass(1);
+#ifdef PORT_VITA
+    VGZ(20); /* (BtlGame_Update) */
+#endif
     StgModel_Cull(view);
     StgModel_Draw(view);
+#ifdef PORT_VITA
+    VGZ(21); /* (the stage's models) */
+#endif
 #ifdef PORT
     if(getenv("BT4_RENDER_TEST")&&getenv("BT4_MAP_ART_CAPTURE")){Gfx_MarkPass(0);return 0;}
 #endif
@@ -277,7 +293,13 @@ s32 Battle_Draw(void) {
     Dbg_ProfColor(prof, 0x80FFFFFF);
     Dbg_ProfMark(prof);
     Gfx_MarkPass(2);
+#ifdef PORT_VITA
+    VGZ(22); /* (the stage's effects before) */
+#endif
     BtlObjDraw_Draw();
+#ifdef PORT_VITA
+    VGZ(23); /* (the fighters and objects) */
+#endif
     Dbg_ProfColor(prof, 0x8040FF40);
     Dbg_ProfMark(prof);
     Gfx_MarkPass(3);
@@ -287,7 +309,13 @@ s32 Battle_Draw(void) {
     Gfx_MarkPass(4);
     Gfx_AddDefaultEnv();
     BtlScene_Draw(1);
+#ifdef PORT_VITA
+    VGZ(24); /* (the scene: effects) */
+#endif
     Ot_Draw();
+#ifdef PORT_VITA
+    VGZ(25); /* (the ordering table) */
+#endif
     Dbg_ProfColor(prof, 0x804040FF);
     Dbg_ProfMark(prof);
     Gfx_MarkPass(3);
@@ -295,7 +323,13 @@ s32 Battle_Draw(void) {
     Dbg_ProfColor(prof, 0x80FFFFFF);
     Dbg_ProfMark(prof);
     Gfx_MarkPass(0);
+#ifdef PORT_VITA
+    VGZ(26); /* (the stage's effects after) */
+#endif
     BtlGame_Draw();
+#ifdef PORT_VITA
+    VGZ(27); /* (the HUD) */
+#endif
     Dbg_ProfColor(prof, 0x80FF40FF);
     Dbg_ProfMark(prof);
     Gfx_MarkPass(0);
@@ -307,6 +341,9 @@ s32 Battle_Draw(void) {
     StgFx_DrawOverlay();
     Dbg_ProfColor(prof, 0x80FFFFFF);
     Gfx_MarkPass(0);
+#ifdef PORT_VITA
+    VGZ(28); /* (text, overlays) */
+#endif
     return 0;
 }
 
@@ -377,7 +414,13 @@ void Battle_Loop(void) {
             Battle_Restart();
             Battle_GetWork()->flags &= ~BATTLE_FLAG_RESTART;
         }
+#ifdef PORT_VITA
+        VGZ(0); /* (bt3.txt gzones: a step begins) */
+#endif
         if(!TagBattle_Network())Job_Run();
+#ifdef PORT_VITA
+        VGZ(1); /* (the jobs: loading) */
+#endif
         if(TagBattle_Network()){
             s32 ready,dir;Pad_Update();
             dir=(gPad[0].gamePressed&(PADG_R1|PADG_RIGHT))?1:(gPad[0].gamePressed&(PADG_L1|PADG_LEFT))?-1:0;
@@ -397,10 +440,16 @@ void Battle_Loop(void) {
             if(!TagBattle_Network())Pad_Update();
             devPauseOwned=DevPause_Begin(DevRules_NetworkTick());
         }
+#ifdef PORT_VITA
+        VGZ(2); /* (the frame's start) */
+#endif
         if (!(Battle_GetWork()->flags & BATTLE_FLAG_PAUSE)) {
             Gsc_Update();
             BtlScript_Update();
         }
+#ifdef PORT_VITA
+        VGZ(3); /* (the scripts) */
+#endif
         BtlChars_CheckStart();
         if(!TagBattle_Network()&&!Port_NetActive())Pad_Update();
         if(TagBattle_Active()){
@@ -419,13 +468,28 @@ void Battle_Loop(void) {
             for(actor=0;actor<TagBattle_Count();++actor)
                 if(BtlCharApi_GetHp(TagBattle_Target(actor))<=0)TagBattle_CycleTarget(actor);
         }
+#ifdef PORT_VITA
+        VGZ(4); /* (pads, Tag Team's pairs) */
+#endif
         Snd_Update();
         Snd_SendFighters();
+#ifdef PORT_VITA
+        VGZ(5); /* (sound) */
+#endif
         BtlGame_PreUpdate();
         Battle_UpdateWork();
+#ifdef PORT_VITA
+        VGZ(6); /* (the game's rules, the battle's work) */
+#endif
         BtlAiMgr_Update();
+#ifdef PORT_VITA
+        VGZ(7); /* (the computer players) */
+#endif
         BtlChars_SampleInput();
         draw = Battle_Update();
+#ifdef PORT_VITA
+        VGZ(19); /* (Battle_Update's end) */
+#endif
         done = BtlGame_Update();
         if(TagBattle_Network())TagOnline_Trace();
         if (Battle_IsSplitScreen() && draw) {
@@ -435,8 +499,17 @@ void Battle_Loop(void) {
         }
         TagBattle_ResultDraw();
         DevPause_End(devPauseOwned);
+#ifdef PORT_VITA
+        VGZ(29); /* (the result's drawing) */
+#endif
         Gfx_EndFrame(2);
+#ifdef PORT_VITA
+        VGZ(30); /* (the frame's end) */
+#endif
         Dma_Flush();
+#ifdef PORT_VITA
+        VGZ(32); /* (the list handed over, after snap_make) */
+#endif
     } while (!done);
 }
 

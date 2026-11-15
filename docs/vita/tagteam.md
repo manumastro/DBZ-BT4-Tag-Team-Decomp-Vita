@@ -172,6 +172,14 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   could be saved. The large uploads' writing ("upload: written", ~134 a list, ~2.2 ms) is the pixels themselves,
   already planned (`upplan`) and written lazily. What is left on the drawing thread is a long tail of parts under
   ~1 ms each; the 2 vs 2 fight lacks ~2.5 ms a list for 30 pictures a second.
+- 2026-11-15, the 2 vs 2 demo fight on other stages (same build, 30-120 s): stage 4 98% speed, 26.5 pictures a
+  second; 24 98%, 25.8; 12 (the island with the sea) 87%, 23.9; 0 (the grassy plain) 83.5%, 21.1. Two limits: the
+  drawing thread is full on every stage (~37 ms of work a picture), and on stages 0 and 12 the game's thread too (the
+  game slows down). The game's thread by part (`gzones=1`), stage 0, ms a step: 1 vs 1 19.0 (29.2 pictures a second,
+  99.6%), 2 vs 2 31.2: the fighters' logic 3.6 -> 7.7, the scene drawn (effects) 4.1 -> 6.5, `snap_make` (the port's
+  copies of the list's pieces at the handover) 1.9 -> 2.9, the fighters drawn 1.4 -> 2.4, the scene 1.2 -> 2.3, the
+  HUD, objects and computer players 1.5 -> 3.6. Of `snap_make`'s 2.9 ms, 1.4 are its images' sums (~380 images a
+  list, read whole each time), 0.9 its walk of the chain, 0.1 its copies.
 - `zones=1`: the zones of the drawing thread and the list reader (one drawn list in 8) timed by the system's clock
   when libperf is not there (a reading costs ~0.7 us, so the small zones come out too large; libperf's counter costs
   ~95 cycles a mark).

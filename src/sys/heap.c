@@ -25,6 +25,9 @@ void Heap_TagCheck(s32 phase) {
     extern char *getenv(const char *name);
     static s32 enabled=-1;
     s32 i;
+#ifdef PORT_VITA
+    if (phase >= 0 && phase <= 10) { extern void Vita_GZ(int z); Vita_GZ(phase == 0 ? 9 : phase == 10 ? 10 : 10 + phase); } /* (bt3.txt gzones: Battle_Update's parts, battle.c) */
+#endif
     if(enabled<0)enabled=getenv("BT4_TAG_CHECK_HEAP")!=NULL;
     if(!enabled)return;
     if(!TagBattle_Active())return;

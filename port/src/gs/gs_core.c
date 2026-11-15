@@ -5152,7 +5152,9 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
                 job.tsub = sceKernelGetProcessTimeWide();
             }
             { extern volatile int gVitaShotMark; job.mark = __sync_lock_test_and_set(&gVitaShotMark, 0); }
+            { extern void Vita_GZ(int z); Vita_GZ(31); } /* (bt3.txt gzones: up to the list's copies) */
             snap_make(tadr, arena);
+            { extern void Vita_GZ(int z); Vita_GZ(33); } /* (snap_make) */
             render_put(&job);
             if (sFresh) {
                 extern unsigned gVitaFresh;
@@ -5328,6 +5330,7 @@ static int snap_img_changed(uint32_t addr, uint32_t qwc) {
     sImgSeen[k].h = h;
     return 1;
 }
+extern void Vita_GZ(int z);
 static void snap_make(uint32_t tadr, int arena) {
     uint32_t stack[2], sp = 0, sSnapCount = 0, sSnapUsed = 0;
     uint32_t *sSnapData = sSnapDataA[arena];
@@ -5442,16 +5445,26 @@ static void snap_make(uint32_t tadr, int arena) {
             gVitaRef[k][0]++;
             gVitaRef[k][1] += qwc;
         }
-        if (image && qwc <= SNAP_IMG_QWC && !(qwc <= SNAP_QWC && spAt == 0) && (id == 0 || id == 3 || id == 4) && gVitaSnapSame && !snap_img_changed(addr, qwc)) {
-            image = 0; /* pixels the same as when this place was last handed over: read in place */
-            gVitaSnapSame2[0]++;
+        if (image && qwc <= SNAP_IMG_QWC && !(qwc <= SNAP_QWC && spAt == 0) && (id == 0 || id == 3 || id == 4) && gVitaSnapSame) {
+            int changed;
+            Vita_GZ(36); /* (bt3.txt gzones: snap_make's walk) */
+            changed = snap_img_changed(addr, qwc);
+            Vita_GZ(34); /* (its images' sums) */
+            if (!changed) {
+                image = 0; /* pixels the same as when this place was last handed over: read in place */
+                gVitaSnapSame2[0]++;
+            } else {
+                gVitaSnapSame2[1]++;
+            }
         } else if (image) {
             gVitaSnapSame2[1]++;
         }
         if ((id == 0 || id == 3 || id == 4) && qwc != 0 && ((qwc <= SNAP_QWC && spAt == 0) || (image && qwc <= SNAP_IMG_QWC)) && sSnapCount < SNAP_MAX &&
             sSnapUsed + qwc * 4 <= SNAP_WORDS) {
             uint32_t hh = snap_h(tag), t2;
+            Vita_GZ(36);
             memcpy(&sSnapData[sSnapUsed], (const void *)(uintptr_t)addr, qwc * 16);
+            Vita_GZ(35); /* (its copies) */
             sSnapA[arena][sSnapCount].tag = tag;
             sSnapA[arena][sSnapCount].off = sSnapUsed;
             for (t2 = 0; t2 < 64 && sSnapH[arena][(hh + t2) & (SNAP_HASH - 1)] != 0; t2++) {
