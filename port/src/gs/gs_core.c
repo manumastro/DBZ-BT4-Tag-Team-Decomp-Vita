@@ -5552,6 +5552,13 @@ static int es_direct(const uint32_t *tag, const uint32_t *data, uint32_t qwc) {
 }
 #endif
 /* Executes one frame's list: the DMA chain at `tadr` on VIF1, then the end-of-frame work of the back end. */
+#ifdef PORT_VITA
+/* a CALL with both of the DMA controller's return places taken: logged (the call is followed, its return lost) */
+#define VITA_CALL_FULL() do { if (sp >= 2) { extern void Vita_Log(const char *fmt, ...); extern unsigned gVitaCallFull; static unsigned told; \
+    gVitaCallFull++; if (told++ < 8) { Vita_Log("gs: list %u: a DMA CALL at %08x to %08x with both return places taken\n", sFrame, tadr, addr); } } } while (0)
+#else
+#define VITA_CALL_FULL() do { } while (0)
+#endif
 static void run_chain(uint32_t tadr, int tte) {
     uint32_t stack[2], sp = 0;
     int guard;
@@ -5585,11 +5592,39 @@ static void run_chain(uint32_t tadr, int tte) {
         case 1: data = tag + 4; tadr += 16 + qwc * 16; break;                             /* CNT */
         case 2: data = tag + 4; tadr = addr; break;                                       /* NEXT */
         case 3: case 4: data = (const uint32_t *)(uintptr_t)addr; tadr += 16; break;      /* REF, REFS */
-        case 5: data = tag + 4; if (sp < 2) { stack[sp++] = tadr + 16 + qwc * 16; } tadr = addr; break; /* CALL */
+        case 5: data = tag + 4; if (sp < 2) { stack[sp++] = tadr + 16 + qwc * 16; } VITA_CALL_FULL(); tadr = addr; break; /* CALL */
         case 6: data = tag + 4; if (sp > 0) { tadr = stack[--sp]; } else { end = 1; } break;          /* RET */
         default: data = tag + 4; end = 1; break;                                          /* END */
         }
 #ifdef PORT_VITA
+        {   /* A chain that comes back to where it was (the same tag next, the same calls to return from) goes round for
+               ever: in Tag Team a list did, each round with its VU1 calls, and held the list reader more than 10 s.
+               The list ends there, and the place is logged. */
+            static struct { uint32_t gen, tadr, sp, s0, s1; } seen[8192];
+            static uint32_t gen;
+            uint32_t hh, k;
+            if (guard == 0) {
+                gen++;
+            }
+            hh = ((tadr * 0x9E3779B1u) ^ (sp ? stack[sp - 1] * 0x85EBCA6Bu : 0) ^ sp) >> 19;
+            for (k = 0; k < 8; k++) {
+                uint32_t j = (hh + k) & 8191;
+                if (seen[j].gen != gen) {
+                    seen[j].gen = gen; seen[j].tadr = tadr; seen[j].sp = sp; seen[j].s0 = sp > 0 ? stack[0] : 0; seen[j].s1 = sp > 1 ? stack[1] : 0;
+                    break;
+                }
+                if (seen[j].tadr == tadr && seen[j].sp == sp && seen[j].s0 == (sp > 0 ? stack[0] : 0) && seen[j].s1 == (sp > 1 ? stack[1] : 0) && !end) {
+                    extern void Vita_Log(const char *fmt, ...);
+                    static unsigned told;
+                    if (told++ < 8) {
+                        Vita_Log("gs: list %u: its DMA chain came back to tag %08x (depth %u) after %d tags: ended there\n", sFrame, tadr, sp, guard);
+                    }
+                    { extern unsigned gVitaChainLoop; gVitaChainLoop++; }
+                    end = 1;
+                    break;
+                }
+            }
+        }
         sChainSp = sp;
         if (id == 6 && sCcCap >= 0 && sp == sCcDepth) { /* (the recorded call returns: after its RET's own data) */
             if (tte) { vif(tag + 2, 2); }
