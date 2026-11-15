@@ -12,11 +12,46 @@
 #include <psp2/perf.h>
 
 int gVitaPerfOn;
+/* bt3.txt zones=1 (the development build): without the plugin, the zones (vita_vgl.c Vita_Z, one drawn list in
+   eight) timed by the system's clock instead of the cycle counter: microseconds times 444, so that the log's
+   "cycles" read the same. Coarser (a mark costs a system call) but enough to see where a list's time goes. */
+int gVitaZoneT;
+extern unsigned long long sceKernelGetProcessTimeWide(void);
+int Vita_PmonGet(int thid, unsigned int counter, unsigned int *value) {
+    if (gVitaPerfOn) {
+        return scePerfArmPmonGetCounterValue(thid, counter, value);
+    }
+    *value = counter == 31 ? (unsigned)(sceKernelGetProcessTimeWide() * 444u) : 0;
+    return 0;
+}
 
-/* Loads the user module; 0 if the kernel plugin is not there. Called once, before any thread counts. */
+#ifndef PORT_VITA_RELEASE
+#include <psp2/appmgr.h>
+#include <psp2/io/stat.h>
+#include <stdio.h>
+#include <taihen.h>
+#endif
+/* Loads the user module; 0 if the kernel plugin is not there. Called once, before any thread counts. The development
+   build first loads the kernel plugin itself when it is in the app's folder (libperf.skprx beside eboot.bin), as
+   VitaShell loads its own: no line in tai/config.txt and no restart; it stays loaded until the console restarts (a
+   second start finds it there: 0x8002D013). Its result is kept for the log (gVitaPerfK). */
+int gVitaPerfK;
 int Vita_PerfInit(void) {
     int status = 0;
-    SceUID id = sceKernelLoadStartModule("app0:libperf.suprx", 0, NULL, 0, NULL, &status);
+    SceUID id;
+#ifndef PORT_VITA_RELEASE
+    {
+        char tid[16] = {0}, path[64];
+        SceIoStat st;
+        if (sceAppMgrAppParamGetString(0, 12, tid, sizeof(tid)) >= 0 && tid[0] != 0) {
+            snprintf(path, sizeof(path), "ux0:app/%s/libperf.skprx", tid);
+            if (sceIoGetstat(path, &st) >= 0) {
+                gVitaPerfK = taiLoadStartKernelModule(path, 0, NULL, 0);
+            }
+        }
+    }
+#endif
+    id = sceKernelLoadStartModule("app0:libperf.suprx", 0, NULL, 0, NULL, &status);
     gVitaPerfOn = id >= 0 && status == 0;
     return gVitaPerfOn ? 1 : (id < 0 ? id : status);
 }

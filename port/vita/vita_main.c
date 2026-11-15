@@ -758,7 +758,7 @@ void Vita_VBlank(unsigned vblanks) {
                                 { extern unsigned gVitaPlan[7]; if (gVitaPlan[0] | gVitaPlan[1] | gVitaPlan[4] | gVitaPlan[5]) { logf_("vita:   large uploads' plans (upplan): %u used, %u made, %u checked, %u wrong; rectangles' numbers %u not worked out (another upload's data there), %u worked out all the same, %u of them found the same\n", gVitaPlan[0], gVitaPlan[1], gVitaPlan[2], gVitaPlan[3], gVitaPlan[4], gVitaPlan[5], gVitaPlan[6]); memset(gVitaPlan, 0, sizeof(gVitaPlan)); } }
                                 { extern unsigned gVitaVuMax[2], gVitaVuCut; logf_("vita:   VU1 interpreter, the most in a list: %u instructions in %u runs; runs left out %u\n", gVitaVuMax[0], gVitaVuMax[1], gVitaVuCut); gVitaVuMax[0] = gVitaVuMax[1] = gVitaVuCut = 0; }
                                 { extern unsigned gVitaOtMax, gVitaOtSize, gVitaDmaMax; logf_("vita:   most packet memory of the effects' table in a frame: %u of %u KB; longest display list %u KB of 1024\n", gVitaOtMax >> 10, gVitaOtSize >> 10, gVitaDmaMax >> 10); gVitaOtMax = gVitaDmaMax = 0; }
-                                { extern unsigned gVitaChainMax, gVitaChainLoop, gVitaCallFull; logf_("vita:   longest DMA chain of a list: %u tags; chains that came back to where they were %u, calls with both return places taken %u\n", gVitaChainMax, gVitaChainLoop, gVitaCallFull); gVitaChainMax = gVitaChainLoop = gVitaCallFull = 0; }
+                                { extern unsigned gVitaChainMax, gVitaChainLoop, gVitaCallFull, gVitaChainBad; logf_("vita:   longest DMA chain of a list: %u tags; chains that came back to where they were %u, calls with both return places taken %u, tags or data outside the memory %u\n", gVitaChainMax, gVitaChainLoop, gVitaCallFull, gVitaChainBad); gVitaChainMax = gVitaChainLoop = gVitaCallFull = gVitaChainBad = 0; }
                                 { extern unsigned gVitaTexSweep[3], gVitaPalExactN[1]; if (gVitaTexSweep[0] | gVitaPalExactN[0]) { logf_("vita:   texture table full: %u sweeps, %u let go not used for a second, %u not used in this frame; %u palettes known by their colours (palexact)\n", gVitaTexSweep[0], gVitaTexSweep[1], gVitaTexSweep[2], gVitaPalExactN[0]); memset(gVitaTexSweep, 0, sizeof(gVitaTexSweep)); gVitaPalExactN[0] = 0; } }
                                 { extern unsigned gVitaBind[8]; if (gVitaBind[0] | gVitaBind[1] | gVitaBind[6] | gVitaBind[7]) { logf_("vita:   textures bound by their names (texbind): %u found by the names, %u bindings made, %u checked, %u wrong (%u of them other contents); %u destinations unbound by another's write, %u lookups in no destination, %u bindings found lost\n", gVitaBind[0], gVitaBind[1], gVitaBind[2], gVitaBind[3], gVitaBind[4], gVitaBind[5], gVitaBind[6], gVitaBind[7]); memset(gVitaBind, 0, sizeof(gVitaBind)); } }
                                 { extern unsigned gVitaEsDirectN[2]; if (gVitaEsDirectN[0]) { logf_("vita:   the seam's call packets the direct way (esdirect): %u\n", gVitaEsDirectN[0]); memset(gVitaEsDirectN, 0, sizeof(gVitaEsDirectN)); } }
@@ -919,7 +919,8 @@ void Vita_VBlank(unsigned vblanks) {
                             extern unsigned gVitaPerfLists[2];
                             static uint32_t gameLast[5];
                             static uint64_t game[5];
-                            if (gVitaPerfOn) {
+                            extern int gVitaZoneT;
+                            if (gVitaPerfOn || gVitaZoneT) { /* (zones=1 without the plugin: the zones only, some lines twice) */
                                 const uint64_t *t[4] = {game, gVitaPerfList[0], gVitaPerfList[1], gVitaPerfWork};
                                 static const char *const nm[4] = {"game thread, per frame", "picture thread, per list not drawn", "picture thread, per list drawn", "strip thread, per drawn picture"};
                                 unsigned div[4], k;
@@ -929,7 +930,7 @@ void Vita_VBlank(unsigned vblanks) {
                                 div[1] = gVitaPerfLists[0];
                                 div[2] = gVitaPerfLists[1];
                                 div[3] = gVitaPerfLists[1];
-                                for (k = 0; k < 4; k++) {
+                                for (k = 0; k < (gVitaPerfOn ? 4u : 0u); k++) {
                                     const uint64_t *c = t[k];
                                     unsigned d = div[k] ? div[k] : 1;
                                     unsigned ki = (unsigned)(c[3] / 1000) ? (unsigned)(c[3] / 1000) : 1;
@@ -1694,6 +1695,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "fehelper") == 0) { /* the uploads' numbers on the fourth core: 0 off, 1 on, 2 on in the soak's B battles (gs_core.c) */
             extern int gVitaFeHelper;
             gVitaFeHelper = atoi(eq);
+        } else if (strcmp(line, "rtswap") == 0) { /* a fight picture's swap made by the render thread: 0 off, 1 on, 2 in the soak's B battles */
+            extern int gVitaRtSwap;
+            gVitaRtSwap = atoi(eq);
         } else if (strcmp(line, "gxmcache") == 0) { /* vitaGL's GXM state calls left out when they change nothing: 0 off, 1 on, 2 in the soak's B battles */
             extern int gVitaGxmCache;
             gVitaGxmCache = atoi(eq);
@@ -1798,6 +1802,9 @@ static void read_settings(void) {
             gVitaStartMode = atoi(eq);
         } else if (strcmp(line, "hangdump") == 0) {
             gVitaHangDump = atoi(eq);
+        } else if (strcmp(line, "zones") == 0) { /* 1: the zones timed by the system's clock when libperf is not there */
+            extern int gVitaZoneT;
+            gVitaZoneT = atoi(eq) != 0;
         } else if (strcmp(line, "tagteam") == 0) { /* 0: no Tag Team entry in the main menu (Vita_TagMenu) */
             sTagMenu = atoi(eq) != 0;
         } else if (strcmp(line, "replay") == 0) {
@@ -2461,6 +2468,7 @@ int __wrap_main(int argc, char **argv) {
         int r = sPerfOff ? 0 : Vita_PerfInit();
 #endif
         logf_(r == 1 ? "vita: processor counters on (libperf)\n" : "vita: processor counters off (libperf kernel plugin not loaded: %08x)\n", r);
+        { extern int gVitaPerfK; if (gVitaPerfK != 0) { logf_("vita: libperf's kernel plugin loaded from the app's folder: %08x\n", (unsigned)gVitaPerfK); } }
     }
     sLogThreaded = logThread;
     th = sceKernelCreateThread("bt3_game", game_thread, 0x10000100, GAME_STACK, 0, 0x00010000 /* the first core, to itself */, NULL);

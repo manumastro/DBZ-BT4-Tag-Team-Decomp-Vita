@@ -49,7 +49,8 @@ void Vita_Log(const char *fmt, ...);
 #define VITA_RARE(x) __builtin_expect_with_probability(!!(x), 1, 0.0)
 #endif
 extern int gGsSplit; /* gs_core.c: the list is read and drawn on two threads */
-extern int gVitaPerfOn;
+extern int gVitaPerfOn, gVitaZoneT;
+extern int Vita_PmonGet(int thid, unsigned int counter, unsigned int *value);
 extern void Vita_PerfRead(uint32_t v[5]);
 extern void Vita_PerfAccum(uint32_t last[5], uint64_t sum[5]);
 extern void Vita_PerfThreadStart(void);
@@ -1651,26 +1652,35 @@ static uint32_t wp_sig(void) {
     return h;
 }
 
-static void frame_begin(void) {
-    rt_sync();
+static void frame_begin_gl(void);
+/* the next picture begun: what the drawing thread decides for it (frame_begin_be), and its target bound and cleared
+   (frame_begin_gl: on the thread that draws, the render thread's ring with rtswap) */
+static void frame_begin_be(void) {
     {   /* the frame about to be drawn is one the film takes: its middle too (wtshot=1) */
         extern int Vita_InFight(void);
         extern int gVitaFilm, gVitaWtShot;
         extern unsigned gVitaFilmPicsNext(void);
         sMidOn = gVitaWtShot && gVitaFilm > 0 && Vita_InFight() && gVitaFilmPicsNext() % (unsigned)gVitaFilm == 0 ? 1 : 0;
     }
-    target_set(0);
     {   /* a fight's picture in parts: decided before the picture's first scene is begun (by the clear) */
         extern int Vita_InBattle(void);
         vgl_bt3_split_on = Vita_InBattle() && !(gVglSafe2 & 1);
-        sSplitN = 0;
         {   /* the effects at a lower resolution (fxlow): in a fight, with what they need built */
             extern int gVitaAbSide;
             int want = gVitaFxLow == 2 ? gVitaAbSide == 1 : gVitaFxLow != 0;
             sFxlOn = want && Vita_InBattle() && gVitaMsaa == 0 && sVsZ != 0 && sDepthTex != 0 && sFxProg[0] != 0;
         }
-        sSplitAt = vgl_bt3_split_on ? sceKernelGetProcessTimeWide() + SPLIT_MS * 1000ull : 0;
     }
+}
+static void frame_begin(void) {
+    rt_sync();
+    frame_begin_be();
+    frame_begin_gl();
+}
+static void frame_begin_gl(void) {
+    target_set(0);
+    sSplitN = 0;
+    sSplitAt = vgl_bt3_split_on ? sceKernelGetProcessTimeWide() + SPLIT_MS * 1000ull : 0;
     GLC_RESET();
     glDisable(GL_SCISSOR_TEST);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -2570,6 +2580,29 @@ static inline void wt_swap(void) {
         sMemRamK = (unsigned)(vglMemFree(VGL_MEM_RAM) >> 10);
     }
 }
+/* bt3.txt rtswap=1: a fight picture's swap and the next picture's clear made by the render thread, in its ring after
+   the picture's last draws, so that the drawing thread goes on with the next list at once instead of waiting for the
+   render thread to finish this picture (1.5 ms a picture in 2 vs 2) and for the swap. Only when nothing else at the
+   picture's end needs vitaGL on the drawing thread (the log's pictures, the film, the GPU profile, a change of size,
+   the movie): those the old way (fe_sync). 0: the old way; 2: in the soak's B battles. */
+int gVitaRtSwap = 0;
+unsigned gVitaRtSwapN[2]; /* for the log: pictures swapped by the render thread, the old way */
+typedef struct RtSwap { unsigned seq; int paced; } RtSwap;
+static void pace_swap_pre(RtSwap *s);
+static void pace_swap_rt(const RtSwap *s, int phase);
+static void rt_swap_exec(const RtSwap *s) {
+    unsigned long long t0 = sceKernelGetProcessTimeWide();
+    target_set(0); /* (the picture bound again before the swap) */
+    pace_swap_rt(s, 0);
+    vglSwapBuffers(GL_FALSE);
+    pace_swap_rt(s, 1);
+    gVitaWall[0] += sceKernelGetProcessTimeWide() - t0;
+    if (++sMemSeen % 60 == 0) {
+        sMemVramK = (unsigned)(vglMemFree(VGL_MEM_VRAM) >> 10);
+        sMemRamK = (unsigned)(vglMemFree(VGL_MEM_RAM) >> 10);
+    }
+    frame_begin_gl();
+}
 /* What one draw of a batch reads (flush_impl): its state and its data. */
 typedef struct FlushIn {
     State s;
@@ -2823,6 +2856,7 @@ static void flush_run(const FlushIn *in) {
 #define RT_XF 8 /* the intro's cross-fade */
 #define RT_FXB 9 /* the effects' picture of lower resolution: begun (fxlow) */
 #define RT_FXE 10 /* ... and added to the picture */
+#define RT_SWAP 11 /* the swap and the next picture's clear (rtswap) */
 typedef struct RtHdr { uint32_t size, op, pad_[2]; } RtHdr;
 static uint8_t *sRtRing;
 static volatile uint32_t sRtHead, sRtTail; /* bytes handed over / done, counting on (the ring's place: & (RT_RING - 1)) */
@@ -3009,6 +3043,8 @@ static int rt_exec_one(void) {
             fxl_begin_exec((const uint8_t *)(h + 1));
         } else if (h->op == RT_FXE) {
             fxl_end_exec();
+        } else if (h->op == RT_SWAP) {
+            rt_swap_exec((const RtSwap *)(const void *)(h + 1));
         }
         sRtWhere = 0;
         gVitaRt[6] += sceKernelGetProcessTimeWide() - t0;
@@ -4335,6 +4371,8 @@ void Vita_AmLog(void) { /* vita_main.c: the model draws that read the picture's 
                      "for room in the ring %llu times (%llu ms); %llu made by the drawing thread itself\n", gVitaRtCore, gVitaRt[0], gVitaRt[1] >> 10, gVitaRt[6] / 1000,
                      gVitaRt[2], gVitaRt[3] / 1000, gVitaRt[4], gVitaRt[5] / 1000, gVitaRt[7]);
             memset(gVitaRt, 0, sizeof(gVitaRt));
+            Vita_Log("vgl:   swaps (rtswap): %u made by the render thread, %u the old way\n", gVitaRtSwapN[0], gVitaRtSwapN[1]);
+            gVitaRtSwapN[0] = gVitaRtSwapN[1] = 0;
         }
     }
     if (sAmRN == 0) {
@@ -4434,9 +4472,9 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
     P_IN(9);
     if (gVitaZoneOn & 1) {
         uint32_t c0 = 0, c1 = 0;
-        scePerfArmPmonGetCounterValue(0, 31, &c0);
+        Vita_PmonGet(0, 31, &c0);
         GsGpu_Draw_impl(type, ctx, v);
-        scePerfArmPmonGetCounterValue(0, 31, &c1);
+        Vita_PmonGet(0, 31, &c1);
         gVitaDrawCyc[type & 7] += c1 - c0;
         gVitaDrawCnt[type & 7]++;
     } else {
@@ -5166,7 +5204,7 @@ page_draw:
    primitive. */
 static int sTblRun; /* (below: tbl_intercept's) */
 uint64_t gVitaTriCyc[7]; /* (the log: lists measured part by part) a run's quick triangle's cycles: checks, bookkeeping, Q, batch, checks, vertices; count */
-#define TC(i) do { if (tcOn) { uint32_t now_; scePerfArmPmonGetCounterValue(0, 31, &now_); gVitaTriCyc[i] += now_ - tcLast; tcLast = now_; } } while (0)
+#define TC(i) do { if (tcOn) { uint32_t now_; Vita_PmonGet(0, 31, &now_); gVitaTriCyc[i] += now_ - tcLast; tcLast = now_; } } while (0)
 /* the run's "not known" alpha cells (am_write's -1), gathered by row and laid at once: the same cells as
    the triangles' own am_write calls, before anything that reads them (a triangle the full way, a batch drawn) */
 static uint16_t sRunAm[14];
@@ -5229,7 +5267,7 @@ void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri) {
         float s[3], t[3], q[3], bx0, by0, bx1, by1, area;
         int i;
         if (tcOn) {
-            scePerfArmPmonGetCounterValue(0, 31, &tcLast);
+            Vita_PmonGet(0, 31, &tcLast);
         }
         gVglCalls[4]++;
         /* whether the quick way holds is looked at for the run's first triangle and after one drawn the full
@@ -7044,11 +7082,32 @@ static void t114_list_end_old(int drawn) {
     }
 }
 int gVitaGxmCache = 1;
+/* (rtswap) this picture's end handed to the render thread; fe_sync: the old way after all (something at the end needs
+   vitaGL here) */
+static int sFeAsync;
+static void fe_sync(void) {
+    if (sFeAsync) {
+        sFeAsync = 0;
+        rt_sync();
+        target_set(0);
+    }
+}
 void GsGpu_FrameEnd(void) {
     al_frame_end(!gVitaGsSkip);
     flush();
     flush_bins_c(1);
-    rt_sync(); /* the render thread's draws done: what follows is this thread's (the parts kept are let go, the swap) */
+    {
+        extern int gVitaAbSide, gVitaFilm, Vita_InBattle(void);
+        extern volatile int gVitaShotReq;
+        static int battleWas;
+        int battle = Vita_InBattle(), want = gVitaRtSwap == 2 ? gVitaAbSide == 1 : gVitaRtSwap != 0;
+        sFeAsync = want && sRtOn && !gVitaGsSkip && battle && battleWas && !sMovieDirty && sProf < 0 && sT114Shot == 0 && sSqN == 0 &&
+                   gVitaFilm <= 0 && gVitaShotReq == 0 && !sDumping && sLogFrames <= 0 && sMidN == 0 && !(gVglSafe & 4194304) && !gVitaGpuProf;
+        battleWas = battle;
+    }
+    if (!sFeAsync) {
+        rt_sync(); /* the render thread's draws done: what follows is this thread's (the parts kept are let go, the swap) */
+    }
     if (sDpRtBone != 0) { /* (dprt: the bones not finite the render thread found) */
         gVitaBoneBad += sDpRtBone;
         sDpRtBone = 0;
@@ -7059,11 +7118,14 @@ void GsGpu_FrameEnd(void) {
         extern void vglbt3_GxmDirty(void);
         int want = gVitaGxmCache == 2 ? gVitaAbSide == 1 : gVitaGxmCache != 0;
         if (want != vgl_bt3_gxm_cache) {
+            fe_sync();
             vgl_bt3_gxm_cache = want;
             vglbt3_GxmDirty();
         }
     }
-    target_set(0); /* (the picture bound again before the swap) */
+    if (!sFeAsync) {
+        target_set(0); /* (the picture bound again before the swap; rtswap: in the ring) */
+    }
     if (sWpClrN > 0) { /* a clear of the page held back and never needed: the page was not cleared */
         sWpValid = 0;
         sWpClrN = 0;
@@ -7170,6 +7232,7 @@ void GsGpu_FrameEnd(void) {
             extern int Vita_InBattle(void);
             int now = Vita_InBattle();
             if (!gGsSplit && was && !now && (sStageUsed != 0 || sFtUsed != 0)) {
+                fe_sync();
                 glFinish();
                 memset(sStageCache, 0, sizeof(sStageCache));
                 sStageUsed = 0;
@@ -7190,6 +7253,7 @@ void GsGpu_FrameEnd(void) {
     sHaveState = 0;
     if (!gVitaGsSkip) {
         if (sMovieDirty) {
+            fe_sync();
             movie_fill();
         }
         if (sLogFrames > 0) {
@@ -7314,6 +7378,9 @@ void GsGpu_FrameEnd(void) {
                 extern int Vita_InFight(void);
                 static int abStep;
                 static unsigned abN;
+                if ((abStep == 0 && gVitaShotReq != 0 && Vita_InFight()) || abStep > 0) {
+                    fe_sync(); /* (pictures for the log: the old way) */
+                }
                 if (abStep == 0 && gVitaShotReq != 0 && Vita_InFight()) {
                     gVitaShotReq = 0;
                     t114_shot(9000 + abN * 10 + 1, gGsFrame);
@@ -7333,7 +7400,25 @@ void GsGpu_FrameEnd(void) {
                     abN++;
                 }
             }
-            swap_sized(); /* (the menus' size or the fights') */
+            if (sFeAsync) { /* (rtswap) unless the size changes */
+                extern int gPortMenuMode;
+                int menu = gVitaMenuHi && gPortMenuMode;
+                if ((menu ? SCR_W_MENU : SCR_W_FIGHT) != sScrW || (menu ? SCR_H_MENU : SCR_H_FIGHT) != sScrH || sSqN != 0) {
+                    fe_sync();
+                }
+            }
+            if (sFeAsync) {
+                RtSwap sw;
+                pace_swap_pre(&sw);
+                frame_begin_be();
+                *(RtSwap *)(void *)rt_reserve(RT_SWAP, sizeof(RtSwap)) = sw;
+                rt_commit();
+                rt_kick();
+                gVitaRtSwapN[0]++;
+            } else {
+                swap_sized(); /* (the menus' size or the fights') */
+                gVitaRtSwapN[1]++;
+            }
             t114_emit();
             gProf = 1;
             if (gVitaProfMeasure) { Vita_ProfSwitch(1); }
@@ -7343,7 +7428,10 @@ void GsGpu_FrameEnd(void) {
             Vita_Log("vgl: frame %u: swapped\n", gGsFrame);
             sLogFrames--;
         }
-        frame_begin();
+        if (!sFeAsync) {
+            frame_begin();
+        }
+        sFeAsync = 0;
     }
     t114_list_end(!gVitaGsSkip);
 }
@@ -10582,7 +10670,7 @@ void Vita_Z(int z) {
         if (!(gVitaZoneOn & 1)) {
             return;
         }
-        scePerfArmPmonGetCounterValue(0, 31, &now);
+        Vita_PmonGet(0, 31, &now);
         gVitaZone[z] += now - sZLast;
         gVitaZoneN[z]++;
         sZLast = now;
@@ -10590,7 +10678,7 @@ void Vita_Z(int z) {
         if (!(gVitaZoneOn & 2)) {
             return;
         }
-        scePerfArmPmonGetCounterValue(0, 31, &now);
+        Vita_PmonGet(0, 31, &now);
         gVitaZoneF[z] += now - sZLastF;
         gVitaZoneNF[z]++;
         sZLastF = now;
@@ -10615,7 +10703,7 @@ static void warm_begin(int th) { /* th 0: the drawing thread (gVitaZone), 1: the
     }
     sWarmWas[th] = now;
     sWarmOn[th] = 0;
-    if (sWarmLeft[th] <= 0 || !gVitaPerfOn) {
+    if (sWarmLeft[th] <= 0 || (!gVitaPerfOn && !gVitaZoneT)) {
         return;
     }
     sWarmLeft[th]--;
@@ -10625,7 +10713,7 @@ static void warm_begin(int th) { /* th 0: the drawing thread (gVitaZone), 1: the
         sWarmSaveN[th][k] = zn[k];
     }
     if (sWarmOn[th] == 1) {
-        scePerfArmPmonGetCounterValue(0, 31, th == 0 ? &sZLast : &sZLastF);
+        Vita_PmonGet(0, 31, th == 0 ? &sZLast : &sZLastF);
         __sync_fetch_and_or(&gVitaZoneOn, th == 0 ? 1 : 2);
     }
     sWarmT0[th] = sceKernelGetProcessTimeWide();
@@ -10663,12 +10751,12 @@ void Vita_FeListBegin(int drawn) {
     if (drawn) {
         warm_begin(1);
     }
-    if (!drawn || !gVitaPerfOn || ++n % 32 != 7 || sWarmOn[1]) {
+    if (!drawn || (!gVitaPerfOn && !gVitaZoneT) || ++n % (gVitaPerfOn ? 32 : 8) != 7 || sWarmOn[1]) {
         return;
     }
     {
         int k;
-        scePerfArmPmonGetCounterValue(0, 31, &sZLastF);
+        Vita_PmonGet(0, 31, &sZLastF);
         __sync_fetch_and_or(&gVitaZoneOn, 2);
         for (k = 0; k < 64; k++) {
             Vita_Z(31); /* (what a mark costs) */
@@ -10686,7 +10774,7 @@ void Vita_FeListEnd(void) {
 }
 void Vita_PerfListBegin(void) {
     static int started;
-    if (!gVitaPerfOn) {
+    if (!gVitaPerfOn && !gVitaZoneT) {
         return;
     }
     if (!started) {
@@ -10699,16 +10787,16 @@ void Vita_PerfListBegin(void) {
     }
     {
         static unsigned drawn;
-        if (!gVitaGsSkip && drawn % 32 == 15 && !sWarmOn[0]) {
+        if (!gVitaGsSkip && drawn % (gVitaPerfOn ? 32 : 8) == (gVitaPerfOn ? 15 : 7) && !sWarmOn[0]) {
             int k;
             drawn++;
-            scePerfArmPmonGetCounterValue(0, 31, &sZLast);
+            Vita_PmonGet(0, 31, &sZLast);
             __sync_fetch_and_or(&gVitaZoneOn, 1);
             for (k = 0; k < 64; k++) {
                 Vita_Z(31); /* (what a mark costs) */
             }
             Vita_Z(0);
-        } else if (!gVitaGsSkip && ++drawn % 16 == 0) {
+        } else if (!gVitaGsSkip && ++drawn % 16 == 0 && gVitaPerfOn) { /* (the parts need the counters) */
             int k;
             sRegCur = 11; /* (what measuring costs: 64 switches with nothing in between) */
             reg_read(sRegLast);
@@ -10803,37 +10891,57 @@ void Vita_PaceBe(unsigned seq, unsigned vb, int end) { /* gs_core.c, the drawing
         }
     }
 }
-static void pace_swap(int phase) { /* the drawing thread, around the swap */
-    extern void *gxm_color_surfaces_addr[];
-    extern unsigned int gxm_back_buffer_index;
+/* (rtswap) the swap's records split: what the drawing thread knows of the picture, when it hands the swap over */
+static void pace_swap_pre(RtSwap *s) {
     extern int Vita_InBattle(void);
+    static float covLast;
+    static unsigned texLast;
     PaceRec *r = &sPR[sBeSeq & 31];
     int mine = r->seq == sBeSeq;
+    float cov = gVglCov[1] >= covLast ? gVglCov[1] - covLast : gVglCov[1];
+    unsigned nt = gVglNewTex >= texLast ? gVglNewTex - texLast : gVglNewTex;
+    covLast = gVglCov[1];
+    texLast = gVglNewTex;
+    if (mine) {
+        r->tSw0 = sceKernelGetProcessTimeWide(); /* (made again when the render thread swaps) */
+        r->cov = (unsigned)(cov * (100.0f / (512.0f * 448.0f)));
+        r->newTex = nt;
+        r->hold = sPaceHold;
+        r->texUs = sTexBudgetFrame == gGsFrame ? (unsigned)sTexBudgetUs : 0;
+        r->fxm = (unsigned)gVitaFxMask;
+    }
+    s->seq = sBeSeq;
+    s->paced = mine && r->tSub != 0 && Vita_InBattle() && !sPaceHold;
+}
+/* ... and the render thread's part, around its swap: the display buffer it is drawn into */
+static void pace_swap_rt(const RtSwap *s, int phase) {
+    extern void *gxm_color_surfaces_addr[];
+    extern unsigned int gxm_back_buffer_index;
+    PaceRec *r = &sPR[s->seq & 31];
+    int mine = r->seq == s->seq;
     if (phase == 0) {
-        static float covLast;
-        static unsigned texLast;
         unsigned i = gxm_back_buffer_index & 3;
-        float cov = gVglCov[1] >= covLast ? gVglCov[1] - covLast : gVglCov[1];
-        unsigned nt = gVglNewTex >= texLast ? gVglNewTex - texLast : gVglNewTex;
-        covLast = gVglCov[1];
-        texLast = gVglNewTex;
         if (mine) {
             r->tSw0 = sceKernelGetProcessTimeWide();
-            r->cov = (unsigned)(cov * (100.0f / (512.0f * 448.0f)));
-            r->newTex = nt;
-            r->hold = sPaceHold;
-            r->texUs = sTexBudgetFrame == gGsFrame ? (unsigned)sTexBudgetUs : 0;
-            r->fxm = (unsigned)gVitaFxMask;
         }
         sPb[i].valid = 0;
         __sync_synchronize();
         sPb[i].addr = gxm_color_surfaces_addr[gxm_back_buffer_index];
-        sPb[i].seq = sBeSeq;
-        sPb[i].paced = mine && r->tSub != 0 && Vita_InBattle() && !sPaceHold;
+        sPb[i].seq = s->seq;
+        sPb[i].paced = s->paced && mine;
         __sync_synchronize();
         sPb[i].valid = 1;
     } else if (mine) {
         r->tSw1 = sceKernelGetProcessTimeWide();
+    }
+}
+static void pace_swap(int phase) { /* the drawing thread, around the swap */
+    static RtSwap s;
+    if (phase == 0) {
+        pace_swap_pre(&s);
+        pace_swap_rt(&s, 0);
+    } else {
+        pace_swap_rt(&s, 1);
     }
 }
 /* vitaGL's display queue callback (the chip has finished the picture; vitaGL puts it up at the next blank when

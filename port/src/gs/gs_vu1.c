@@ -412,10 +412,11 @@ static void run(uint32_t start) {
 
 #ifdef PORT_VITA
     {   /* A list's interpreted VU1 work capped: in a 2 vs 2 fight a list kept the list reader in this interpreter for
-           more than 10 s (no single run reached the guard below; runs one after another did). Past 20 million
-           instructions in one list the rest of its runs are left out, logged once a list. */
+           more than 10 s (no single run reached the guard below; runs one after another did). Past 2 million
+           instructions in one list (the interpreter makes about 2 million a second there; no list of a
+           fight or of the menus was seen to use it at all) the rest of its runs are left out, logged once a list. */
         extern unsigned gVitaVuCut;
-        if (sStatInstr > 20000000u) {
+        if (sStatInstr > 2000000u) {
             static unsigned toldFrame = ~0u;
             extern void Vita_Log(const char *fmt, ...);
             if (toldFrame != gGsFrame) {
@@ -435,6 +436,26 @@ static void run(uint32_t start) {
     sProg[slot].size = sProgSize;
     sProg[slot].runs++;
     for (guard = 0; guard < 4000000; guard++) {
+#ifdef PORT_VITA
+        /* (2 vs 2: one run alone kept the list reader here for more than 10 s, below the 20 million: its kicks.
+           A quarter of a second in one run, or the list's 2 million passed, and the run ends here, logged) */
+        if ((guard & 4095) == 4095) {
+            extern unsigned long long sceKernelGetProcessTimeWide(void);
+            static unsigned long long runT0;
+            unsigned long long now = sceKernelGetProcessTimeWide();
+            if (guard == 4095) {
+                runT0 = now;
+            } else if (now - runT0 > 250000u || sStatInstr > 2000000u) {
+                extern unsigned gVitaVuCut;
+                extern void Vita_Log(const char *fmt, ...);
+                Vita_Log("vu1: list %u: a run cut after %u instructions (%u ms; %u kicks in the list, %u instructions), program of %u instructions from %u, now at %u; vi %04x %04x %04x %04x %04x %04x %04x %04x, top %u\n",
+                         gGsFrame, guard + 1, (unsigned)((now - runT0) / 1000), sStatKicks, sStatInstr, sProgSize, start & 0x7FF, vu.pc, vu.vi[1], vu.vi[2], vu.vi[3], vu.vi[4],
+                         vu.vi[5], vu.vi[6], vu.vi[7], vu.vi[8], vu.top);
+                gVitaVuCut++;
+                return;
+            }
+        }
+#endif
         uint32_t lo, hi, dest, ft, fs, fd, op, bc, c;
         Reg res, *wr = NULL;
         uint32_t wmask = 0;

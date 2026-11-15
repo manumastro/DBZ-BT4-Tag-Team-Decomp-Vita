@@ -14,6 +14,7 @@ law for using it (its `serve` must run for the whole session; a person approves 
     --eboot     first send port/build/vita_dev/eboot.bin over the installed one (the run's own "prepare" step). Each
                 overwrite leaves a full hidden copy of the old file that no command can free (vita-agent-use's upload
                 storage): send it only when it changed, and watch ux0's free space
+    --eboot-dir another build folder's eboot.bin for --eboot (port/build/vita_dev_pgogen: the profile-counting build)
     --shots     screenshots taken during the run, evenly spaced (default 6; 0 none)
     --title     default BTFV00008, the development build
     --out       default port/build/runs/agent-<date-time>
@@ -81,6 +82,7 @@ def main():
     ap.add_argument("--settings", required=True, type=pathlib.Path)
     ap.add_argument("--seconds", type=int, default=300)
     ap.add_argument("--eboot", action="store_true")
+    ap.add_argument("--eboot-dir", type=pathlib.Path, help="with --eboot: the eboot.bin of this build folder instead of vita_dev's (port/build/vita_dev_pgogen)")
     ap.add_argument("--shots", type=int, default=6)
     ap.add_argument("--title", default="BTFV00008")
     ap.add_argument("--out", type=pathlib.Path)
@@ -107,7 +109,7 @@ def main():
         note("the settings did not reach", SETTINGS)
         return 3
 
-    eboot = ROOT / "port/build/vita_dev/eboot.bin"
+    eboot = (o.eboot_dir if o.eboot_dir else ROOT / "port/build/vita_dev") / "eboot.bin"
     if o.eboot and not eboot.is_file():
         note(str(eboot), "not found (BT3_VITA_DEV=1 python3 port/vita/build.py)")
         return 2

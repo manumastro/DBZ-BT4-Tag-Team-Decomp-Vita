@@ -2695,7 +2695,7 @@ extern void Vita_Z(int z);
 #ifdef PORT_VITA
 int gVitaTriRun = 1;   /* bt3.txt trirun=0: those packets register by register, as before */
 extern volatile int gVitaZoneOn;
-extern int scePerfArmPmonGetCounterValue(int thid, unsigned int counter, unsigned int *value);
+extern int Vita_PmonGet(int thid, unsigned int counter, unsigned int *value);
 unsigned long long gVitaTriRunCyc[2]; /* cycles reading the runs' packets into vertices, triangles */
 unsigned long long gVitaGifCyc[2]; /* lists measured part by part: cycles in the triangle runs, in the images */
 unsigned gVitaGifCnt[2];
@@ -2735,7 +2735,7 @@ static void tri_run(const uint64_t *q, uint32_t n) {
     for (i = 0; i < n; i += 64) {
         uint32_t m = n - i < 64 ? n - i : 64, c0 = 0, c1;
         if (gVitaZoneOn & 1) {
-            scePerfArmPmonGetCounterValue(0, 31, &c0);
+            Vita_PmonGet(0, 31, &c0);
         }
         for (j = 0; j < m; j++) {
             const uint64_t *pk = q + 14 * (i + j);
@@ -2770,7 +2770,7 @@ static void tri_run(const uint64_t *q, uint32_t n) {
             }
         }
         if (gVitaZoneOn & 1) {
-            scePerfArmPmonGetCounterValue(0, 31, &c1);
+            Vita_PmonGet(0, 31, &c1);
             gVitaTriRunCyc[0] += c1 - c0;
             gVitaTriRunCyc[1] += m;
         }
@@ -2900,9 +2900,9 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
             }
             if (gVitaZoneOn & 1) { /* */
                 unsigned c0 = 0, c1 = 0;
-                scePerfArmPmonGetCounterValue(0, 31, &c0);
+                Vita_PmonGet(0, 31, &c0);
                 tri_run(q, n);
-                scePerfArmPmonGetCounterValue(0, 31, &c1);
+                Vita_PmonGet(0, 31, &c1);
                 gVitaGifCyc[0] += c1 - c0;
                 gVitaGifCnt[0] += n;
             } else {
@@ -3006,9 +3006,9 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
             GZM2(8);
             if (gVitaZoneOn & 1) { /* */
                 unsigned c0 = 0, c1 = 0;
-                scePerfArmPmonGetCounterValue(0, 31, &c0);
+                Vita_PmonGet(0, 31, &c0);
                 transfer_data((const uint8_t *)q, n * 16);
-                scePerfArmPmonGetCounterValue(0, 31, &c1);
+                Vita_PmonGet(0, 31, &c1);
                 gVitaGifCyc[1] += c1 - c0;
                 gVitaGifCnt[1]++;
             } else {
@@ -4694,11 +4694,11 @@ static void *gr_thread(void *arg) {
                 __builtin_prefetch(&sGr[(h + size) % GR_SIZE]);
                 __builtin_prefetch(&sGr[(h + size + 64) % GR_SIZE]);
                 if (gVitaZoneOn & 1) {
-                    extern int scePerfArmPmonGetCounterValue(int thid, unsigned int counter, unsigned int *value);
+                    extern int Vita_PmonGet(int thid, unsigned int counter, unsigned int *value);
                     unsigned c0 = 0, c1 = 0, ty = r->type & 15;
-                    scePerfArmPmonGetCounterValue(0, 31, &c0);
+                    Vita_PmonGet(0, 31, &c0);
                     gr_exec(r);
-                    scePerfArmPmonGetCounterValue(0, 31, &c1);
+                    Vita_PmonGet(0, 31, &c1);
                     gVitaGrCyc[ty] += c1 - c0;
                     gVitaGrN[ty]++;
                 } else {
@@ -5551,6 +5551,36 @@ static int es_direct(const uint32_t *tag, const uint32_t *data, uint32_t qwc) {
     return 1;
 }
 #endif
+#ifdef PORT_VITA
+/* Is [p, p + bytes) memory the process has? The DMA chain's tags and the data they point to are checked before they
+   are read: in a 2 vs 2 demo fight one list (2908, about 105 s in) has a tag pointing into data that is not a tag,
+   which sent garbage counts to VU1 (the list reader stuck in the interpreter) or read an address with nothing there
+   (a crash in vif). The ranges of the last memory blocks found are kept: a system call only on a miss. */
+#include <psp2/kernel/sysmem.h>
+static uint32_t sMbLo[8], sMbHi[8], sMbNext;
+static int mem_ok(uint32_t p, uint32_t bytes) {
+    uint32_t k, e = p + bytes;
+    SceKernelMemBlockInfo info;
+    if (e < p) {
+        return 0;
+    }
+    for (k = 0; k < 8; k++) {
+        if (p >= sMbLo[k] && e <= sMbHi[k]) {
+            return 1;
+        }
+    }
+    memset(&info, 0, sizeof(info));
+    info.size = sizeof(info);
+    if (p == 0 || sceKernelGetMemBlockInfoByAddr((void *)(uintptr_t)p, &info) < 0 || info.mappedBase == NULL) {
+        return 0;
+    }
+    k = sMbNext++ & 7;
+    sMbLo[k] = (uint32_t)(uintptr_t)info.mappedBase;
+    sMbHi[k] = sMbLo[k] + info.mappedSize;
+    return p >= sMbLo[k] && e <= sMbHi[k];
+}
+unsigned gVitaChainBad; /* for the log: lists whose chain had a tag or data outside the process's memory */
+#endif
 /* Executes one frame's list: the DMA chain at `tadr` on VIF1, then the end-of-frame work of the back end. */
 #ifdef PORT_VITA
 /* a CALL with both of the DMA controller's return places taken: logged (the call is followed, its return lost) */
@@ -5577,6 +5607,23 @@ static void run_chain(uint32_t tadr, int tte) {
 #else
     for (guard = 0; guard < 100000; guard++) {
 #endif
+#ifdef PORT_VITA
+        static uint32_t lastT[8][4];
+        if (!mem_ok(tadr, 16)) {
+            extern void Vita_Log(const char *fmt, ...);
+            static unsigned told;
+            gVitaChainBad++;
+            if (told++ < 8) {
+                int k;
+                Vita_Log("gs: list %u: DMA tag %d at %08x is not in the process's memory: the list ends there; the tags before:\n", sFrame, guard, tadr);
+                for (k = 1; k <= 8 && k <= guard; k++) {
+                    const uint32_t *l = lastT[(guard - k) & 7];
+                    Vita_Log("gs:   at %08x: %08x %08x %08x\n", l[0], l[1], l[2], l[3]);
+                }
+            }
+            break;
+        }
+#endif
         const uint32_t *tag = (const uint32_t *)(uintptr_t)tadr;
         uint32_t qwc = tag[0] & 0xFFFF, id = (tag[0] >> 28) & 7, addr = tag[1]; /* a host pointer: all 32 bits */
         const uint32_t *data;
@@ -5596,6 +5643,24 @@ static void run_chain(uint32_t tadr, int tte) {
         case 6: data = tag + 4; if (sp > 0) { tadr = stack[--sp]; } else { end = 1; } break;          /* RET */
         default: data = tag + 4; end = 1; break;                                          /* END */
         }
+#ifdef PORT_VITA
+        lastT[guard & 7][0] = (uint32_t)(uintptr_t)tag; lastT[guard & 7][1] = tag[0]; lastT[guard & 7][2] = tag[1]; lastT[guard & 7][3] = tag[3];
+        if (qwc != 0 && !mem_ok((uint32_t)(uintptr_t)data, qwc * 16)) {
+            extern void Vita_Log(const char *fmt, ...);
+            static unsigned told;
+            gVitaChainBad++;
+            if (told++ < 8) {
+                int k;
+                Vita_Log("gs: list %u: DMA tag %d at %08x (id %u, %u quadwords) points to %08x, not in the process's memory: the list ends there; the tags before:\n",
+                         sFrame, guard, (unsigned)(uintptr_t)tag, id, qwc, (unsigned)(uintptr_t)data);
+                for (k = 1; k <= 8 && k <= guard; k++) {
+                    const uint32_t *l = lastT[(guard - k) & 7];
+                    Vita_Log("gs:   at %08x: %08x %08x %08x\n", l[0], l[1], l[2], l[3]);
+                }
+            }
+            break;
+        }
+#endif
 #ifdef PORT_VITA
         {   /* A chain that comes back to where it was (the same tag next, the same calls to return from) goes round for
                ever: in Tag Team a list did, each round with its VU1 calls, and held the list reader more than 10 s.

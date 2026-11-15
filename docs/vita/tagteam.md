@@ -116,12 +116,38 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   most), the display list (366 of 1024 KB), DMA chains (4,263 tags at most, none came back on itself). Now: a list's
   interpreted VU1 work capped at 20 million instructions (the rest left out, the program logged), and a loop in
   the aura flames fixed (`EftAura_StepFlames`: a flame the full pool could not replace was looked at for ever).
-  Cause not found yet.
-- Next, larger:  textures made through the render
-  thread's ring without waiting for it; the GIF packets decoded ahead by the list reader (studied, not done).
+- 2026-11-15, the same stop seen three more times, always at list 2908: once the cap never came (one run of a
+  program of 345 instructions with a loop counter of ~50,000, its kicks keeping the interpreter at ~2 million
+  instructions a second, so a run alone took seconds), once the cap came after 10 s (too late for the watchdog), once
+  a crash in vif() reading 0x4d5b4d5a. So the list's DMA chain itself is bad there: a tag pointing into data that
+  is not a tag. Now: every DMA tag and the data it points to are checked to be in the process's memory (the ranges
+  of the last memory blocks kept, a system call only on a miss); a list whose chain leaves it ends there, logged
+  with its last 8 tags; the interpreter's cap is 2 million instructions a list (no list of a fight or the menus uses
+  it at all) and a quarter of a second for one run. The next occurrence names the tags; who builds them is the
+  next step.
+- 2026-11-15, measured with the processor's counters (libperf, loaded by the development build itself, below): the
+  drawing thread takes ~35 ms a drawn list in 2 vs 2, spread over many parts, none above 3-4 ms (the GIF packets'
+  registers ~9 ms in all, the GS primitives' states and vertices ~8, the uploads ~6.5, the model strips ~6, the kept
+  parts ~5, the picture's end ~4); it runs 0.74 instructions a cycle with 20 instruction-cache misses and 22
+  mispredicted branches per 1000 instructions (the game's thread 0.50). `rtswap` (the swap and the next picture's
+  clear made by the render thread) took the drawing thread's waits for it from ~80 to ~10 every 2 s but the picture
+  rate only from 26.81 to 26.98 a second: off. Next: a profile-guided build (`BT3_PGO`, already in build.py, never
+  used until now) for the instruction cache and the branches; then the GIF packets decoded ahead by the list reader
+  (which is busy only ~16 of every 33 ms).
 
 ## Tools made for it
 
+- `zones=1`: the zones of the drawing thread and the list reader (one drawn list in 8) timed by the system's clock
+  when libperf is not there (a reading costs ~0.7 us, so the small zones come out too large; libperf's counter costs
+  ~95 cycles a mark).
+- libperf without touching `tai/config.txt`: the development build loads `libperf.skprx` itself from its app folder
+  (`ux0:app/BTFV00008/`, beside `libperf.suprx`) with `taiLoadStartKernelModule`, as VitaShell loads its kernel
+  module; it stays loaded until the console restarts (built from https://github.com/shoui520/libperf with the Docker
+  image's VitaSDK: `cmake -S . -B build && cmake --build build -j1`; the examples' packages fail, not needed).
+  vita-agent-use's `config plan/apply` could not be used: it wants a recovery VitaShell on `uma0:`, which this
+  console does not have.
+- `vita_agent_run.py --eboot-dir DIR`: another build folder's `eboot.bin` (the profile-counting build);
+  `docker_build.sh` passes `BT3_PGO` through.
 - `BT4_*` lines of `bt3.txt` go to the game's environment in the development build (`read_settings`).
 - `hangdump=<s>` (development build): after that many seconds without a picture the watchdog stops the program on
   purpose, so that the system writes its crash dump (`ux0:data/psp2core-*.psp2dmp`) with every thread's registers;
