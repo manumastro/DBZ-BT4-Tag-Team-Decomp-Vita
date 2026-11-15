@@ -1,8 +1,8 @@
 /*
  * BT4decomp on the PS Vita: what its PC build's own files give the game, where those files are not in the Vita build.
  *
- * Left out on the Vita, as online play was left out of the BT3 Vita port: online play and its lobbies, the Tag Team
- * rooms (port/src/gs/tag_team_net.c: offline Tag Team goes through them too, so it is not on the Vita yet), the F1
+ * Left out on the Vita, as online play was left out of the BT3 Vita port: online play and its lobbies, the online Tag
+ * Team rooms (port/src/gs/tag_team_net.c; its local room, one player and CPUs, is port/vita/vita_tag.c), the F1
  * window (ui.cpp), voice chat, the screen reader, the script mods, spectating, the PC renderer's own markers and
  * panels, mp3/wav songs and stages added from outside the disc, and the language choice (the Vita reads the one
  * disc in ux0:data/bt4/disc; English).
@@ -218,74 +218,7 @@ unsigned Port_StageArt(int stage,int kind) { return 0; }
 /* (port/src/gs/state.c) */
 void Port_StateLog(unsigned vblank, const void *fight, unsigned fightSize) {}
 
-/* (port/src/gs/tag_team_net.c) */
-const char * Port_TagChatLine(int i) { return ""; }
-const char * Port_TagCode(void) { return ""; }
-const char * Port_TagEndpoint(void) { return ""; }
-const char * Port_TagError(void) { return ""; }
-const char * Port_TagPlayerName(int seat) { return ""; }
-int Port_TagAllArmed(void) { return 0; }
-int Port_TagAllEnded(void) { return 0; }
-int Port_TagAllLoaded(void) { return 0; }
-int Port_TagBgm(void) { return 0; }
-int Port_TagCPU(int seat) { return 0; }
-int Port_TagCanStart(void) { return 0; }
-int Port_TagCancelSelect(void) { return 0; }
-int Port_TagCapacity(void) { return 0; }
-int Port_TagChatCount(void) { return 0; }
-int Port_TagConfirmed(int seat) { return 0; }
-int Port_TagConnect(const char *server) { return 0; }
-int Port_TagCopyCode(void) { return 0; }
-int Port_TagCount(void) { return 0; }
-int Port_TagDataFingerprint(unsigned long long *out) { return 0; }
-int Port_TagDelay(void) { return 0; }
-int Port_TagDifficulty(int seat) { return 0; }
-int Port_TagDraftPending(void) { return 0; }
-int Port_TagDraftSeat(void) { return -1; }
-int Port_TagFreeForAll(void) { return 0; }
-int Port_TagHost(void) { return 0; }
-int Port_TagHumans(void) { return 0; }
-int Port_TagJoinCode(const char *code) { return 0; }
-int Port_TagMovePlayer(int from,int to) { return 0; }
-int Port_TagPhase(void) { return 0; }
-int Port_TagPlayerChara(int seat) { return 0; }
-int Port_TagPlayerCostume(int seat) { return 0; }
-int Port_TagQueueWaiting(int queue) { return 0; }
-int Port_TagReselect(void) { return 0; }
-int Port_TagResultChoice(void) { return 0; }
-int Port_TagSeat(void) { return -1; }
-int Port_TagSendInput(uint32_t frame,const unsigned char pad[16]) { return 0; }
-int Port_TagSlot(int seat,int cpu,int difficulty) { return 0; }
-int Port_TagSlots(void) { return 0; }
-int Port_TagStage(void) { return 0; }
-int Port_TagTakeFrame(unsigned char out[10][16]) { return 0; }
-int Port_TagTeam(int seat) { return 0; }
-int Port_TagTeamCount(int team) { return 0; }
-int Port_TagTeamIndex(int seat) { return 0; }
-int Port_TagTeamSlots(int team) { return 0; }
-int Port_TagTeams(int left,int right) { return 0; }
-int Port_TagTime(void) { return 0; }
-unsigned Port_TagMenuMillis(void) { return 0; }
-unsigned Port_TagSeed(void) { return 0; }
-void Port_TagArena(int stage,int bgm,int attacks) {}
-void Port_TagBattleRenderSet(int active) {}
-void Port_TagCPUOptions(int fill,int difficulty) {}
-void Port_TagCapture(void) {}
-void Port_TagChatSend(const char *text) {}
-void Port_TagClose(void) {}
-void Port_TagCommand(int command,int a,int b) {}
-void Port_TagHash(unsigned frame,unsigned hash) {}
-void Port_TagInitialTeams(int left,int right) {}
-void Port_TagJoin(const char *code,const char *name,uint64_t content) {}
-void Port_TagMenuTestAdvance(unsigned ms) {}
-void Port_TagModeOptions(int free_for_all,int quick) {}
-void Port_TagOpen(int size,int limit,int delay,const char *name,uint64_t content) {}
-void Port_TagPoll(void) {}
-void Port_TagUiCapture(int index) {}
-void Port_TagWait(int phase,int menu,int cursor,int show) {}
-void Port_TagWaitClear(void) {}
-void Port_TagWaitResumed(void) {}
-void Port_TagYield(void) {}
+/* (port/src/gs/tag_team_net.c): the local room is port/vita/vita_tag.c */
 
 /* (port/src/gs/tag_team_sync_client.inc) */
 void Port_TagHashActor(int actor,unsigned x,unsigned y,unsigned z,unsigned hp,unsigned ki,unsigned action,unsigned target,unsigned team,unsigned chara,unsigned costume) {}

@@ -677,7 +677,15 @@ s32 PortScreen_Main(void) {
         }}
         Bgm_Play(0x816 + 2);
         do {
+#ifdef PORT_VITA
+            {   /* the Vita: no online hub; its own setup of a local Tag Team room (port/vita/vita_main.c): 2 to the
+                   character select, 0 back to the main menu */
+                extern s32 Vita_TagSetup(void);
+                result = Vita_TagSetup();
+            }
+#else
             result = PortTbo_Run();
+#endif
             if (result == 2 && TeamSel_TagRun(2)) { result=3; break; }
         } while (result == 2);
         Adx_StopAll();

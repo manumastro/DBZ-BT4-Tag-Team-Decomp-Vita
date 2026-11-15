@@ -51,6 +51,8 @@ char gVitaDisc[256] = HOME "/disc";
 static FILE *sLog;
 static int sHeapCdram, sFloatChoice = -1; /* -1: ask */
 static unsigned long long sStart, sBattleStart, sLastDraw;
+static int sTagMenu = 1; /* bt3.txt tagteam=0: no Tag Team entry in the main menu (Vita_TagMenu, below) */
+static int gVitaHangDump; /* bt3.txt hangdump=<s> (development build): a crash dump after that long without a picture */
 static int gVitaExitAfter; /* bt3.txt exitafter=<s> (development build): the program ends itself after that many seconds */
 static unsigned sBattleStartVb, sLastVb, sLastState = 0xFFFFFFFFu;
 static volatile int sEnded;
@@ -393,7 +395,7 @@ static void summary(int final) {
 
         snprintf(line, sizeof(line), "fight so far: %u vertical blanks in %u.%u s = %u.%u per second = %u%% of the console's speed",
                  vb, (unsigned)(us / 1000000), (unsigned)(us / 100000 % 10), perSec10 / 10, perSec10 % 10, percent);
-        psvDebugScreenPrintf("%s\e[K\n", line);
+        psvDebugScreenPrintf("%s\n", line);
         if (final) {
             logf_("vita: %s\n", line);
         }
@@ -1433,7 +1435,7 @@ static void read_settings(void) {
         /* the released program: only the player's settings. The test runs leave theirs in the same file
            (mode=demo, film=...): a game started from its bubble goes to its title screen, not into a test fight */
         if (strcmp(line, "disc") != 0 && strcmp(line, "heap") != 0 && strcmp(line, "wide") != 0 && strcmp(line, "report") != 0 &&
-            strcmp(line, "fightres") != 0) {
+            strcmp(line, "fightres") != 0 && strcmp(line, "tagteam") != 0) {
             continue;
         }
 #endif
@@ -1753,9 +1755,15 @@ static void read_settings(void) {
         } else if (strcmp(line, "startmode") == 0) { /* the menus start on this screen (62 the options) */
             extern int gVitaStartMode;
             gVitaStartMode = atoi(eq);
+        } else if (strcmp(line, "hangdump") == 0) {
+            gVitaHangDump = atoi(eq);
+        } else if (strcmp(line, "tagteam") == 0) { /* 0: no Tag Team entry in the main menu (Vita_TagMenu) */
+            sTagMenu = atoi(eq) != 0;
         } else if (strcmp(line, "replay") == 0) {
             setenv("BT3_REPLAY", eq, 1);
-        } else if (strncmp(line, "BT3_", 4) == 0) {
+        } else if (strncmp(line, "BT3_", 4) == 0 || strncmp(line, "BT4_", 4) == 0) {
+            /* BT4_ too: BT4decomp's own test switches, e.g. BT4_TAG_ACTOR_TEST=4 (src/battle/battle_work.c
+               TagBattle_Prepare: every fight with 4, 6, 8 or 10 fighters, the extra ones CPUs) */
             setenv(line, eq, 1);
         }
         logf_("vita: setting %s=%s\n", line, eq);
@@ -1937,6 +1945,83 @@ static void unlock_in_menus(void) {
     sTextPause = 0;
 }
 
+/* ---- Tag Team offline: the setup of a local room (one player and CPUs) ----
+   The main menu's Tag Team entry (src/menu/menu_a.c) opens the port's screen mode (src/menu/port_screen.c), which
+   on PC shows the online hub (src/menu/port_tbo.c: pictures and TrueType lines the Vita does not draw). Here this
+   text screen in its place: the mode, the time limit and the CPUs' difficulty, then the room is opened as the PC's
+   offline test does (port_tbo.c Tb_TagUpdate) and the game's own character select follows. docs/vita/tagteam.md */
+int Vita_TagMenu(void) { return sTagMenu; }
+
+int Vita_TagSetup(void) {
+    extern void Port_TagCPUOptions(int fill, int difficulty), Port_TagModeOptions(int free_for_all, int quick);
+    extern int Port_TagConnect(const char *server), Port_TagTeams(int left, int right), Port_TagSlots(void);
+    extern int Port_TagSlot(int seat, int cpu, int difficulty), Port_TagPhase(void);
+    extern void Port_TagOpen(int size, int limit, int delay, const char *name, unsigned long long content);
+    extern void Port_TagCommand(int command, int a, int b), Port_TagClose(void);
+    static const char *const kModeEn[5] = {"2 vs 2", "3 vs 3 (experimental)", "4 vs 4 (experimental)", "5 vs 5 (experimental)", "Free for All, 6 (experimental)"};
+    static const char *const kModeEs[5] = {"2 contra 2", "3 contra 3 (experimental)", "4 contra 4 (experimental)", "5 contra 5 (experimental)", "Todos contra todos, 6 (experimental)"};
+    static const char *const kTimeEn[5] = {"60 s", "90 s", "180 s", "240 s", "No limit"};
+    static const char *const kTimeEs[5] = {"60 s", "90 s", "180 s", "240 s", "Sin limite"};
+    static const char *const kDiffEn[5] = {"Very easy", "Easy", "Normal", "Hard", "Very hard"};
+    static const char *const kDiffEs[5] = {"Muy facil", "Facil", "Normal", "Dificil", "Muy dificil"};
+    static int mode, timeIdx = 2, diff = 2, row;
+    int es = unlock_es(), i, ffa, n, ok;
+    unsigned b;
+
+    sTextPause = 1;
+    logf_("vita: menus: the Tag Team setup\n");
+    Vita_TextScreen();
+    for (;;) {
+        psvDebugScreenPrintf("\e[H\e[2J\n\e[33m%s\e[39m\n\n", es ? "Tag Team (sin conexion): tu y la CPU" : "Tag Team (offline): you and CPU fighters");
+        psvDebugScreenPrintf("%s %-12s %s\n", row == 0 ? "\e[36m>" : " ", es ? "Modo" : "Mode", (es ? kModeEs : kModeEn)[mode]);
+        psvDebugScreenPrintf("%s %-12s %s\n", row == 1 ? "\e[36m>" : "\e[39m ", es ? "Tiempo" : "Time limit", (es ? kTimeEs : kTimeEn)[timeIdx]);
+        psvDebugScreenPrintf("%s %-12s %s\n\e[39m\n", row == 2 ? "\e[36m>" : "\e[39m ", es ? "CPU" : "CPU level", (es ? kDiffEs : kDiffEn)[diff]);
+        psvDebugScreenPrintf("%s\n\n", es ? "Elegiras a tu luchador y a los de la CPU, luego el\nescenario. L3 (panel trasero, abajo a la izquierda)\ncambia de rival."
+                                          : "You choose your fighter and the CPUs' ones, then the\nstage. L3 (the rear pad, lower left) changes target.");
+        psvDebugScreenPrintf("%s\n", es ? "ARRIBA / ABAJO: opcion   IZQUIERDA / DERECHA: cambiar\nCROSS: empezar   CIRCLE: volver"
+                                        : "UP / DOWN: row   LEFT / RIGHT: change\nCROSS: start   CIRCLE: back");
+        b = wait_buttons(SCE_CTRL_UP | SCE_CTRL_DOWN | SCE_CTRL_LEFT | SCE_CTRL_RIGHT | SCE_CTRL_CROSS | SCE_CTRL_CIRCLE);
+        if (b & (SCE_CTRL_CROSS | SCE_CTRL_CIRCLE)) {
+            break;
+        }
+        if (b & SCE_CTRL_UP) row = (row + 2) % 3;
+        if (b & SCE_CTRL_DOWN) row = (row + 1) % 3;
+        if (b & (SCE_CTRL_LEFT | SCE_CTRL_RIGHT)) {
+            int d = (b & SCE_CTRL_LEFT) ? 4 : 1;
+            if (row == 0) mode = (mode + d) % 5;
+            if (row == 1) timeIdx = (timeIdx + d) % 5;
+            if (row == 2) diff = (diff + d) % 5;
+        }
+    }
+    ok = 0;
+    if (b & SCE_CTRL_CROSS) {
+        /* as port_tbo.c Tb_TagUpdate's offline room: CPUs in every other place */
+        ffa = mode == 4;
+        n = ffa ? 3 : mode + 2;
+        Port_TagCPUOptions(1, diff);
+        if (Port_TagConnect(NULL)) {
+            Port_TagModeOptions(ffa, 0);
+            Port_TagOpen(ffa ? 3 : 2, timeIdx, 0, "Player", 0);
+            Port_TagTeams(n, n);
+            for (i = 1; i < Port_TagSlots(); i++) {
+                Port_TagSlot(i, 1, diff);
+            }
+            Port_TagCommand(3 /* TTW_SELECT */, 0, 0);
+            ok = Port_TagPhase() == 2; /* TT_SELECT */
+        }
+        if (!ok) {
+            Port_TagClose();
+        }
+    }
+    logf_("vita: menus: Tag Team setup: %s (mode %d, time %d, CPU %d)\n", ok ? "start" : "back", mode, timeIdx, diff);
+    while (buttons() & (SCE_CTRL_CROSS | SCE_CTRL_CIRCLE)) {
+        sceKernelDelayThread(20000); /* (let go first: the press is not the next screen's too) */
+    }
+    psvDebugScreenPrintf("\e[H\e[2J");
+    sTextPause = 0;
+    return ok ? 2 : 0;
+}
+
 static void start_screen(void) {
 #ifdef PORT_VITA_RELEASE
     /* The released program: no start screen. The game from its start (logos, title, menus). */
@@ -2106,6 +2191,17 @@ static int watchdog_thread(SceSize args, void *argp) {
             still = 0;
             continue;
         }
+#ifndef PORT_VITA_RELEASE
+        if (gVitaHangDump > 0 && last != 0 && sLogThreaded && (still + 1) / 2 >= (unsigned)gVitaHangDump) {
+            /* bt3.txt hangdump=<s>: the program stopped on purpose after that long without a picture, so that the
+               system writes its crash dump (ux0:data/psp2core-*.psp2dmp) with every thread's registers and stack:
+               where a hung thread is, with vita-parse-core and bt3.unstripped.elf */
+            logf_("vita: hangdump: no picture for %d s: the program is stopped on purpose for a crash dump\n", gVitaHangDump);
+            log_sync();
+            sceKernelDelayThread(500000);
+            *(volatile int *)0 = 0x48414e47;
+        }
+#endif
         if (last == 0 || !sLogThreaded || ++still % 6 != 0 || dumps >= 4) { /* (not before the first picture, nor at the end) */
             continue;
         }

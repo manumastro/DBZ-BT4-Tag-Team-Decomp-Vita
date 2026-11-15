@@ -508,7 +508,7 @@ u32 BtlInput_GetKeyMask(BtlInputChr *chr, s32 action) {
     { /* the control type as the controller page shows it: Normal (the handheld's: Ki Charge on L) or the
          custom set, read here rather than from key[], which the console copied only when the player row was left */
         s32 tmp[SAVE_KEY_COUNT];
-        const s32 *key = Save_PortKeys(chr->player, tmp);
+        const s32 *key = Save_PortKeys(TagBattle_Active() ? chr->pad : chr->player, tmp); /* (Tag Team: the pad, as below) */
 
         for (i = 0; i < SAVE_KEY_COUNT; i++) {
             if (key[i] == action) {

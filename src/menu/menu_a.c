@@ -316,6 +316,13 @@ void MainMenu_Init(s32 section) {
         if (i == 3) {
             gMainMenu->items[gMainMenu->itemCount++] = MAINMENU_TBO;
         }
+#elif defined(PORT_VITA) /* the Vita: the same entry, for Tag Team offline (one player and CPUs: port/vita/vita_tag.c) */
+        if (i == 3) {
+            extern int Vita_TagMenu(void); /* (bt3.txt tagteam=0 hides it) */
+            if (Vita_TagMenu()) {
+                gMainMenu->items[gMainMenu->itemCount++] = MAINMENU_TBO;
+            }
+        }
 #endif
     }
 #ifdef PORT

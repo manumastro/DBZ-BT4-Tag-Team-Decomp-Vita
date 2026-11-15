@@ -17,8 +17,9 @@ does differently.
   `Port_NetSession` 0, `Port_NetSpeedMilli` 1000, `Port_OnlineBlocked` "Online play is not available on the PS
   Vita.", the `Port_Lobby*`, `Port_Ranked*`, `PortVoice_*` stubs, `Port_TagNetwork` 0, and the data fingerprint
   (`plat_fprint.c`) and verification (`plat_verify.c`) stubs.
-- **Offline Tag Team is off too**: the game reaches the Tag Team rooms through `tag_team_net.c` even for a local
-  room with CPUs (`Port_TagConnect("")`, `local_room`), and that file is stubbed (`vita_bt4.c`'s header).
+- **Offline Tag Team is off too**: `tag_team_net.c` is stubbed (`vita_bt4.c`'s header). On the PC a room of one
+  player and CPUs is still an online room; the local room (`Port_TagConnect(NULL)`, `local_room`) is reached only by
+  the render tests. The plan for an offline Tag Team on the Vita: [tagteam.md](tagteam.md).
 - Code size of the online part: `net*.c` about 11,200 lines (C), signaling about 1,400 (C++), Tag Team about 2,800,
   voice about 1,000.
 

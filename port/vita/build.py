@@ -227,7 +227,9 @@ def port_sources():
             (V / "vita_read.c", "hard"), (V / "vita_pgo.c", "hard"), (V / "vita_iso.c", "hard"),
             # BT4decomp: the presentation switches and the fighters' sounds by distance as on PC; what its other PC files
             # give the game, answered as the game without them (online play, Tag Team rooms, the F1 window: vita_bt4.c)
-            (S / "gs/presentation.c", "gs"), (S / "gs/snd_spatial.c", "gs"), (V / "vita_bt4.c", "hard")]
+            (S / "gs/presentation.c", "gs"), (S / "gs/snd_spatial.c", "gs"), (V / "vita_bt4.c", "hard"),
+            # Tag Team offline: the room model and its local room (docs/vita/tagteam.md)
+            (S / "tag_team.c", "hard"), (V / "vita_tag.c", "hard")]
     return out
 
 
