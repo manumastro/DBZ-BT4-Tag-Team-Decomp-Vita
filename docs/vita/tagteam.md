@@ -151,6 +151,18 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
 
 ## Tools made for it
 
+- 2026-11-15, tried and dropped: the GIF packets decoded on the list reader (`gifpre`, not kept in the tree). The
+  list reader kept a copy of the registers that make the vertices (PRIM, RGBAQ, ST, UV, XYOFFSET, the vertex queue,
+  the GIF tag), followed through every record it sent, the kept calls' records too, and sent the drawing thread
+  register writes, primitives with their vertices made and runs of triangles instead of the packets. Exact: a check
+  mode drew from the packets and compared each primitive and the registers after them, 0 differing in a 200 s run.
+  But slower: 22.4 pictures a second against 26.9 (2 vs 2 demo fight, 15-101 s). The drawing thread's time in the
+  packets went from 256 to 246 ms every 2 s, while the list reader's went from 388 to 1,106 (its idle 659 -> 138 ms):
+  the decoded records were larger than the packets (~1.2 MB a list), and following the kept calls meant reading their
+  records again. Even without the registers' tail and the kept calls (a measurement only, not exact) the drawing
+  thread gained ~0.6 ms a list (packets 256 -> 172 ms every 2 s, but the primitives 337 -> 372: their vertices no
+  longer in the cache) and the list reader lost ~4. The drawing thread's GIF time is bound by memory, not by the
+  parsing: moving the parsing does not move the cost.
 - `zones=1`: the zones of the drawing thread and the list reader (one drawn list in 8) timed by the system's clock
   when libperf is not there (a reading costs ~0.7 us, so the small zones come out too large; libperf's counter costs
   ~95 cycles a mark).
