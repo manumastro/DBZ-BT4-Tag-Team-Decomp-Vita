@@ -1953,6 +1953,79 @@ static void transfer_begin(void) {
 #ifdef PORT_VITA
 static int sUpLazyAll; /* (the upload being made: all of its blocks taken note of, none written: up_piece) */
 #endif
+/* ---- The large uploads' plans (bt3.txt upplan). An upload taken note of by the block (up_piece, below) worked out
+   the place in GS memory of each of its blocks one after the other (vram_rw: the format's block tables, the
+   buffer's width), and the game sends every texture every frame to the same places: 130-150 such uploads a picture in
+   a 2 vs 2 fight, 10,000 blocks and more. A plan is the list of the blocks of one rectangle (place, width, format,
+   position, size), made the first time and read after: the blocks' ids, their planes' numbers, their destination are
+   written exactly as before, only their places come from the plan. Every 64th use the places are worked out again and
+   compared (a plan found wrong is mended).
+   And an upload to a destination that holds another upload's data, unchanged since (its pages' numbers the same), does
+   not have its rectangle's number worked out to find its own data there (it cannot be: the blocks' ids are made from
+   the other upload's number): it is taken note of again at once; every 64th time the number is worked out all the
+   same and compared (an upload found there all the same is counted, and not taken note of again, as before). ---- */
+int gVitaUpPlan;          /* 0 off (default), 1 on, 2 in the soak's B battles */
+unsigned gVitaPlan[7];    /* for the log: plans used, made, checked, wrong; rectangles' numbers not worked out (another
+                             upload's data there), worked out all the same (every 64th), of them found the same */
+#define PLAN_SLOTS 512
+#define PLAN_POOL 65536 /* the blocks of all the plans (128 KB): when full, all of them are let go and made again */
+#define PLAN_MAX 4096   /* blocks in one plan at most (a 512 x 512 picture of 32-bit pixels) */
+typedef struct UpPlan { uint32_t bp, bw, psm, pos, size, at, n, gen, uses; } UpPlan;
+static UpPlan sPlan[PLAN_SLOTS];
+static uint16_t sPlanPool[PLAN_POOL];
+static uint32_t sPlanTop, sPlanGen = 1;
+static int plan_on(void) {
+    extern int gVitaAbSide;
+    return gVitaUpPlan == 2 ? gVitaAbSide == 1 : gVitaUpPlan != 0;
+}
+/* the plan of the n blocks of the rectangle (x0, y0, w, h) of the buffer (bp, bw, psm); *mode: 1 read it, 2 read it and
+   check it, 3 make it (written by the caller, block by block), 0 none */
+static uint16_t *plan_get(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, uint32_t n, int *mode) {
+    uint32_t pos = x0 | y0 << 16, size = w | h << 16;
+    UpPlan *pl = &sPlan[((bp | bw << 14 | psm << 20) * 0x9E3779B1u ^ pos * 0x85EBCA6Bu ^ size * 0xC2B2AE35u) >> 23];
+
+    if (pl->gen == sPlanGen && pl->bp == bp && pl->bw == bw && pl->psm == psm && pl->pos == pos && pl->size == size && pl->n == n) {
+        gVitaPlan[0]++;
+        if ((++pl->uses & 63) == 0) {
+            gVitaPlan[2]++;
+            *mode = 2;
+        } else {
+            *mode = 1;
+        }
+        return &sPlanPool[pl->at];
+    }
+    if (n == 0 || n > PLAN_MAX) {
+        *mode = 0;
+        return NULL;
+    }
+    if (sPlanTop + n > PLAN_POOL) { /* (every plan let go: made again as their uploads come) */
+        sPlanTop = 0;
+        sPlanGen++;
+    }
+    pl->bp = bp; pl->bw = bw; pl->psm = psm; pl->pos = pos; pl->size = size;
+    pl->at = sPlanTop; pl->n = n; pl->gen = sPlanGen; pl->uses = 0;
+    sPlanTop += n;
+    gVitaPlan[1]++;
+    *mode = 3;
+    return &sPlanPool[pl->at];
+}
+/* whether the rectangle (gs.tx, gs.ty, gs.tw, gs.th) holds what an upload left there (its number `rect`); `other`: its
+   destination holds another upload's data, unchanged since (upplan): not worked out, but every 64th time */
+static int plan_rect_same(int other, uint32_t dbp, uint32_t dbw, uint32_t dpsm, uint32_t rect) {
+    static unsigned k;
+    int same;
+
+    if (other && (++k & 63) != 0) {
+        gVitaPlan[4]++;
+        return 0;
+    }
+    same = up_rect_id(dbp, dbw, dpsm, gs.tx, gs.ty, gs.tw, gs.th) == rect;
+    if (other) {
+        gVitaPlan[5]++;
+        gVitaPlan[6] += (unsigned)same;
+    }
+    return same;
+}
 static void up_piece(uint32_t bp, uint32_t bw, uint32_t psm, int bits, uint32_t gw, uint32_t gh, uint32_t x0, uint32_t y0,
                      uint32_t w, uint32_t h, const uint8_t *src) {
     uint32_t stride = w * (uint32_t)bits / 8, bx, by;
@@ -1963,9 +2036,24 @@ static void up_piece(uint32_t bp, uint32_t bw, uint32_t psm, int bits, uint32_t 
 
         if (e >= 0) {
             uint32_t lo = (uint32_t)hash ^ (uint32_t)bits << 24 ^ stride, hi = (uint32_t)(hash >> 32);
+            int pm = 0, bad = 0; /* (upplan: the blocks' places from the plan, read, checked or made; above) */
+            uint16_t *pb = plan_on() ? plan_get(bp, bw, psm, x0, y0, w, h, ((w + gw - 1) / gw) * ((h + gh - 1) / gh), &pm) : NULL;
             for (by = 0; by < h; by += gh) {
                 for (bx = 0; bx < w; bx += gw, n++) {
-                    Blk *k = &sBlk[vram_rw(bp, bw, psm, x0 + bx, y0 + by, 2, 0)];
+                    uint32_t b;
+                    Blk *k;
+                    if (pm == 1) {
+                        b = pb[n];
+                    } else {
+                        b = vram_rw(bp, bw, psm, x0 + bx, y0 + by, 2, 0);
+                        if (pm == 3) {
+                            pb[n] = (uint16_t)b;
+                        } else if (pm == 2 && pb[n] != b) {
+                            pb[n] = (uint16_t)b;
+                            bad = 1;
+                        }
+                    }
+                    k = &sBlk[b];
                     uint32_t id = (lo + n * 0x9E3779B1u) * 0x85EBCA6Bu;
                     id = (id ^ id >> 15 ^ hi) * 0xC2B2AE35u;
                     k->id = id ^ id >> 13;
@@ -1980,6 +2068,7 @@ static void up_piece(uint32_t bp, uint32_t bw, uint32_t psm, int bits, uint32_t 
 #endif
                 }
             }
+            gVitaPlan[3] += (unsigned)bad;
             gVitaUp[2] += w * h;
             return;
         }
@@ -2301,6 +2390,7 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
            written again, 5,500 cycles, and counted as a change of GS memory */
         void *mm = NULL;
         int memoWhy = 0;
+        int other = 0; /* (upplan: the destination holds another upload's data, unchanged since: plan_rect_same) */
         if (sLazy && gs.tpos == 0 && n == total && bytes >= 2048) {
             static struct { uint64_t bb, hash; uint32_t x, y, w, h, rect; int valid; } *m;
             extern volatile int gVitaZoneOn;
@@ -2324,6 +2414,7 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
                     sUpCat = 2;
                     return;
                 }
+                other = plan_on() && d->valid && d->dk == dk && d->pos == pos && d->size == size && d->name != hash && d->sig == dest_check(d);
                 d->valid = 0;
                 d->dk = dk; d->pos = pos; d->size = size; d->name = hash; d->rect = 0xFFFFFFFEu; /* (its rectangle's number: below, once written by the block) */
                 d->nblk = 0;
@@ -2332,7 +2423,7 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
             }
             m = (void *)&memo[(uint32_t)((hash ^ gs.bitbltbuf >> 32 ^ gs.tx * 31u ^ gs.ty * 131u) * 0x9E3779B1u) >> 24];
             memoWhy = !m->valid ? 0 : (m->bb != gs.bitbltbuf || m->x != gs.tx || m->y != gs.ty || m->w != gs.tw || m->h != gs.th) ? 2 : m->hash != hash ? 1 : 3;
-            if (memoWhy == 3 && up_rect_id(dbp, dbw, dpsm, gs.tx, gs.ty, gs.tw, gs.th) == m->rect) {
+            if (memoWhy == 3 && plan_rect_same(other, dbp, dbw, dpsm, m->rect)) {
                 gs.tpos = total;
                 gVitaUp[2] += total;
                 {   /* Nothing to write, but an upload all the same: a page the game DREW into (a work buffer, on the
