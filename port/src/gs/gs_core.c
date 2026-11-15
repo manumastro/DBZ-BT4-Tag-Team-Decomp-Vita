@@ -4537,11 +4537,27 @@ static void gr_exec(const GRec *r) {
                 __builtin_prefetch(&ds->f[fk].val[4]);
             }
         }
-        memcpy(sGrConsts, r + 1, 384);
-        { extern unsigned gVglConstGen; gVglConstGen++; }
-        if (dp_part(r->c, sGrConsts)) {
-            GZM(1);
-            break; /* drawn from its kept form */
+        {
+#ifdef PORT_VITA
+            /* dprt (vita_vgl.c GsGpu_DpRtOn): the constants read from the record (it stays until this returns; the
+               back end copies what it keeps) and copied into sGrConsts only when the part is walked: after a GR_PART
+               the next strip record carries its constants again (cc_replay: sFeHave = 0) */
+            extern int GsGpu_DpRtOn(void);
+            const int fromRec = GsGpu_DpRtOn();
+#else
+            const int fromRec = 0;
+#endif
+            if (!fromRec) {
+                memcpy(sGrConsts, r + 1, 384);
+            }
+            { extern unsigned gVglConstGen; gVglConstGen++; }
+            if (dp_part(r->c, fromRec ? (const float *)(const void *)(r + 1) : sGrConsts)) {
+                GZM(1);
+                break; /* drawn from its kept form */
+            }
+            if (fromRec) {
+                memcpy(sGrConsts, r + 1, 384); /* (the part's strips read them) */
+            }
         }
         cap = dp_cap_begin(r->c);
 #ifdef PORT_VITA
