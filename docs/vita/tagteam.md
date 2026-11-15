@@ -125,6 +125,17 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   with its last 8 tags; the interpreter's cap is 2 million instructions a list (no list of a fight or the menus uses
   it at all) and a quarter of a second for one run. The next occurrence names the tags; who builds them is the
   next step.
+- 2026-11-15, the guard caught it (list 2909): `Vu1Pkt_LoadProg0`'s REF and CNT, then a model part's CALL
+  (`Vu1Pkt_CallProg0`, `ObjDraw_DrawParts`) to 0x88d40eb0, below the game heap, in a block of the C library's heap
+  (`Port_GameBigAlloc`: Tag Team's model files), where a file's header lay instead of the part's chain. Tag Team
+  reloads a fighter's files in the fight (`BtlRes_Reload`; the old buffers are freed by the next reload,
+  `BtlRes_TagDiscardReload`, and the new ones allocated and read at once, often at the same place), while the list
+  reader is one list behind the game: the list handed over before the free still called into the old model. On the
+  PS2 the DMA was over long before a disc read could end. Now `Port_GameBigFree` waits for the lists handed over and
+  the drawing thread's queue (`Port_GsSync`) before it gives a block back; logged ("a block outside the game heap
+  ... given back") and counted in the report. On the console: 8 runs of that fight with it, the guard never caught a
+  tag again (before: the stop in about 4 runs of 9); one block given back at about 106 s in 2 of the 3 runs that log
+  it (the third had no reload); the speed the same (98.1-98.4%, 26.1-26.7 pictures a second, 15-101 s).
 - 2026-11-15, measured with the processor's counters (libperf, loaded by the development build itself, below): the
   drawing thread takes ~35 ms a drawn list in 2 vs 2, spread over many parts, none above 3-4 ms (the GIF packets'
   registers ~9 ms in all, the GS primitives' states and vertices ~8, the uploads ~6.5, the model strips ~6, the kept

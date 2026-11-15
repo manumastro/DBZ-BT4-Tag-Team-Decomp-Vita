@@ -16,6 +16,7 @@
 #include <malloc.h>
 #include "vita_paths.h"
 #include <psp2/io/fcntl.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/sysmem.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -200,10 +201,25 @@ int Port_GameBigFree(unsigned addr) {
     if (h[0] != BIG_MAGIC || h[1] != ((uint32_t)(uintptr_t)h ^ BIG_MAGIC)) {
         return 0;
     }
+    {   /* The lists already handed over may still read the block: Tag Team reloads a fighter's model files in the
+           fight (btl_obj.c: BtlRes_TagCommitReload frees the old ones), and the list reader, one list behind, then
+           followed a model's DMA CALL into the next file loaded at the same place (a list of the 2 vs 2 demo fight,
+           about 105 s in: the VU1 interpreter for seconds, or a crash in vif()). On the PS2 the DMA was over long
+           before a disc read could finish. Rare (a fighter's files): the wait is for one list at most. */
+        extern void Port_GsSync(void);
+        extern unsigned gVitaBigFreeSync;
+        extern void Vita_Log(const char *fmt, ...);
+        Port_GsSync();
+        if (gVitaBigFreeSync++ < 64) {
+            Vita_Log("vita: a block outside the game heap at %08x given back (%u ms), after the lists handed over\n", addr,
+                     (unsigned)(sceKernelGetProcessTimeWide() / 1000));
+        }
+    }
     h[0] = 0;
     free(h);
     return 1;
 }
+unsigned gVitaBigFreeSync; /* for the log: blocks outside the game heap given back after the lists had been read */
 
 /* Which game the shared code runs (include/port_variant.h): 1, the Budokai Tenkaichi 4 mod, in BT4decomp's build */
 #ifdef PORT_VITA_BT4
