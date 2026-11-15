@@ -1455,6 +1455,7 @@ typedef struct WorkTarget { uint32_t fbp, fbw; int w, h; GLuint tex, fbo; uint8_
 static WorkTarget sWt[WT_MAX];
 static int sWtN;
 static unsigned gVitaBoneBad;      /* fighters' bones or vertices that were not finite */
+static unsigned sDpRtBone;         /* (dprt: those the render thread found, added to gVitaBoneBad after rt_sync) */
 static unsigned sWtRej[WT_MAX][8]; /* primitives into a target refused, by the reason (sRejWhy) */
 static int sWtOn;           /* (made at the start: bt3.txt safe2=128 leaves them out) */
 int gVitaFxOff;             /* (the log's pictures without the effects: with the work page off) */
@@ -7048,6 +7049,10 @@ void GsGpu_FrameEnd(void) {
     flush();
     flush_bins_c(1);
     rt_sync(); /* the render thread's draws done: what follows is this thread's (the parts kept are let go, the swap) */
+    if (sDpRtBone != 0) { /* (dprt: the bones not finite the render thread found) */
+        gVitaBoneBad += sDpRtBone;
+        sDpRtBone = 0;
+    }
     {   /* vitaGL's GXM state calls left out when they change nothing (bt3.txt gxmcache=: 0 off, 1 on, 2 on in the soak's
            B battles); set here, the render thread idle */
         extern int vgl_bt3_gxm_cache, gVitaAbSide;
@@ -8551,6 +8556,29 @@ int GsGpu_DpFastOn(void) {
     extern int gVitaAbSide;
     return gVitaDpFast == 2 ? gVitaAbSide == 1 : gVitaDpFast != 0;
 }
+/* bt3.txt dprt: a kept part's fighter uniform blocks worked out by the render thread, and the kept parts' groups
+   handed to it by their place instead of copied into the ring. The drawing thread (the bottleneck in 2 vs 2) only
+   copies the part's constants (384 bytes, once for all its blocks) and notes each block's job (its DpUb, where its
+   constants are, where it goes); the render thread fills the blocks in the ring before it draws. What it reads that
+   is not in the ring, the kept part's groups and DpUb, is never changed after the part was kept (dp_end), and the
+   part is freed only after rt_sync (dp_free_pending). The direct strips' groups (sDsGroup) change until dp_draw_all
+   and are still copied; the textures (texture_get_k) and the GS state (dp_match) stay on the drawing thread.
+   0 off (default), 1 on, 2 in the soak's B battles; the switch is also gs_core.c's GR_PART: the constants read from
+   the record instead of copied into sGrConsts first (copied only when the part is walked). */
+int gVitaDpRt = 0;
+unsigned gVitaDpRtN[5]; /* for the log: parts whose blocks the render thread worked out, its blocks, groups handed over by their place, bytes not copied, bytes added (constants, jobs) */
+int GsGpu_DpRtOn(void) {
+    extern int gVitaAbSide;
+    return gVitaDpRt == 2 ? gVitaAbSide == 1 : gVitaDpRt != 0;
+}
+typedef struct DpJob { const DpUb *ub; uint32_t c, o; uint16_t floats; uint8_t clipOff, pad_; } DpJob; /* (c: in the constants, o: in the blocks, in floats) */
+#define DP_JOBS 2048
+#define DP_CFLOATS (96 * 1024)
+static DpJob sDpJob[DP_JOBS];
+static int sDpJobN;
+static float sDpC[DP_CFLOATS] __attribute__((aligned(16))); /* the parts' constants (96 floats each) */
+static int sDpCN;
+static int sDpRtLive;      /* a packet in the ring points into kept parts (their groups, their DpUb): rt_sync before they are freed */
 typedef struct DpItem { const DpGroup *g; const float *u; GLuint tex; int next; } DpItem;
 #define DP_ITEMS 2048
 static DpItem sDpItem[DP_ITEMS];
@@ -8853,6 +8881,10 @@ void GsGpu_DpFree(void *blob) {
         return;
     }
     if (sDpFreeN == 4096) {
+        if (sDpRtLive) {
+            rt_sync(); /* (dprt: the ring may point into it) */
+            sDpRtLive = 0;
+        }
         free(sDpFreeList[0]); /* (not reached: 4096 in one frame) */
         memmove(sDpFreeList, sDpFreeList + 1, 4095 * sizeof(void *));
         sDpFreeN--;
@@ -8861,6 +8893,10 @@ void GsGpu_DpFree(void *blob) {
 }
 static void dp_free_pending(void) {
     int i;
+    if (sDpRtLive) {
+        rt_sync(); /* (dprt: the ring may point into them; done already where this is called, so nothing waited for) */
+        sDpRtLive = 0;
+    }
     for (i = 0; i < sDpFreeN; i++) {
         free(sDpFreeList[i]);
     }
@@ -8870,7 +8906,11 @@ static void dp_free_pending(void) {
 /* bones A (0..15, pivot 32..34) and B (16..31, pivot 36..38) of a fighter's uniform block that are not
    finite: replaced by the identity (and a pivot of 0) so that nothing else turns NaN; the flags (1 A, 2 B) for the
    shader, which drops the vertices that use such a bone */
+static float bone_fix_n(float *o, unsigned *cnt);
 static float bone_fix(float *o) {
+    return bone_fix_n(o, &gVitaBoneBad);
+}
+static float bone_fix_n(float *o, unsigned *cnt) { /* (cnt: the counter of the thread it runs on, dprt) */
     int m, k, bad = 0;
     for (m = 0; m < 2; m++) {
         uint32_t acc = 0;
@@ -8892,17 +8932,21 @@ static float bone_fix(float *o) {
         }
     }
     if (bad) {
-        gVitaBoneBad++;
+        (*cnt)++;
     }
     return (float)bad;
 }
 /* a part's uniform block: the fighters' (vertex program 0, layer 0 or 1) or the stage's (program 4) */
-static void dp_ublock(float *o, const float *c, const DpUb *ub, uint32_t floats);
-static void dp_ublock_fast(float *o, const float *c, const DpUb *ub, uint32_t floats) {
+static void dp_ublock_x(float *o, const float *c, const DpUb *ub, uint32_t floats, int clipOff, unsigned *bone);
+static void dp_ublock(float *o, const float *c, const DpUb *ub, uint32_t floats) {
+    dp_ublock_x(o, c, ub, floats, gVitaClipOff, &gVitaBoneBad);
+}
+/* (clipOff and bone given: dprt runs it on the render thread, with gVitaClipOff as it was when the part came) */
+static void dp_ublock_fast_x(float *o, const float *c, const DpUb *ub, uint32_t floats, int clipOff, unsigned *bone) {
     if (ub->mode == 1 && ub->layer != 2) { /* (every float of 0..91 written: no clearing but the tail) */
         int k;
         memcpy(o, c, 160);
-        o[75] = bone_fix(o);
+        o[75] = bone_fix_n(o, bone);
         o[40] = c[40]; o[41] = c[44]; o[42] = c[48]; o[43] = c[52];
         for (k = 0; k < 4; k++) {
             float v = c[(ub->layer == 0 ? 88 : 92) + k];
@@ -8912,7 +8956,7 @@ static void dp_ublock_fast(float *o, const float *c, const DpUb *ub, uint32_t fl
         memcpy(&o[64], ub->t8, 32);
         o[72] = (float)ub->layer;
         o[73] = 0.0f;
-        if (!gVitaClipOff) {
+        if (!clipOff) {
             o[74] = 1.0f;
             memcpy(&o[76], &c[72], 64);
         } else {
@@ -8932,16 +8976,19 @@ static void dp_ublock_fast(float *o, const float *c, const DpUb *ub, uint32_t fl
         }
         return;
     }
-    dp_ublock(o, c, ub, floats);
+    dp_ublock_x(o, c, ub, floats, clipOff, bone);
 }
-static void dp_ublock(float *o, const float *c, const DpUb *ub, uint32_t floats) {
+static void dp_ublock_fast(float *o, const float *c, const DpUb *ub, uint32_t floats) {
+    dp_ublock_fast_x(o, c, ub, floats, gVitaClipOff, &gVitaBoneBad);
+}
+static void dp_ublock_x(float *o, const float *c, const DpUb *ub, uint32_t floats, int clipOff, unsigned *bone) {
     const float *u17 = ub->u17;
     float *t;
     memset(o, 0, floats * 4);
     if (ub->mode == 1) {
         int k;
         memcpy(o, c, 160);                                  /* 0..9: bones and pivots (VU memory 0..9) */
-        o[75] = bone_fix(o);                                /* */
+        o[75] = bone_fix_n(o, bone);                        /* */
         o[40] = c[40]; o[41] = c[44]; o[42] = c[48]; o[43] = c[52]; /* 10: the light */
         for (k = 0; k < 4; k++) {                           /* 11: the layer's colour (layer 2: program 2's, where layer 0's is) */
             float v = c[(ub->layer == 0 || ub->layer == 2 ? 88 : 92) + k];
@@ -8956,7 +9003,7 @@ static void dp_ublock(float *o, const float *c, const DpUb *ub, uint32_t floats)
             return;
         }
         o[72] = (float)ub->layer;
-        if (!gVitaClipOff) { /* program 0's clip-test matrix: its reject (kVertFtD) */
+        if (!clipOff) { /* program 0's clip-test matrix: its reject (kVertFtD) */
             o[74] = 1.0f;
             memcpy(&o[76], &c[72], 64);
         }
@@ -8983,10 +9030,13 @@ void GsGpu_DpDraw(const void *blob, const float *c) {
     if (VITA_RARE(gVitaSliver) && b->nub > 0 && b->ub[0].mode == 1) {
         bone_check(c, "kept part");
     }
-    if (sDpItemN + b->ngroups > DP_ITEMS || sDpUN + b->nub * 128 > DP_UFLOATS) {
+    extern int gVitaShadeLog;
+    const int fast = GsGpu_DpFastOn();
+    const int quick = fast && !VITA_RARE(gVitaFilm > 0) && !VITA_RARE(gVitaShadeLog);
+    const int rt = quick && sRtOn && GsGpu_DpRtOn(); /* (dprt: the fighters' blocks worked out by the render thread) */
+    if (sDpItemN + b->ngroups > DP_ITEMS || sDpUN + b->nub * 128 > DP_UFLOATS || (rt && (sDpCN + 96 > DP_CFLOATS || sDpJobN + b->nub > DP_JOBS))) {
         dp_draw_all();
     }
-    const int fast = GsGpu_DpFastOn();
     if (gVitaOrder && sBinCount > 0) { /* the batches waiting came first: drawn first when the order matters */
         int unsafe = sBinLastUnsafe >= 0 || (fast && b->unsafe);
         for (i = 0; i < b->ngroups && !unsafe && !fast; i++) {
@@ -8998,20 +9048,37 @@ void GsGpu_DpDraw(const void *blob, const float *c) {
     }
     flush(); /* GS primitives that came before */
     ZM(33);
+    int cAt = -1; /* (dprt: where the part's constants were copied) */
     for (i = 0; i < b->nub; i++) {
         uint32_t floats = sDpUSize[b->ub[i].mode == 1 ? 0 : 1] / 4;
         float *o = &sDpU[sDpUN];
         sDpUN += (int)((floats + 3) & ~3u);
-        if (fast) {
+        if (rt && b->ub[i].mode == 1) { /* its place kept, its job noted (the stage's blocks: 24 floats from 16, as cheap as the job) */
+            DpJob *j = &sDpJob[sDpJobN++];
+            if (cAt < 0) {
+                cAt = sDpCN;
+                memcpy(&sDpC[sDpCN], c, 384);
+                sDpCN += 96;
+            }
+            j->ub = &b->ub[i];
+            j->c = (uint32_t)cAt;
+            j->o = (uint32_t)(o - sDpU);
+            j->floats = (uint16_t)floats;
+            j->clipOff = gVitaClipOff != 0;
+            j->pad_ = 0;
+            gVitaDpRtN[1]++;
+        } else if (fast) {
             dp_ublock_fast(o, c, &b->ub[i], floats);
         } else {
             dp_ublock(o, c, &b->ub[i], floats);
         }
         ub[i] = o;
     }
+    if (cAt >= 0) {
+        gVitaDpRtN[0]++;
+    }
     ZM(34);
-    extern int gVitaShadeLog;
-    if (fast && !VITA_RARE(gVitaFilm > 0) && !VITA_RARE(gVitaShadeLog)) {
+    if (quick) {
         extern unsigned gGsEpoch;
         extern volatile uint64_t gGsClutT0;
         for (i = 0; i < b->ngroups; i++) {
@@ -9902,16 +9969,38 @@ static void dp_draw_items(DpItem *items, int n, int prof, unsigned frame) {
         }
     }
 }
-/* the render thread's copy of the items, their groups and their uniform blocks */
-typedef struct RtDp { int n, prof; uint32_t uf, frame; } RtDp;
+/* dprt: the uniform blocks whose jobs were noted (GsGpu_DpDraw), written into `u` (the ring's copy, or sDpU when
+   drawn here) from the constants `cst` */
+static void dp_jobs_run(float *u, const float *cst, const DpJob *j, uint32_t nj, unsigned *bone) {
+    uint32_t k;
+    for (k = 0; k < nj; k++, j++) {
+        dp_ublock_fast_x(u + j->o, cst + j->c, j->ub, j->floats, j->clipOff, bone);
+    }
+}
+/* the render thread's copy of the items, their groups and their uniform blocks (dprt: the kept parts' groups by
+   their place, the fighters' blocks left to fill, with the constants and the jobs that fill them) */
+typedef struct RtDp { int n, prof; uint32_t uf, frame, nj, ou, oc, oj; } RtDp;
 static int rt_put_dp(void) {
-    uint32_t n = (uint32_t)sDpItemN, uf = (uint32_t)sDpUN, i;
-    uint32_t oi = a16((uint32_t)sizeof(RtDp)), og = oi + a16(n * (uint32_t)sizeof(DpItem)), ou = og + a16(n * (uint32_t)sizeof(DpGroup)), total = ou + uf * 4u;
+    const int ptrs = GsGpu_DpRtOn();
+    const uintptr_t ds0 = (uintptr_t)sDsGroup, ds1 = (uintptr_t)(sDsGroup + DP_ITEMS);
+    uint32_t n = (uint32_t)sDpItemN, uf = (uint32_t)sDpUN, nj = (uint32_t)sDpJobN, nc = (uint32_t)sDpCN, i, ng = n, at, holes = 0;
+    uint32_t oi, og, ou, oc, oj, total;
     uint8_t *p;
     RtDp *d;
     DpItem *it;
     DpGroup *g;
     float *u;
+    if (ptrs) { /* (only the direct strips' groups copied: they change until dp_draw_all) */
+        for (i = 0, ng = 0; i < n; i++) {
+            ng += (uintptr_t)sDpItem[i].g >= ds0 && (uintptr_t)sDpItem[i].g < ds1;
+        }
+    }
+    oi = a16((uint32_t)sizeof(RtDp));
+    og = oi + a16(n * (uint32_t)sizeof(DpItem));
+    ou = og + a16(ng * (uint32_t)sizeof(DpGroup));
+    oc = ou + a16(uf * 4u);
+    oj = oc + a16(nc * 4u);
+    total = oj + nj * (uint32_t)sizeof(DpJob);
     if (total > RT_RING / 4) {
         return 0;
     }
@@ -9924,12 +10013,43 @@ static int rt_put_dp(void) {
     d->prof = sProf;
     d->frame = gGsFrame;
     d->uf = uf;
-    memcpy(u, sDpU, uf * 4u);
-    for (i = 0; i < n; i++) {
-        g[i] = *sDpItem[i].g;
+    d->nj = nj;
+    d->ou = ou;
+    d->oc = oc;
+    d->oj = oj;
+    if (nj == 0) {
+        memcpy(u, sDpU, uf * 4u);
+    } else { /* (the blocks the render thread fills are not copied: the jobs come in the order of their places) */
+        for (i = 0, at = 0; i < nj; i++) {
+            uint32_t o = sDpJob[i].o, len = ((uint32_t)sDpJob[i].floats + 3u) & ~3u;
+            if (o > at) {
+                memcpy(u + at, sDpU + at, (o - at) * 4u);
+            }
+            at = o + len;
+            holes += len;
+        }
+        if (uf > at) {
+            memcpy(u + at, sDpU + at, (uf - at) * 4u);
+        }
+        memcpy(p + oc, sDpC, nc * 4u);
+        memcpy(p + oj, sDpJob, nj * sizeof(DpJob));
+        sDpRtLive = 1; /* (the jobs point into the kept parts' DpUb) */
+    }
+    for (i = 0, ng = 0; i < n; i++) {
         it[i] = sDpItem[i];
-        it[i].g = &g[i];
+        if (!ptrs || ((uintptr_t)sDpItem[i].g >= ds0 && (uintptr_t)sDpItem[i].g < ds1)) {
+            g[ng] = *sDpItem[i].g;
+            it[i].g = &g[ng++];
+        }
         it[i].u = u + (sDpItem[i].u - sDpU);
+    }
+    if (ptrs && ng < n) {
+        sDpRtLive = 1; /* (the items point into the kept parts' groups) */
+        gVitaDpRtN[2] += n - ng;
+    }
+    if (ptrs || nj != 0) {
+        gVitaDpRtN[3] += (n - ng) * (uint32_t)sizeof(DpGroup) + holes * 4u;
+        gVitaDpRtN[4] += nc * 4u + nj * (uint32_t)sizeof(DpJob);
     }
     rt_commit();
     rt_kick();
@@ -9937,9 +10057,10 @@ static int rt_put_dp(void) {
 }
 static void rt_exec_dp(uint8_t *p) {
     const RtDp *d = (const RtDp *)(const void *)p;
-    uint32_t n = (uint32_t)d->n;
+    if (d->nj != 0) {
+        dp_jobs_run((float *)(void *)(p + d->ou), (const float *)(const void *)(p + d->oc), (const DpJob *)(const void *)(p + d->oj), d->nj, &sDpRtBone);
+    }
     dp_draw_items((DpItem *)(void *)(p + a16((uint32_t)sizeof(RtDp))), d->n, d->prof, d->frame);
-    (void)n;
 }
 static void dp_draw_all(void) {
     ag_close(); /* the additive group before anything else */
@@ -9948,6 +10069,8 @@ static void dp_draw_all(void) {
     unsigned long long t0;
     ds_close();
     if (sDpItemN == 0) {
+        sDpJobN = 0; /* (dprt: no item reads their blocks) */
+        sDpCN = 0;
         return;
     }
     if (VITA_RARE(sCovSample)) {
@@ -9958,11 +10081,14 @@ static void dp_draw_all(void) {
         if (sRtOn) {
             rt_sync(); /* (too large for the ring: drawn here, the ring emptied first) */
         }
+        dp_jobs_run(sDpU, sDpC, sDpJob, (uint32_t)sDpJobN, &gVitaBoneBad); /* (dprt: the blocks the render thread would have filled) */
         dp_draw_items(sDpItem, sDpItemN, sProf, gGsFrame);
     }
     sDpItemN = 0;
     sDpUN = 0;
     sDsGroupN = 0;
+    sDpJobN = 0;
+    sDpCN = 0;
     gVitaDpUs += sceKernelGetProcessTimeWide() - t0;
     sCur = keep;
     sHaveState = keepHave;

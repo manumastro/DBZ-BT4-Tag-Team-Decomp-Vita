@@ -29,6 +29,7 @@ switch is in [development.md](development.md)'s table):
 | `texbind` | Textures bound by the names of what their uploads left | on | `runs/next1`, `runs/next2` |
 | `seavtx` | The sea's corners tested and projected once a frame each | on | `runs/next1`, `runs/next2` |
 | `esdirect` | The seam's call packets done as what they are (an experiment: no gain measured) | off | `runs/next1` |
+| `dprt` | Kept parts: the fighters' uniform blocks worked out by the render thread, the groups handed over by their place | off | not run yet (built only) |
 
 Removed after a console run: `dpjoin` (never a pair). Also on by default, with all of the above: `runs/final` (10
 minutes, duels and three against three, six stages).
