@@ -1409,6 +1409,13 @@ void EftAura_StepFlames(EftAura *aura, s32 objId) {
                 if (EftAura_SpawnFlames(aura, f->objId, f->part, 1)) {
                     f->flags |= 4;
                 }
+#ifdef PORT_VITA
+                else {
+                    /* the flames' pool full (Tag Team's extra fighters): the flame let go all the same; it stayed,
+                       not advanced past, and this loop looked at it again for ever */
+                    f->flags |= 4;
+                }
+#endif
             } else {
                 *link = f->next;
                 f->next = gEftAuraPool->flameFree;

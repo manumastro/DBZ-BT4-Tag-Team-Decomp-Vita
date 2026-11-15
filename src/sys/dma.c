@@ -62,6 +62,14 @@ void Dma_AddNext(void *addr, u32 *retTag) {
 /* Closes the display list with a GS FINISH and an END tag, sends it on VIF1 and switches to the other buffer. */
 void Dma_Flush(void) {
     u32 *p = gDmaCur;
+#ifdef PORT_VITA
+    {   /* for the report: the longest display list in bytes (vita_main.c) */
+        extern unsigned gVitaDmaMax;
+        if ((unsigned)Dma_GetUsedSize() > gVitaDmaMax) {
+            gVitaDmaMax = (unsigned)Dma_GetUsedSize();
+        }
+    }
+#endif
 
     p[0] = DMA_TAG_CNT | 2;
     p[1] = 0;

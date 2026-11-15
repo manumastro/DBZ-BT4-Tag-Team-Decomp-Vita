@@ -166,6 +166,16 @@ void Ot_Link(OtEntry *entry, s32 count) {
 
 /* Draws what was queued this frame (unless the battle hides it) and empties the table. */
 s32 Ot_Draw(void) {
+#ifdef PORT_VITA
+    {   /* for the report: the most packet memory a frame took (vita_main.c) */
+        extern unsigned gVitaOtMax, gVitaOtSize;
+        unsigned used = (unsigned)((u8 *)gOtCur - (u8 *)gOt->buf);
+        if (used > gVitaOtMax) {
+            gVitaOtMax = used;
+        }
+        gVitaOtSize = (unsigned)gOt->bufSize;
+    }
+#endif
     Ot_Link(gOtFirst->layer, OT_ENTRY_COUNT);
     if (BtlStage_IsReady()) {
         Ot_Send();

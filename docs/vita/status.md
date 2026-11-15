@@ -29,8 +29,8 @@ switch is in [development.md](development.md)'s table):
 | `texbind` | Textures bound by the names of what their uploads left | on | `runs/next1`, `runs/next2` |
 | `seavtx` | The sea's corners tested and projected once a frame each | on | `runs/next1`, `runs/next2` |
 | `esdirect` | The seam's call packets done as what they are (an experiment: no gain measured) | off | `runs/next1` |
-| `upplan` | The large uploads' blocks' places kept for each rectangle; no rectangle's number worked out where another upload's data lies | off | not yet (built only) |
-| `dprt` | Kept parts: the fighters' uniform blocks worked out by the render thread, the groups handed over by their place | off | not run yet (built only) |
+| `upplan` | The large uploads' blocks' places kept for each rectangle; no rectangle's number worked out where another upload's data lies | on | 2026-11-15, console, 2 vs 2 (BT4 Tag Team) 3.5 min A/B: uploads 269 -> 244 ms per 2 s, speed 98.4 -> 98.7%, 0 wrong in ~260 checks |
+| `dprt` | Kept parts: the fighters' uniform blocks worked out by the render thread, the groups handed over by their place | off | 2026-11-15, console, 2 vs 2 with upplan: worse, 26.3 -> 14.5 pictures a second (the render thread became the limit: 63 ms a picture to the chip) |
 
 Removed after a console run: `dpjoin` (never a pair). Also on by default, with all of the above: `runs/final` (10
 minutes, duels and three against three, six stages).

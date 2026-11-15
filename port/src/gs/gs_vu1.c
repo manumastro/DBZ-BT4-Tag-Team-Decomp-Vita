@@ -410,6 +410,24 @@ static void run(uint32_t start) {
 
     unsigned slot, before = sStatInstr, kbefore = sStatKicks;
 
+#ifdef PORT_VITA
+    {   /* A list's interpreted VU1 work capped: in a 2 vs 2 fight a list kept the list reader in this interpreter for
+           more than 10 s (no single run reached the guard below; runs one after another did). Past 20 million
+           instructions in one list the rest of its runs are left out, logged once a list. */
+        extern unsigned gVitaVuCut;
+        if (sStatInstr > 20000000u) {
+            static unsigned toldFrame = ~0u;
+            extern void Vita_Log(const char *fmt, ...);
+            if (toldFrame != gGsFrame) {
+                toldFrame = gGsFrame;
+                Vita_Log("vu1: list %u: %u instructions in %u runs interpreted; the rest left out (this run at %u, program of %u instructions; vi %04x %04x %04x %04x %04x %04x %04x %04x, top %u)\n",
+                         gGsFrame, sStatInstr, sStatRuns, start & 0x7FF, sProgSize, vu.vi[1], vu.vi[2], vu.vi[3], vu.vi[4], vu.vi[5], vu.vi[6], vu.vi[7], vu.vi[8], vu.top);
+            }
+            gVitaVuCut++;
+            return;
+        }
+    }
+#endif
     vu.pc = start & 0x7FF;
     sStatRuns++;
     for (slot = 0; slot < 15 && sProg[slot].size != 0 && sProg[slot].size != sProgSize; slot++) {
@@ -1101,6 +1119,15 @@ void GsVu1_FrameEnd(void) {
                     sProg[k].instr, sStatInstr ? sProg[k].instr * 100 / sStatInstr : 0, sProg[k].kicks);
         }
     }
+#ifdef PORT_VITA
+    {   /* for the report: the most interpreted VU1 instructions and runs in a list */
+        extern unsigned gVitaVuMax[2];
+        if (sStatInstr > gVitaVuMax[0]) {
+            gVitaVuMax[0] = sStatInstr;
+            gVitaVuMax[1] = sStatRuns;
+        }
+    }
+#endif
     sStatRuns = sStatInstr = sStatKicks = 0;
     sHle = 0;
     memset(sProg, 0, sizeof(sProg));

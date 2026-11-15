@@ -107,7 +107,17 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   ended: `exitafter`, and START + SELECT): the drawing and render threads now stop first (`quit`); no crash dump in run
   E. One hang in run D (the list reader in the VU1 interpreter for 10 s, inside a DMA chain; a chain is about 4,300
   tags at most): the chain's limit on the Vita is now 20,000 tags, and one that reaches it is logged.
-- Next, larger: the kept parts' uniform blocks worked out on the render thread; textures made through the render
+- Then (same day): `upplan` (the large uploads' blocks' places remembered; on by default: uploads 269 -> 244 ms
+  per 2 s, 98.4 -> 98.7%, 0 wrong); `dprt` (the kept parts' blocks on the render thread: worse, 14.5 pictures a
+  second, the render thread became the limit; off).
+- A rare stop in the 2 vs 2 demo fight (pairing 0, about 105 s in, in 4 of 9 runs): the list reader inside the VU1
+  interpreter for more than 10 s (normally the interpreter is not used at all in these fights), once a crash in
+  vif() copying from a garbage address instead. Measured, not the cause: the effects' packet memory (65 of 460 KB at
+  most), the display list (366 of 1024 KB), DMA chains (4,263 tags at most, none came back on itself). Now: a list's
+  interpreted VU1 work capped at 20 million instructions (the rest left out, the program logged), and a loop in
+  the aura flames fixed (`EftAura_StepFlames`: a flame the full pool could not replace was looked at for ever).
+  Cause not found yet.
+- Next, larger:  textures made through the render
   thread's ring without waiting for it; the GIF packets decoded ahead by the list reader (studied, not done).
 
 ## Tools made for it

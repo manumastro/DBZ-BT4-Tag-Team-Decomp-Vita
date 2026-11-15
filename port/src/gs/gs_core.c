@@ -1964,7 +1964,7 @@ static int sUpLazyAll; /* (the upload being made: all of its blocks taken note o
    not have its rectangle's number worked out to find its own data there (it cannot be: the blocks' ids are made from
    the other upload's number): it is taken note of again at once; every 64th time the number is worked out all the
    same and compared (an upload found there all the same is counted, and not taken note of again, as before). ---- */
-int gVitaUpPlan;          /* 0 off (default), 1 on, 2 in the soak's B battles */
+int gVitaUpPlan = 1;      /* 0 off, 1 on (default), 2 in the soak's B battles */
 unsigned gVitaPlan[7];    /* for the log: plans used, made, checked, wrong; rectangles' numbers not worked out (another
                              upload's data there), worked out all the same (every 64th), of them found the same */
 #define PLAN_SLOTS 512
