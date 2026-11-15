@@ -1034,6 +1034,18 @@ void Vita_VBlank(unsigned vblanks) {
             {
                 extern unsigned gVitaStX[3];
                 logf_("vita:   states kept from a picture before: %u, worked out again as a check %u, %u of them found otherwise\n", gVitaStX[0], gVitaStX[1], gVitaStX[2]);
+                {
+                    extern unsigned gVitaStWhy[16], Vita_StGen(void);
+                    static unsigned genWas;
+                    unsigned gen = Vita_StGen();
+                    logf_("vita:   states worked out, why their place did not give them: empty %u, the table's generation changed %u (%u new generations), another state of the picture there %u, "
+                          "another of a picture before %u, the texture's pages changed %u, kept but its texture gone or checked %u; kept for their picture only: not the picture %u, into a target %u, "
+                          "texture moved %u, pad %u, texture not the table's %u, the last palette %u, no texture %u, other %u\n",
+                          gVitaStWhy[0], gVitaStWhy[1], gen - genWas, gVitaStWhy[2], gVitaStWhy[3], gVitaStWhy[4], gVitaStWhy[5], gVitaStWhy[9], gVitaStWhy[10], gVitaStWhy[11],
+                          gVitaStWhy[12], gVitaStWhy[13], gVitaStWhy[14], gVitaStWhy[15], gVitaStWhy[8]);
+                    genWas = gen;
+                    memset(gVitaStWhy, 0, sizeof(gVitaStWhy));
+                }
                 memset(gVitaStX, 0, sizeof(gVitaStX));
                 {
                     extern unsigned gVitaWtC[3];

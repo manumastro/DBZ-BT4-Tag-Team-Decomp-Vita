@@ -163,6 +163,15 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   thread gained ~0.6 ms a list (packets 256 -> 172 ms every 2 s, but the primitives 337 -> 372: their vertices no
   longer in the cache) and the list reader lost ~4. The drawing thread's GIF time is bound by memory, not by the
   parsing: moving the parsing does not move the cost.
+- 2026-11-15, the GS primitives' states worked out again (the report's new line "states worked out, why their place
+  did not give them"), 2 vs 2, every 2 s: ~2,600 "the table's generation changed" and ~950 "empty" are the primitives
+  not drawn (~96 a picture, all of them "16-bit or depth target", rejected in the first lines of `state_of_`: cheap,
+  a cache of the rejections would save ~0.1 ms a list); ~1,400-1,900 a texture's pages written in the picture
+  (needed); ~1,300 their place taken by a state of a picture before; plus ~2,200 on the work targets' way (kept for
+  the picture only). Those that cost (5,000-8,000 cycles each) come to ~95 a list, ~1.3 ms, of which perhaps half
+  could be saved. The large uploads' writing ("upload: written", ~134 a list, ~2.2 ms) is the pixels themselves,
+  already planned (`upplan`) and written lazily. What is left on the drawing thread is a long tail of parts under
+  ~1 ms each; the 2 vs 2 fight lacks ~2.5 ms a list for 30 pictures a second.
 - `zones=1`: the zones of the drawing thread and the list reader (one drawn list in 8) timed by the system's clock
   when libperf is not there (a reading costs ~0.7 us, so the small zones come out too large; libperf's counter costs
   ~95 cycles a mark).

@@ -3768,8 +3768,13 @@ __attribute__((hot)) static int state_of(int ctx, int type, State *d) {
    changed in the table since (a texture let go: sStCacheGen), and the GS memory pages of its texture and palette as
    they were (tex_sig). One in eight is worked out again as a check (the log). */
 unsigned gVitaStX[3]; /* (the log) states kept from a picture before; worked out as a check; of them found otherwise */
+unsigned gVitaStWhy[16]; /* (the log) a state worked out: why its place did not give it (see state_of_cached) */
+unsigned Vita_StGen(void);
+unsigned Vita_StGen(void) {
+    return sStCacheGen;
+}
 static int state_of_cached(int ctx, int type, State *d, const uint64_t *rin, int wpk) {
-    static struct { uint64_t r[11]; unsigned frame, epoch; uint32_t sig; int ctx, type, valid, wp, xok, ti; State st; } cache[ST_CACHE], *c;
+    static struct { uint64_t r[11]; unsigned frame, epoch; uint32_t sig; int ctx, type, valid, wp, xok, ti, xwhy; State st; } cache[ST_CACHE], *c;
     uint64_t r[11];
     uint32_t h;
     int ok, pageT = sWpReady && (rin[5] & 0x1FF) == WP_FBP, mainF = gGsMainFbp >= 0 && (uint32_t)(rin[5] & 0x1FF) == (uint32_t)gGsMainFbp;
@@ -3811,6 +3816,11 @@ static int state_of_cached(int ctx, int type, State *d, const uint64_t *rin, int
             return 1;
         }
         State keep = c->st;
+        if (!sigSame && !xSame) { /* (the log: why the place did not give it) */
+            int why = c->valid != (int)sStCacheGen ? (c->valid == 0 ? 0 : 1) : !ST_SAME(c) ? (c->frame == gGsFrame ? 2 : 3) :
+                      c->frame == gGsFrame ? 4 : !c->xok ? 8 + c->xwhy : 5;
+            gVitaStWhy[why & 15]++;
+        }
         sWorkChanged = 0;
         sRejWhy = 0;
         gVitaStOf[sigSame ? 4 : 5]++;
@@ -3847,6 +3857,8 @@ static int state_of_cached(int ctx, int type, State *d, const uint64_t *rin, int
         c->ti = d->tme && sLast != NULL && sLast->id == d->tex ? (int)(sLast - sTex) : -1;
         c->xok = mainF && d->target == 0 && !sTexXf && d->pad_[0] == 0 && (((r[0] >> 4) & 1) ? d->tme && c->ti >= 0 : !d->tme) &&
                  !(((r[0] >> 4) & 1) && ((r[1] >> 37) & 0x3FFF) == 0 && Gs_PsmBits((uint32_t)((r[1] >> 20) & 0x3F)) <= 8); /* (not one with the GS's last loaded palette) */
+        c->xwhy = !mainF ? 1 : d->target != 0 ? 2 : sTexXf ? 3 : d->pad_[0] != 0 ? 4 :
+                  ((r[0] >> 4) & 1) ? (!(d->tme && c->ti >= 0) ? 5 : !c->xok ? 6 : 0) : (d->tme ? 7 : 0);
     } else if (sWorkChanged || gVitaBisect == 2) {
         sStCacheGen++; /* (a draw into another work buffer, or one drawn into anew: changes what may be used as a texture) */
     }
