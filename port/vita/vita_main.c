@@ -1174,6 +1174,21 @@ void Vita_VBlank(unsigned vblanks) {
                                 memset(gVitaDpGTexN, 0, sizeof(gVitaDpGTexN));
                             }
                             {
+                                extern int gVitaUpRepeat, gVitaUpIdMemo;
+                                extern unsigned gVitaUpRepN[5], gVitaUpIdMemoN[6];
+                                if (gVitaUpRepeat) {
+                                    logf_("vita:   uprepeat: %u small, %u of them seen in the last 8 lists (%u to where the same already lies); %u large, %u seen\n",
+                                          gVitaUpRepN[0], gVitaUpRepN[1], gVitaUpRepN[2], gVitaUpRepN[3], gVitaUpRepN[4]);
+                                }
+                                if (gVitaUpIdMemo != 0) {
+                                    logf_("vita:   upidmemo: %u written pieces' block ids from the memo (%u blocks), %u pieces' ids worked out and kept, %u not kept (over 8 blocks); "
+                                          "check: %u blocks compared, %u differed\n",
+                                          gVitaUpIdMemoN[0], gVitaUpIdMemoN[1], gVitaUpIdMemoN[2], gVitaUpIdMemoN[5], gVitaUpIdMemoN[3], gVitaUpIdMemoN[4]);
+                                }
+                                memset(gVitaUpRepN, 0, sizeof(gVitaUpRepN));
+                                memset(gVitaUpIdMemoN, 0, sizeof(gVitaUpIdMemoN));
+                            }
+                            {
                                 extern unsigned gVitaHudBatchN[2], gVitaHudRunN[2];
                                 logf_("vita:   hudbatch: %u packets of plain shapes, %u triangles in them | hudrun: %u runs, %u triangles\n", gVitaHudBatchN[0], gVitaHudBatchN[1],
                                       gVitaHudRunN[0], gVitaHudRunN[1]);
@@ -1701,6 +1716,12 @@ static void read_settings(void) {
         } else if (strcmp(line, "dpgtex") == 0) { /* a kept group's texture remembered by its names: 0 off, 1 on, 2 soak B, 3 on + checked */
             extern int gVitaDpGTex;
             gVitaDpGTex = atoi(eq);
+        } else if (strcmp(line, "uprepeat") == 0) { /* 1: the uploads seen again by their bytes counted, in the report (a measure) */
+            extern int gVitaUpRepeat;
+            gVitaUpRepeat = atoi(eq);
+        } else if (strcmp(line, "upidmemo") == 0) { /* the written uploads' block ids remembered by their bytes: 0 off, 1 on, 2 soak B, 3 on + check */
+            extern int gVitaUpIdMemo;
+            gVitaUpIdMemo = atoi(eq);
         } else if (strcmp(line, "dpptr") == 0) { /* the kept parts' groups handed over by their place: 0 off, 1 on, 2 soak B */
             extern int gVitaDpPtr;
             gVitaDpPtr = atoi(eq);
