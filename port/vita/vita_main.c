@@ -1026,9 +1026,10 @@ void Vita_VBlank(unsigned vblanks) {
                                                 }
                                             }
                                         }
-                                        {   /* the parts of a state's lookup (zones 48..50, inside the zones of its caller: 5, 14, 47) */
-                                            static const char *const zs[3] = {"state: registers, the way", "state: the targets' way", "state: the table's way"};
-                                            for (z = 48; z < 51; z++) {
+                                        {   /* the parts of a state's lookup (zones 48..50, inside the zones of its caller: 5, 14, 47); 51 a kept
+                                               group's texture lookup (inside zone 35's loop: 35 is then the rest of it, its marks one per group) */
+                                            static const char *const zs[4] = {"state: registers, the way", "state: the targets' way", "state: the table's way", "kept part: group texture"};
+                                            for (z = 48; z < 52; z++) {
                                                 if (gVitaZoneN[z]) {
                                                     logf_("vita:   zone %2u %-26s %7u k cycles per drawn list, %6u marks, %4u cycles each\n", z, zs[z - 48],
                                                           (unsigned)(gVitaZone[z] / nl / 1000), gVitaZoneN[z] / nl, (unsigned)(gVitaZone[z] / gVitaZoneN[z]));
@@ -1155,6 +1156,11 @@ void Vita_VBlank(unsigned vblanks) {
                                 extern unsigned gVitaDpGenN[1];
                                 logf_("vita:   fxclamp: %u runs, %u triangles | dpgen: %u state fields changed by kept parts\n", gVitaFxClampN[0], gVitaFxClampN[1], gVitaDpGenN[0]);
                                 gVitaDpGenN[0] = 0;
+                            }
+                            {
+                                extern unsigned gVitaDpGTexN[3];
+                                logf_("vita:   dpgtex: %u group textures remembered, %u looked up, %u checks differed\n", gVitaDpGTexN[0], gVitaDpGTexN[1], gVitaDpGTexN[2]);
+                                memset(gVitaDpGTexN, 0, sizeof(gVitaDpGTexN));
                             }
                             {
                                 extern unsigned gVitaHudBatchN[2], gVitaHudRunN[2];
@@ -1678,6 +1684,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "dpgen") == 0) { /* a kept part's register changes bump the state's generation: 0 off, 1 on, 2 soak B */
             extern int gVitaDpGen;
             gVitaDpGen = atoi(eq);
+        } else if (strcmp(line, "dpgtex") == 0) { /* a kept group's texture remembered by its names: 0 off, 1 on, 2 soak B, 3 on + checked */
+            extern int gVitaDpGTex;
+            gVitaDpGTex = atoi(eq);
         } else if (strcmp(line, "dpptr") == 0) { /* the kept parts' groups handed over by their place: 0 off, 1 on, 2 soak B */
             extern int gVitaDpPtr;
             gVitaDpPtr = atoi(eq);
