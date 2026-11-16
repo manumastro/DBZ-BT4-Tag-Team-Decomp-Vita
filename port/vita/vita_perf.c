@@ -21,7 +21,7 @@ int gVitaZoneT;
    thread's own cycle counter (its waits not counted), else the system's clock (waits counted). The report's "game
    thread by part" line, ms a step. */
 int gVitaGZOn;
-unsigned long long gVitaGZ[40];
+unsigned long long gVitaGZ[64];
 unsigned gVitaGZSteps;
 static unsigned sGzLast;
 int Vita_PmonGet(int thid, unsigned int counter, unsigned int *value);
@@ -34,7 +34,7 @@ void Vita_GZ(int z) {
     if (z == 0) {
         gVitaGZSteps++; /* (the step's start: what came since the last mark is the end of the step before) */
         gVitaGZ[39] += now - sGzLast;
-    } else if (z > 0 && z < 39) {
+    } else if (z > 0 && z < 64 && z != 39) {
         gVitaGZ[z] += now - sGzLast;
     }
     sGzLast = now;

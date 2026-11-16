@@ -27,6 +27,7 @@ void Heap_TagCheck(s32 phase) {
     s32 i;
 #ifdef PORT_VITA
     if (phase >= 0 && phase <= 10) { extern void Vita_GZ(int z); Vita_GZ(phase == 0 ? 9 : phase == 10 ? 10 : 10 + phase); } /* (bt3.txt gzones: Battle_Update's parts, battle.c) */
+    if (phase >= 100 && phase < 160) { extern void Vita_GZ(int z); Vita_GZ(40 + (phase - 100) / 10); } /* (and the fighters' steps: btl_char_mgr.c BtlChars_UpdateMain) */
 #endif
     if(enabled<0)enabled=getenv("BT4_TAG_CHECK_HEAP")!=NULL;
     if(!enabled)return;

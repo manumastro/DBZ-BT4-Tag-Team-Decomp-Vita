@@ -5303,7 +5303,16 @@ static void snap_chk_read(int arena, const uint32_t *tag, const uint32_t *data) 
    same); changed, copied. bt3.txt snapsame=0: every image copied, as earlier versions. */
 int gVitaSnapSame = 1;
 unsigned gVitaSnapSame2[2]; /* for the log: images read in place as unchanged, images copied */
-static struct { uint32_t addr, qwc, h; } sImgSeen[4096];
+static struct { uint32_t addr, qwc, h, same; } sImgSeen[4096]; /* (same: lists in a row it was found unchanged) */
+/* bt3.txt snapcut: snap_make lighter (2 vs 2: 2.9 ms a step of the game's thread, 1.4 of them the images' sums, ~380
+   images a list, all at the list's own level, ~0.04% of them changed). (a) It does not walk into a model's call: no
+   image or piece it copies lies there (measured: none), its return is walked on. (b) An image found unchanged 32
+   lists in a row is summed again one list in 16 (in turn by its place) and read in place otherwise; once found
+   changed, summed every list again. 0 off (default), 1 on, 2 in the soak's B battles, 3 a check: snap_make as before,
+   counting the images the cut would have read in place changed, and those it would not have seen inside calls. */
+int gVitaSnapCut = 0;
+unsigned gVitaSnapCutN[4]; /* (the log) sums not made; of those (3) changed; calls not walked; images inside calls (3) */
+static int sSnapCutNow; /* (snap_make: this list's) */
 static uint32_t img_sum(const uint32_t *w, uint32_t words) {
     uint32_t a = 0x9E3779B1u, b = 0x85EBCA6Bu, i;
     for (i = 0; i + 4 <= words; i += 4) {
@@ -5313,7 +5322,8 @@ static uint32_t img_sum(const uint32_t *w, uint32_t words) {
     return a ^ (b * 0x27D4EB2Fu);
 }
 static int snap_img_changed(uint32_t addr, uint32_t qwc) {
-    uint32_t h = img_sum((const uint32_t *)(uintptr_t)addr, qwc * 4), k = ((addr >> 4) * 0x9E3779B1u) >> 20, t;
+    uint32_t h, k = ((addr >> 4) * 0x9E3779B1u) >> 20, t;
+    int skip;
     for (t = 0; t < 8; t++, k = (k + 1) & 4095) {
         if (sImgSeen[k].addr == addr || sImgSeen[k].addr == 0) {
             break;
@@ -5322,15 +5332,29 @@ static int snap_img_changed(uint32_t addr, uint32_t qwc) {
     if (t == 8) { /* (full around here: in place of the first) */
         k = ((addr >> 4) * 0x9E3779B1u) >> 20;
     }
+    skip = sSnapCutNow && sImgSeen[k].addr == addr && sImgSeen[k].qwc == qwc && sImgSeen[k].same >= 32 && ((sRefList + (addr >> 4)) & 15) != 0;
+    if (skip) {
+        gVitaSnapCutN[0]++;
+        if (gVitaSnapCut != 3) {
+            return 0; /* (long unchanged: read in place without its sum) */
+        }
+    }
+    h = img_sum((const uint32_t *)(uintptr_t)addr, qwc * 4);
     if (sImgSeen[k].addr == addr && sImgSeen[k].qwc == qwc && sImgSeen[k].h == h) {
+        sImgSeen[k].same++;
         return 0;
+    }
+    if (skip) {
+        gVitaSnapCutN[1]++; /* (the check: the cut would have read it in place, changed) */
     }
     sImgSeen[k].addr = addr;
     sImgSeen[k].qwc = qwc;
     sImgSeen[k].h = h;
+    sImgSeen[k].same = 0;
     return 1;
 }
 extern void Vita_GZ(int z);
+unsigned gVitaSnapImg[4], gVitaSnapTags[2]; /* (the log) images' sums at the list's level: same, changed; inside a call: same, changed; tags walked at the list's level, inside a call */
 static void snap_make(uint32_t tadr, int arena) {
     uint32_t stack[2], sp = 0, sSnapCount = 0, sSnapUsed = 0;
     uint32_t *sSnapData = sSnapDataA[arena];
@@ -5341,6 +5365,10 @@ static void snap_make(uint32_t tadr, int arena) {
 
     sRefList++;
     sFresh = 0;
+    {
+        extern int gVitaAbSide;
+        sSnapCutNow = gVitaSnapCut == 1 || gVitaSnapCut == 3 || (gVitaSnapCut == 2 && gVitaAbSide == 1);
+    }
 
     const uint32_t *prevTag = NULL;
     uint32_t prevId = 7, prevQwc = 0;
@@ -5418,10 +5446,17 @@ static void snap_make(uint32_t tadr, int arena) {
         case 1: tadr += 16 + qwc * 16; break;
         case 2: tadr = addr; break;
         case 3: case 4: tadr += 16; break;
-        case 5: if (sp < 2) { stack[sp++] = tadr + 16 + qwc * 16; } tadr = addr; break;
+        case 5:
+            if (sSnapCutNow && gVitaSnapCut != 3) { /* (snapcut: the call not walked, its return is) */
+                tadr += 16 + qwc * 16;
+                gVitaSnapCutN[2]++;
+                break;
+            }
+            if (sp < 2) { stack[sp++] = tadr + 16 + qwc * 16; } tadr = addr; break;
         case 6: if (sp > 0) { tadr = stack[--sp]; } else { end = 1; } break;
         default: end = 1; break;
         }
+        gVitaSnapTags[spAt != 0]++;
         if ((id == 0 || id == 3 || id == 4) && qwc > 512) { /* (the large pieces: textures, models; small ones come and go every frame) */
             uint32_t h = (addr ^ addr >> 13 ^ qwc * 0x9E3779B1u) * 0x85EBCA6Bu >> 19, tries;
             for (tries = 0; tries < 4 && !(sRefSeen[(h + tries) & 8191].addr == addr && sRefSeen[(h + tries) & 8191].qwc == qwc); tries++) {
@@ -5450,6 +5485,8 @@ static void snap_make(uint32_t tadr, int arena) {
             Vita_GZ(36); /* (bt3.txt gzones: snap_make's walk) */
             changed = snap_img_changed(addr, qwc);
             Vita_GZ(34); /* (its images' sums) */
+            gVitaSnapImg[(spAt != 0) * 2 + (changed != 0)]++;
+            gVitaSnapCutN[3] += spAt != 0 && sSnapCutNow;
             if (!changed) {
                 image = 0; /* pixels the same as when this place was last handed over: read in place */
                 gVitaSnapSame2[0]++;

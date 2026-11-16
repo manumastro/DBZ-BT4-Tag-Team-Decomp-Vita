@@ -842,23 +842,40 @@ void Vita_VBlank(unsigned vblanks) {
                               gProfGameHist[0], gProfGameHist[1], gProfGameHist[2], gVitaWaitSkips, gVitaSnap[0], gVitaSnap[1], gVitaSnapSame2[0], gVitaSnapSame2[1]);
                         gVitaSnapSame2[0] = gVitaSnapSame2[1] = 0;
                         {
+                            extern unsigned gVitaSnapImg[4], gVitaSnapTags[2];
+                            logf_("vita:   snap_make: images summed at the list's level %u the same, %u changed; inside a call %u the same, %u changed; tags walked at the list's level %u, inside a call %u\n",
+                                  gVitaSnapImg[0], gVitaSnapImg[1], gVitaSnapImg[2], gVitaSnapImg[3], gVitaSnapTags[0], gVitaSnapTags[1]);
+                            memset(gVitaSnapImg, 0, sizeof(gVitaSnapImg));
+                            {
+                                extern int gVitaSnapCut;
+                                extern unsigned gVitaSnapCutN[4];
+                                if (gVitaSnapCut != 0) {
+                                    logf_("vita:   snapcut: images' sums not made %u (check: %u of them changed), calls not walked %u, images inside calls %u\n",
+                                          gVitaSnapCutN[0], gVitaSnapCutN[1], gVitaSnapCutN[2], gVitaSnapCutN[3]);
+                                    memset(gVitaSnapCutN, 0, sizeof(gVitaSnapCutN));
+                                }
+                            }
+                            gVitaSnapTags[0] = gVitaSnapTags[1] = 0;
+                        }
+                        {
                             extern int gVitaGZOn;
-                            extern unsigned long long gVitaGZ[40];
+                            extern unsigned long long gVitaGZ[64];
                             extern unsigned gVitaGZSteps;
                             if (gVitaGZOn && gVitaGZSteps != 0) {
-                                static const char *const gzn[40] = {"", "jobs", "frame start", "scripts", "pads, pairs", "sound", "rules", "computer players", "",
+                                static const char *const gzn[64] = {"", "jobs", "frame start", "scripts", "pads, pairs", "sound", "rules", "computer players", "",
                                     "input sampled", "input", "fighters", "scene", "effects", "scene after", "stage", "cameras", "", "objects", "", "game update",
                                     "stage models", "stage fx before", "fighters drawn", "scene drawn", "ordering table", "stage fx after", "HUD", "text", "result",
-                                    "frame end", "list to the copies", "list handed over", "snap_make (walk, end)", "snap: image sums", "snap: copies", "snap: walk", "", "", "loop"};
+                                    "frame end", "list to the copies", "list handed over", "snap_make (walk, end)", "snap: image sums", "snap: copies", "snap: walk", "", "", "loop",
+                                    "fighters: motion", "fighters: step 6", "fighters: step 7", "fighters: step 8", "fighters: step 9", "fighters: camera"};
                                 char gl[900];
                                 int len = 0, z;
                                 unsigned long long all = 0;
-                                for (z = 1; z < 40; z++) {
+                                for (z = 1; z < 64; z++) {
                                     all += gVitaGZ[z];
                                 }
-                                for (z = 1; z < 40 && len < (int)sizeof(gl) - 40; z++) {
+                                for (z = 1; z < 64 && len < (int)sizeof(gl) - 40; z++) {
                                     unsigned us = (unsigned)(gVitaGZ[z] / 444u / gVitaGZSteps);
-                                    if (gzn[z][0] != 0 && us >= 50) {
+                                    if (gzn[z] != NULL && gzn[z][0] != 0 && us >= 50) {
                                         len += snprintf(gl + len, sizeof(gl) - (size_t)len, " %s %u.%u;", gzn[z], us / 1000, us / 100 % 10);
                                     }
                                 }
@@ -1564,6 +1581,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "shadelog") == 0) { /* 1: the fighters' shading layers in the log (an earlier version's) */
             extern int gVitaShadeLog;
             gVitaShadeLog = atoi(eq) != 0;
+        } else if (strcmp(line, "snapcut") == 0) { /* snap_make lighter: 0 off, 1 on, 2 in the soak's B battles, 3 a check (gs_core.c gVitaSnapCut) */
+            extern int gVitaSnapCut;
+            gVitaSnapCut = atoi(eq);
         } else if (strcmp(line, "gzones") == 0) { /* 1: the game's thread timed by part, a step at a time (vita_perf.c Vita_GZ): the report's "game thread by part" */
             extern int gVitaGZOn;
             gVitaGZOn = atoi(eq) != 0;
