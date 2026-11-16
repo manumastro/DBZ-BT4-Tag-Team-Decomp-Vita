@@ -5071,6 +5071,139 @@ static int fl_book(State *dp, int ctx, const GsVertex *v, int gouraud, uint64_t 
     }
     return 1;
 }
+/* ---- bt3.txt sprrun: the GS's sprites read as runs (gs_core.c spr_run: one REGLIST packet of UV, XYZ2, UV, XYZ2 or
+   of XYZ2, XYZ2, a sprite a loop, no other register written between them: the glow's and the blurs' passes, the depth
+   byte's strips, ~525 sprites a drawn list in a 2 vs 2 fight). Each sprite still goes through GsGpu_Draw_impl: what it
+   drops before the state (the glow's own passes, the outline's, the table passes), the quick way and everything after
+   the state as before, sprite by sprite. Only state_of is not asked again: inside the packet the registers are the
+   same, so the state the sprite before worked out (or its refusal) is taken while nothing else it depends on has
+   moved (the picture, GS memory's epoch, the state table's generation, the work buffers' list, the targets made, a
+   target read as the texture still whole and unchanged). Never for the work page (its clears are held back, it is
+   spoiled as it is drawn), for a texture whose pages may be the target's, for a refusal that depends on what was
+   drawn (a stale target, a texture made in the next picture), nor inside a part being kept. 0 off, 1 on, 2 the
+   soak's B battles, 3 on and each state taken worked out the long way all the same and compared (the long way's
+   drawn). ---- */
+extern int gVitaSprRun; /* (gs_core.c) */
+unsigned gVitaSprRunN[7]; /* (the log) packets, sprites; of them dropped before the state, a refusal taken, a state taken,
+                             the other ways (the quick way, worked out); the check: states taken that differed */
+static struct {
+    int on, have, step; /* in a run; a state kept; the sprite's way (0 none yet, 1 worked out, 2 a refusal taken, 3 a state taken) */
+    int ok, why, ctx, xf, wtn;
+    uint32_t gen, frame, epoch, stgen, wgen;
+    float xfv[4];
+    State d;
+} sSr;
+/* 1: the state (or refusal) just worked out for a sprite of the run may be taken for the next ones */
+static int sr_keepable(int ctx, int ok, const State *d) {
+    uint64_t fr = gGs.frame[ctx], t0 = gGs.tex0[ctx];
+    uint32_t fbp = (uint32_t)(fr & 0x1FF), tbp = (uint32_t)(t0 & 0x3FFF) / 32;
+    int tme = (int)((gGs.prim >> 4) & 1);
+    if (gDpCapture || fbp == WP_FBP || (tme && tbp == WP_FBP)) {
+        return 0; /* (the work page, drawn into or read) */
+    }
+    if (!ok) {
+        return sRejWhy == 1 || sRejWhy == 2 || sRejWhy == 3 || sRejWhy == 4 || sRejWhy == 6; /* (by the registers alone) */
+    }
+    if ((d->target != 0 && d->target < WT_BASE) || (d->pad_[0] != 0 && !sTexXf)) {
+        return 0; /* (the work page's slots) */
+    }
+    if (tme) {
+        /* the texture's pages and the target's: none in common (bounds from above: a 32-bit page's 64 x 32 pixels,
+           the wider of the buffer's width and the texture's or the scissor's, the target's rows up to the
+           scissor's last; a page more for a texture not at a page's start) */
+        uint64_t sc = gGs.scissor[ctx];
+        uint32_t fbw = (uint32_t)((fr >> 16) & 0x3F), tbw = (uint32_t)((t0 >> 14) & 0x3F);
+        uint32_t tw = 1u << ((t0 >> 26) & 15), th = 1u << ((t0 >> 30) & 15);
+        uint32_t fx1 = (uint32_t)((sc >> 16) & 0x7FF) + 1, fy1 = (uint32_t)((sc >> 48) & 0x7FF) + 1;
+        uint32_t fpw = fbw > (fx1 + 63) / 64 ? fbw : (fx1 + 63) / 64, tpw = tbw > (tw + 63) / 64 ? tbw : (tw + 63) / 64;
+        uint32_t f1 = fbp + fpw * ((fy1 + 31) / 32), t1 = tbp + tpw * ((th + 31) / 32) + ((t0 & 0x1F) != 0);
+        if ((tbp < f1 && fbp < t1) || (tbp + 512 < f1 && fbp < t1 + 512) || (tbp < f1 + 512 && fbp + 512 < t1)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+/* 1: nothing the kept state depends on has moved */
+static int sr_same(int ctx) {
+    if (!sSr.have || sSr.ctx != ctx || sSr.gen != gGsStateGen || sSr.frame != gGsFrame || sSr.epoch != gGsEpoch || sSr.stgen != sStCacheGen ||
+        sSr.wgen != sWorkGen || sSr.wtn != sWtN || gDpCapture) {
+        return 0;
+    }
+    if (sSr.xf) { /* a target read as the texture: still drawn, not stale, its memory as it was (as state_of_ asks) */
+        uint64_t t0 = gGs.tex0[ctx];
+        WorkTarget *ws = wt_find((uint32_t)(t0 & 0x3FFF) / 32, (uint32_t)((t0 >> 14) & 0x3F));
+        if (ws != NULL && (!ws->drawn || ws->stale || wt_sig(ws) != ws->sig)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+/* state_of for a sprite of a run */
+static int sr_state(int ctx, State *d) {
+    int ok;
+    if (sr_same(ctx)) {
+        sSr.step = sSr.ok ? 3 : 2;
+        if (gVitaSprRun == 3) { /* (the check) */
+            ok = state_of(ctx, 6, d);
+            gVitaSprRunN[6] += ok != sSr.ok || (ok ? memcmp(d, &sSr.d, sizeof(State)) != 0 || sTexXf != sSr.xf || (sTexXf && memcmp(sTexXfV, sSr.xfv, sizeof(sTexXfV)) != 0)
+                                                  : sRejWhy != sSr.why);
+            return ok;
+        }
+        sTexXf = sSr.xf;
+        memcpy(sTexXfV, sSr.xfv, sizeof(sTexXfV));
+        sRejWhy = sSr.why;
+        if (sSr.ok) {
+            *d = sSr.d;
+            return 1;
+        }
+        if (sWtOn) { /* (as state_of after a refusal: a pass into a work target missed) */
+            uint64_t fr = gGs.frame[ctx];
+            WorkTarget *ft = wt_find((uint32_t)(fr & 0x1FF), (uint32_t)((fr >> 16) & 0x3F));
+            if (ft != NULL) {
+                ft->stale = 1;
+                ft->cov = 0.0f;
+                gVitaWt[1]++;
+                sWtRej[(ft - sWt) % WT_MAX][sRejWhy & 7]++;
+            }
+        }
+        return 0;
+    }
+    ok = state_of(ctx, 6, d);
+    sSr.step = 1;
+    sSr.have = sr_keepable(ctx, ok, d);
+    if (sSr.have) {
+        sSr.ok = ok;
+        sSr.why = sRejWhy;
+        sSr.ctx = ctx;
+        sSr.xf = sTexXf;
+        memcpy(sSr.xfv, sTexXfV, sizeof(sTexXfV));
+        if (ok) {
+            sSr.d = *d;
+        }
+        sSr.gen = gGsStateGen;
+        sSr.frame = gGsFrame;
+        sSr.epoch = gGsEpoch;
+        sSr.stgen = sStCacheGen;
+        sSr.wgen = sWorkGen;
+        sSr.wtn = sWtN;
+    }
+    return ok;
+}
+/* n sprites of a run, two corners each, as gs_core.c's vertex() makes them */
+void GsGpu_DrawSprRun(int ctx, const GsVertex *v, uint32_t n) {
+    uint32_t k;
+    gVitaSprRunN[1] += n;
+    sSr.on = 1;
+    sSr.have = 0;
+    for (k = 0; k < n; k++) {
+        unsigned fl = gVitaFl[0];
+        sSr.step = 0;
+        GsGpu_Draw(6, ctx, v + 2 * k);
+        gVitaSprRunN[sSr.step == 2 ? 3 : sSr.step == 3 ? 4 : (sSr.step == 1 || gVitaFl[0] != fl) ? 5 : 2]++;
+    }
+    sSr.on = 0;
+    sSr.have = 0;
+}
 static void GsGpu_Draw_impl(int type, int ctx, const GsVertex *v) {
     uint64_t prim = gGs.prim, t0 = gGs.tex0[ctx];
     int fst = (prim >> 8) & 1, gouraud = (prim >> 3) & 1, n = type == 6 ? 2 : type == 3 ? 3 : type == 1 ? 2 : 1, i;
@@ -5173,7 +5306,7 @@ static void GsGpu_Draw_impl(int type, int ctx, const GsVertex *v) {
     }
     sTexMayDefer = 1;
     sWpAllow = 1;
-    i = state_of(ctx, type, &d);
+    i = sSr.on && type == 6 ? sr_state(ctx, &d) : state_of(ctx, type, &d); /* (sprrun: a sprite of a run, below) */
     sWpAllow = 0;
     sTexMayDefer = 0;
     ZM(47); /* state_of on its own */
