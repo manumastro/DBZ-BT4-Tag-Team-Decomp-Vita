@@ -2261,6 +2261,20 @@ static int tex_layer(uint64_t t0, uint64_t texa) {
 }
 static GLuint texture_get_k(uint64_t t0raw, uint64_t texa);
 static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa);
+/* bt3.txt dpgtex: a kept part's group remembers the texture found for it (TexMemo, beside the part's groups: GsGpu_DpCapEnd),
+   as sBind2 does but in a place of its own: no hash, no slot shared with other textures. Taken only on what sBind2's
+   entry is taken on: the same TEX0 as the renderer takes it (the palette of the GS's last CLUT load in it), the same
+   TEXA, the same names of what its destinations hold now (Gs_TexNames), and the texture table's entry still the same
+   texture (TEX0, TEXA, contents, GL name). 0 off (default), 1 on, 2 in the soak's B battles, 3 on with every one
+   remembered found the long way too and compared (that one drawn) */
+typedef struct TexMemo { uint64_t t0, texa; uint32_t nT, nC, gen; GLuint id; int ti; } TexMemo;
+int gVitaDpGTex = 0;
+unsigned gVitaDpGTexN[3]; /* for the log: group textures remembered (still the same: taken, or found the long way and compared), looked up (sBind2's way or the long way), checks that differed */
+static inline int dpgtex_mode(void) { /* 0 off, 1 on, 3 on and checked */
+    extern int gVitaAbSide;
+    return gVitaDpGTex == 2 ? (gVitaAbSide == 1) : gVitaDpGTex == 3 ? 3 : gVitaDpGTex != 0;
+}
+static GLuint texture_get_km(uint64_t t0raw, uint64_t texa, TexMemo *m, int check);
 unsigned gVitaKeyProf[2]; /* (upprof=1, the log) texture lookups by the drawing state, their microseconds */
 /* (bt3.txt texbind: gs_core.c Gs_TexNames) the texture found last by the names of what its destinations hold: its
    place in the table, checked against what is there (the table is put together again when full) */
@@ -2275,6 +2289,10 @@ static inline uint64_t tex_t0_now(uint64_t t0raw) {
     return t0;
 }
 static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
+    return texture_get_km(t0raw, texa, NULL, 0);
+}
+/* (m: a kept group's remembered texture, or NULL; check: dpgtex=3, a remembered one found the long way too) */
+static GLuint texture_get_km(uint64_t t0raw, uint64_t texa, TexMemo *m, int check) {
     extern int gVitaUpProf;
     extern int Gs_TexBindOn(void), Gs_TexNames(uint64_t t0, uint32_t *nT, uint32_t *nC);
     extern unsigned gVitaBind[8];
@@ -2282,6 +2300,7 @@ static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
     unsigned long long t = gVitaUpProf ? sceKernelGetProcessTimeWide() : 0;
     GLuint r;
     int bound = 0; /* 1: found the long way, its binding made after; 2: found by the names, checked the long way */
+    int mchk = 0, mheld = 0; /* (dpgtex) the group's remembered texture found the long way and compared; still the same */
     uint32_t nT = 0, nC = 0;
     uint64_t t0s = 0;
     __typeof__(&sBind2[0]) be = NULL;
@@ -2291,7 +2310,22 @@ static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
             uint64_t h = (t0s ^ t0s >> 29 ^ texa * 0x9E3779B97F4A7C15ull) ^ ((uint64_t)nT << 32 | nC) * 0xC2B2AE3D27D4EB4Full;
             be = &sBind2[(uint32_t)(h >> 54)];
             bound = 1;
-            if (be->t0 == t0s && be->texa == texa && be->nT == nT && be->nC == nC && be->ti < sTexCount) {
+            if (m != NULL && m->id != 0 && m->t0 == t0s && m->texa == texa && m->nT == nT && m->nC == nC && m->ti < sTexCount) {
+                Tex *c = &sTex[m->ti]; /* (dpgtex: sBind2's test, on the group's own entry) */
+                if (c->tex0a == t0s && c->texa == texa && c->gen == m->gen && c->id == m->id) {
+                    gVitaDpGTexN[0]++;
+                    mheld = 1;
+                    if (!check && (++bindN & 63) != 0) {
+                        c->last = gGsFrame;
+                        sLast = c;
+                        sSigGenCur = c->gen;
+                        r = c->id;
+                        goto done;
+                    }
+                    mchk = 1; /* (the long way below, compared) */
+                }
+            }
+            if (!mchk && be->t0 == t0s && be->texa == texa && be->nT == nT && be->nC == nC && be->ti < sTexCount) {
                 Tex *c = &sTex[be->ti];
                 if (c->tex0a == t0s && c->texa == texa && c->gen == be->gen && c->id == be->id) {
                     if ((++bindN & 63) != 0) {
@@ -2300,6 +2334,10 @@ static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
                         sSigGenCur = c->gen;
                         gVitaBind[0]++;
                         r = c->id;
+                        if (m != NULL) { /* (dpgtex: remembered as sBind2 holds it) */
+                            m->t0 = t0s; m->texa = texa; m->nT = nT; m->nC = nC;
+                            m->ti = be->ti; m->gen = be->gen; m->id = r;
+                        }
                         goto done;
                     }
                     bound = 2;
@@ -2329,14 +2367,26 @@ static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
                 }
             }
         }
+        if (mchk) {
+            gVitaDpGTexN[2] += r != m->id;
+        }
         if (r != 0 && sLast != NULL && sLast->id == r && sLast->tex0a == t0s && sLast->texa == texa) {
             be->t0 = t0s; be->texa = texa; be->nT = nT; be->nC = nC;
             be->ti = (int)(sLast - sTex); be->gen = sLast->gen; be->id = r;
             be->rid = rid; be->cid = cid;
             gVitaBind[1]++;
+            if (m != NULL) {
+                m->t0 = t0s; m->texa = texa; m->nT = nT; m->nC = nC;
+                m->ti = be->ti; m->gen = be->gen; m->id = r;
+            }
+        } else if (m != NULL) {
+            m->id = 0; /* (nothing to remember: looked up again next time) */
         }
     }
 done:
+    if (m != NULL && !mheld) {
+        gVitaDpGTexN[1]++;
+    }
     if (gVitaUpProf) {
         gVitaKeyProf[0]++;
         gVitaKeyProf[1] += (unsigned)(sceKernelGetProcessTimeWide() - t);
@@ -8952,7 +9002,10 @@ int gVitaDpSplit = 1; /* bt3.txt dpsplit: a kept part's stage strips grouped by 
 #define DP_BANK_SHIFT 15
 typedef struct DpUb { float u17[3]; uint8_t mode, layer; float t8[8]; } DpUb; /* t8: the viewport's floats worked out from u17 once (dpfast) */
 #define DP_UB 8
-typedef struct DpBlob { int ngroups, nub; uint8_t unsafe, seeThru; uint32_t tris, stripsF, stripsS; DpUb ub[DP_UB]; DpGroup g[1]; } DpBlob;
+typedef struct DpBlob { int ngroups, nub; uint8_t unsafe, seeThru; uint32_t tris, stripsF, stripsS; TexMemo *gt; DpUb ub[DP_UB]; DpGroup g[1]; } DpBlob;
+/* (gt: dpgtex, a texture remembered per group, in the part's own memory after its groups and 64 bytes on, apart from
+   what the render thread reads (dpptr); written only by the drawing thread. The groups themselves stay as kept.) */
+#define DP_BLOB_BYTES(ng) (((sizeof(DpBlob) + (size_t)(ng) * sizeof(DpGroup) + 63) & ~(size_t)63) + 64 + (size_t)(ng) * sizeof(TexMemo))
 /* (gs_core.c dptexa) nothing a kept part draws reads TEXA: no texture, a 32-bit one, or 8 / 4-bit with a 32-bit palette
    loaded with it (CLD 0 with CBP 0 is the GS's last palette, of a format not known here) */
 int GsGpu_DpTexaFree(const void *blob) {
@@ -9189,7 +9242,7 @@ void *GsGpu_DpCapEnd(void) {
         gVitaDpEndWhy[4]++;
         return NULL;
     }
-    b = (DpBlob *)malloc(sizeof(DpBlob) + (size_t)ng * sizeof(DpGroup));
+    b = (DpBlob *)malloc(DP_BLOB_BYTES(ng));
     tmp = (uint16_t *)malloc(total * 2 + 16);
     if (b == NULL || tmp == NULL) {
         free(b);
@@ -9197,8 +9250,9 @@ void *GsGpu_DpCapEnd(void) {
         gVitaDpEndWhy[5]++;
         return NULL;
     }
-    memset(b, 0, sizeof(DpBlob) + (size_t)ng * sizeof(DpGroup));
+    memset(b, 0, DP_BLOB_BYTES(ng)); /* (the remembered textures: none, id 0) */
     b->ngroups = ng;
+    b->gt = (TexMemo *)(void *)((uint8_t *)b + ((sizeof(DpBlob) + (size_t)ng * sizeof(DpGroup) + 63) & ~(size_t)63) + 64);
     for (j = 0, at = 0; j < ng; j++) {
         DpGroup *g = &b->g[j];
         int u;
@@ -9516,9 +9570,9 @@ void GsGpu_DpDraw(const void *blob, const float *c) {
         gVitaDpRtN[0]++;
     }
     ZM(34);
+    const int gtm = dpgtex_mode();
+    TexMemo *const gt = gtm ? b->gt : NULL;
     if (quick) {
-        extern unsigned gGsEpoch;
-        extern volatile uint64_t gGsClutT0;
         for (i = 0; i < b->ngroups; i++) {
             DpGroup *g = (DpGroup *)&b->g[i];
             DpItem *it = &sDpItem[sDpItemN++];
@@ -9526,9 +9580,16 @@ void GsGpu_DpDraw(const void *blob, const float *c) {
             it->g = g;
             it->u = ub[g->ub];
             /* (its texture looked up each time: the game writes the stage's materials one after another into one place
-               and a fighter's palettes into one place, so what a group's texture was is never still there; tried, never
-               found the same) */
-            it->tex = g->st.tme ? texture_get_k(g->t0, g->texa) : 0;
+               and a fighter's palettes into one place, so what a group's texture was by its place in GS memory alone
+               is rarely still there (a memo without the names was tried and never found the same); dpgtex remembers it
+               with the names of what its destinations hold, as texbind's sBind2) */
+            if (g->st.tme) {
+                ZM(35);
+                it->tex = texture_get_km(g->t0, g->texa, gt != NULL ? &gt[i] : NULL, gtm == 3);
+                ZM(51); /* (zone 51: the kept groups' texture lookups) */
+            } else {
+                it->tex = 0;
+            }
         }
         sSeeThru |= b->seeThru;
         gVglVuTris += b->tris;
@@ -9551,7 +9612,7 @@ void GsGpu_DpDraw(const void *blob, const float *c) {
         sSeeThru |= g->st.mask == 8; /* */
         it->g = g;
         it->u = ub[g->ub];
-        it->tex = g->st.tme ? texture_get_k(g->t0, g->texa) : 0;
+        it->tex = g->st.tme ? texture_get_km(g->t0, g->texa, gt != NULL ? &gt[i] : NULL, gtm == 3) : 0;
         if (VITA_RARE(gVitaFilm > 0)) {
             SIG_MIX(sSigSt, (uint32_t)g->t0); /* (the signature: the kept parts' groups, their textures' contents) */
             SIG_MIX(sSigSt, (uint32_t)(g->t0 >> 32));
