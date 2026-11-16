@@ -1719,6 +1719,8 @@ static void frame_begin_gl(void) {
 }
 
 static int vj_thread(SceSize args, void *argp);
+static void disp_plugins(void);
+static int sDispCheck;
 static int sVjOn;
 int gVitaMsaa; /* bt3.txt msaa=<0, 2, 4> */
 int GsGpu_Init(void) {
@@ -1766,6 +1768,8 @@ int GsGpu_Init(void) {
                     gVitaMsaa == 4 ? SCE_GXM_MULTISAMPLE_4X : gVitaMsaa == 2 ? SCE_GXM_MULTISAMPLE_2X : SCE_GXM_MULTISAMPLE_NONE);
     Vita_Log("vgl: multisampling %s; menus at %s, fights at %d x %d\n", gVitaMsaa == 4 ? "4x" : gVitaMsaa == 2 ? "2x" : "off",
              gVitaMenuHi ? "960 x 544" : "the fights' size", SCR_W_FIGHT, SCR_H_FIGHT);
+    disp_plugins();
+    sDispCheck = 4; /* (what the system shows, after the first pictures: swap_sized) */
     vglSetDisplayCallback(pace_cb); /* (the pictures shown in step with the game's clock) */
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClearDepthf(0.0f);
@@ -6743,6 +6747,47 @@ static void tex_redescribe(GLuint t, void *data, SceGxmTextureFormat fmt, int w,
     sceGxmTextureSetUAddrMode(gt, sceGxmTextureGetUAddrMode(&old));
     sceGxmTextureSetVAddrMode(gt, sceGxmTextureGetVAddrMode(&old));
 }
+/* What the system was given to show, a few pictures after a change of size (the ones drawn at the old size have
+   left the display's queue by then): the log's "display:" line. The system stretches a buffer smaller than 960 x 544
+   to the screen; a plugin that changes its scaling (Sharpscale in its Integer or Real mode) shows it smaller
+   instead, with black around it: the fights only, at 640 x 368 (fightres=960 draws them at the screen's size). */
+static void disp_check(void) {
+    SceDisplayFrameBuf fb;
+    memset(&fb, 0, sizeof(fb));
+    fb.size = sizeof(fb);
+    if (sceDisplayGetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME) < 0) {
+        Vita_Log("display: what the system shows could not be asked\n");
+        return;
+    }
+    Vita_Log("display: the system shows a buffer of %u x %u (pitch %u)\n", (unsigned)fb.width, (unsigned)fb.height, (unsigned)fb.pitch);
+}
+/* (once, at the start) whether the plugin lists of taiHEN name Sharpscale: a yes or no each, nothing else of them */
+static void disp_plugins(void) {
+    static const char *const kConf[2] = {"ur0:tai/config.txt", "ux0:tai/config.txt"};
+    char line[256];
+    int k, i, found;
+    for (k = 0; k < 2; k++) {
+        FILE *f = fopen(kConf[k], "r");
+        if (f == NULL) {
+            Vita_Log("display: %s not read\n", kConf[k]);
+            continue;
+        }
+        found = 0;
+        while (!found && fgets(line, sizeof(line), f) != NULL) {
+            if (line[0] == '#') {
+                continue;
+            }
+            for (i = 0; line[i] != '\0'; i++) {
+                if (line[i] >= 'A' && line[i] <= 'Z') {
+                    line[i] = (char)(line[i] - 'A' + 'a');
+                }
+            }
+            found = strstr(line, "sharpscale") != NULL;
+        }
+        fclose(f);
+        Vita_Log("display: Sharpscale %s in %s\n", found ? "is" : "is not", kConf[k]);
+    }
+}
 /* (the drawing thread, right after a swap that changed the display's size) everything of the picture's
    size made again for the new one: the view, the display buffers and the depth as textures, the copies of the picture */
 unsigned gVitaScrSwitches;
@@ -6776,7 +6821,10 @@ static void scr_resized(int w, int h) {
     sScissor[0] = sScissor[1] = sScissor[2] = sScissor[3] = -1;
     GLC_RESET();
     gVitaScrSwitches++;
-    Vita_Log("vgl: the picture is drawn at %d x %d from list %u\n", w, h, gGsFrame);
+    Vita_Log("vgl: the picture is drawn at %d x %d from list %u (%s; on it x %d, width %d, height %d; wide=%d)\n", w, h, gGsFrame,
+             w == SCR_W_MENU && h == SCR_H_MENU ? "the screen's own size" : "the system stretches it to the screen",
+             VIEW_X, VIEW_W, VIEW_H, gVitaWide);
+    sDispCheck = 4;
 }
 /* the picture's swap; the menus' size or the fights' asked for the next picture */
 static void swap_sized(void) {
@@ -6791,6 +6839,8 @@ static void swap_sized(void) {
     wt_swap();
     if (change) {
         scr_resized(w, h);
+    } else if (VITA_RARE(sDispCheck > 0) && --sDispCheck == 0) {
+        disp_check();
     }
 }
 static void fx_quad(void) {
