@@ -2,6 +2,7 @@ import {OnlineCore,clientAtLeast} from './online_core.mjs';
 import {verifyAccess,legacyProof,legacyBootstrap,createSession,sha256} from './online_auth.mjs';
 import {roomTurn} from './online_turn.mjs';
 import {importRows} from './online_migration.mjs';
+import {launchRanked,rankedMonthEnd,monthlyRanked} from './ranked_seasons.mjs';
 
 const json=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 async function readJson(request,limit=24576){
@@ -20,7 +21,10 @@ export class OnlineCoordinator {
         this.ctx=ctx;this.env=env;this.core=new OnlineCore(ctx.storage.sql);
         this.authTail=Promise.resolve();this.turnPending=new Map();
         ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping','pong'));
-        ctx.blockConcurrencyWhile(async()=>{if(await ctx.storage.getAlarm()===null)await ctx.storage.setAlarm(Date.now()+600000);});
+        ctx.blockConcurrencyWhile(async()=>{
+            const now=Date.now(),next=monthlyRanked(this.core)?Math.min(now+600000,rankedMonthEnd(now)):now+600000;
+            const alarm=await ctx.storage.getAlarm();if(alarm===null||alarm>next)await ctx.storage.setAlarm(next);
+        });
     }
     budget(subject,operation,maximum=120){
         const minute=Math.floor(Date.now()/60000);
@@ -52,10 +56,24 @@ export class OnlineCoordinator {
             if(this.core.one("SELECT 1 n FROM online_legacy WHERE table_name='banned_users' AND json_extract(body,'$.user_id')=? LIMIT 1",user))throw new Error('ACCOUNT_UNAVAILABLE');
             return {reply:this.core.command(user,op,args),events:this.core.events};
         });
-        for(const e of committed.events)for(const ws of this.ctx.getWebSockets()){
-            if(ws.deserializeAttachment()?.user!==e.user)continue;
-            try{ws.send(JSON.stringify({event:e.event,body:e.body}));}catch{}
-        }return committed.reply;
+    if (committed.events.length) {
+      const byUser = /* @__PURE__ */ new Map();
+      for (const e of committed.events) {
+        const list = byUser.get(e.user);
+        if (list) list.push(e);
+        else byUser.set(e.user, [e]);
+      }
+      for (const ws of this.ctx.getWebSockets()) {
+        const u = ws.deserializeAttachment()?.user;
+        const list = u && byUser.get(u);
+        if (!list) continue;
+        for (const e of list) try {
+          ws.send(JSON.stringify({ event: e.event, body: e.body }));
+        } catch {
+        }
+      }
+    }
+        return committed.reply;
     }
     async auth(path,body,ip){
         // All token rotations are serialized across awaits; one refresh token can be consumed only once.
@@ -73,17 +91,28 @@ export class OnlineCoordinator {
                 else{
                     // Accounts created while the old service drained prove
                     // ownership with its Auth API, never a submitted player ID.
-                    const profile=await legacyBootstrap(body.source,body.access_token);
-                    this.ctx.storage.transactionSync(()=>{
-                        this.core.run('INSERT OR IGNORE INTO online_users VALUES(?,?)',subject,Date.now());
-                        this.core.run('INSERT INTO online_aliases VALUES(?,?,?) ON CONFLICT(source,subject) DO NOTHING',body.source,subject,subject);
-                        if(profile.name){
-                            this.core.command(subject,'nickname_set',{name:profile.name});
-                            const r=profile.ranked;
-                            if(body.source==='secondary'&&Number.isInteger(r.rating)&&r.rating>=0&&r.rating<=100000&&Number.isInteger(r.wins)&&Number.isInteger(r.losses))
-                                this.core.run("INSERT OR IGNORE INTO ranked_players VALUES(?,'solo',?,?,?,?)",subject,profile.name,r.rating,r.wins,r.losses);
-                        }
-                    });user=subject;
+              let profile = null;
+          try { profile = await legacyBootstrap(body.source, body.access_token); } catch (err) { profile = null; }
+          const cutTo = (s, maxBytes) => { let out = "", n = 0; for (const ch of s) { const w = new TextEncoder().encode(ch).length; if (n + w > maxBytes) break; out += ch; n += w; } return out; };
+          this.ctx.storage.transactionSync(() => {
+            this.core.run("INSERT OR IGNORE INTO online_users VALUES(?,?)", subject, Date.now());
+            this.core.run("INSERT INTO online_aliases VALUES(?,?,?) ON CONFLICT(source,subject) DO NOTHING", body.source, subject, subject);
+            let finalName = null;
+            const wanted = profile && typeof profile.name === "string" ? profile.name.normalize("NFKC").trim() : "";
+            if (wanted.length) {
+              const stem = cutTo(wanted, 16);
+              const candidates = [wanted, ...[2, 3, 4, 5, 6, 7, 8, 9].map((i) => stem + "~" + i)];
+              for (const cand of candidates) {
+                try { this.core.command(subject, "nickname_set", { name: cand }); finalName = cand; break; }
+                catch (err) { if (!(err instanceof Error && (err.message === "NICKNAME_TAKEN" || err.message === "INVALID_NICKNAME"))) throw err; }
+              }
+            }
+            const r = profile && profile.ranked && typeof profile.ranked === "object" ? profile.ranked : null;
+            if (!monthlyRanked(this.core) && body.source === "secondary" && r && Number.isInteger(r.rating) && r.rating >= 0 && r.rating <= 1e5 && Number.isInteger(r.wins) && Number.isInteger(r.losses))
+              this.core.run("INSERT OR IGNORE INTO ranked_players VALUES(?,'solo',?,?,?,?)", subject, finalName ?? cutTo(wanted, 19), r.rating, r.wins, r.losses);
+          });
+          user=subject;
+
                 }
             }else{
                 if(this.core.one("SELECT value FROM online_meta WHERE key='admission'")?.value!=='open')throw new Error('MIGRATION_IN_PROGRESS');
@@ -97,15 +126,34 @@ export class OnlineCoordinator {
         try{
             if(path==='/v5/health')return json({service:'BT4decomp Online',schema:5,admission:this.core.one("SELECT value FROM online_meta WHERE key='admission'")?.value||'closed'});
             if(path.startsWith('/v5/admin/')){
-                if(!this.env.ADMIN_SECRET||!safeEqual(bearer(request),this.env.ADMIN_SECRET))return json({error:'AUTH_REQUIRED'},401);
+                const releaseAdmin=this.env.RELEASE_ADMIN_SECRET&&safeEqual(bearer(request),this.env.RELEASE_ADMIN_SECRET);
+                if(!releaseAdmin&&(!this.env.ADMIN_SECRET||!safeEqual(bearer(request),this.env.ADMIN_SECRET)))return json({error:'AUTH_REQUIRED'},401);
                 const body=await readJson(request,1048576);
+                if(path==='/v5/admin/ranked-audit')return json({
+                    configuration:this.core.rows("SELECT key,value FROM online_meta WHERE key IN ('ranked_scoring','ranked_monthly_reset','ranked_weekly_reset','ranked_season','ranked_epoch_ms','ranked_paused','admission','minimum_client') ORDER BY key"),
+                    users:this.core.one('SELECT count(*) n FROM online_users').n,
+                    names:this.core.one('SELECT count(*) n FROM online_names').n,
+                    scores:this.core.one('SELECT count(*) n,min(rating) minimum,max(rating) maximum,sum(rating) total FROM ranked_players'),
+                    matches:this.core.one('SELECT count(*) n FROM ranked_matches').n,
+                    history:this.core.one('SELECT count(*) n FROM ranked_history').n,
+                    resets:this.core.rows('SELECT id,applied,old_season,new_season,reason FROM ranked_resets ORDER BY applied DESC LIMIT 5'),
+                    next_reset_at:monthlyRanked(this.core)?new Date(rankedMonthEnd(Date.now())).toISOString():null
+                });
+                if(path==='/v5/admin/release-snapshot'){
+                    if(!releaseAdmin)return json({error:'AUTH_REQUIRED'},401);
+                    const allowed=new Set(['online_users','online_names','online_meta','ranked_players','ranked_matches','ranked_reports','ranked_history','ranked_streaks','ranked_streak_matches','ranked_weekly','ranked_reviews','ranked_resets','ranked_reset_players','ranked_collections','ranked_rock_finds','quick_rock_finds']);
+                    if(!allowed.has(body.table)||!Number.isSafeInteger(body.offset)||body.offset<0)throw new Error('BAD_REQUEST');
+                    return json({table:body.table,offset:body.offset,rows:this.core.rows(`SELECT * FROM ${body.table} ORDER BY rowid LIMIT 500 OFFSET ?`,body.offset)});
+                }
                 if(path==='/v5/admin/import'||path==='/v5/admin/sync'){
                     if(await sha256(JSON.stringify(body.rows))!==body.digest)throw new Error('IMPORT_CHECKSUM');
                     return json(this.ctx.storage.transactionSync(()=>importRows(this.core,body,path.endsWith('/sync'))));
                 }
                 if(path==='/v5/admin/inventory')return json({names:this.core.one('SELECT count(*) n FROM online_names').n,users:this.core.one('SELECT count(*) n FROM online_users').n,
                     ratings:this.core.one('SELECT count(*) n FROM ranked_players').n,imports:this.core.rows('SELECT source,table_name,count(*) n FROM online_legacy GROUP BY source,table_name'),
-                    rooms:this.core.one('SELECT count(*) n FROM online_rooms').n});
+                    rooms:this.core.one('SELECT count(*) n FROM online_rooms').n,
+                    match_characters:{ranked:this.core.one('SELECT count(*) n FROM ranked_matches WHERE chars IS NOT NULL').n,
+                        casual:this.core.one("SELECT count(*) n FROM online_legacy WHERE source='cloudflare' AND table_name='online_matches'").n}});
                 if(path==='/v5/admin/admission'&&['open','closed'].includes(body.state)){
                     if(body.minimum){if(!clientAtLeast(body.minimum,body.minimum))throw new Error('BAD_VERSION');this.core.run("INSERT INTO online_meta VALUES('minimum_client',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",body.minimum);}
                     this.core.run("INSERT INTO online_meta VALUES('admission',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",body.state);return json({state:body.state});
@@ -113,8 +161,52 @@ export class OnlineCoordinator {
                 if(path==='/v5/admin/ranked'&&['paused','open'].includes(body.state)){
                     this.core.run("INSERT INTO online_meta VALUES('ranked_paused',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",body.state==='paused'?'1':'0');return json({state:body.state});
                 }
+                if(path==='/v5/admin/ranked-scoring'&&['elo','streak'].includes(body.scoring)){
+                    if(monthlyRanked(this.core)&&body.scoring!=='streak')throw new Error('RANKED_ALREADY_LAUNCHED');
+                    this.core.run("INSERT INTO online_meta VALUES('ranked_scoring',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",body.scoring);
+                    return json({scoring:body.scoring});
+                }
+                if(path==='/v5/admin/ranked-launch'&&request.method==='POST'){
+                    const result=this.ctx.storage.transactionSync(()=>launchRanked(this.core,body));
+                    await this.ctx.storage.setAlarm(Math.min(Date.now()+600000,rankedMonthEnd(Date.now())));
+                    return json(result);
+                }
                 return json({error:'BAD_REQUEST'},400);
             }
+      if (path.startsWith("/v5/panel/")) {
+        if (!this.env.PANEL_SECRET || !safeEqual(bearer(request), this.env.PANEL_SECRET)) return json({ error: "AUTH_REQUIRED" }, 401);
+        this.budget("panel", "panel", 600);
+        if (request.method !== "POST") return json({ error: "BAD_REQUEST" }, 400);
+        let panelSql = "";
+        try {
+          const panelBody = await readJson(request, 262144);
+          panelSql = typeof panelBody.sql === "string" ? panelBody.sql.trim() : "";
+        } catch {
+          return json({ error: "BAD_REQUEST" }, 400);
+        }
+        if (!panelSql || panelSql.length > 16384) return json({ error: "BAD_REQUEST" }, 400);
+        const bare = panelSql.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, " ");
+        if (path === "/v5/panel/sql") {
+          if (!/^(select|with)\b/i.test(bare)) return json({ error: "READ_ONLY" }, 400);
+          if (/;(?![\s;]*$)/.test(bare) || /\b(insert|update|delete|drop|alter|create|attach|detach|pragma|vacuum|reindex)\b/i.test(bare)) return json({ error: "READ_ONLY" }, 400);
+          if (!/\blimit\b/i.test(bare)) panelSql += " LIMIT 5000";
+          try {
+            return json({ rows: this.core.rows(panelSql) });
+          } catch (e2) {
+            return json({ error: "BAD_SQL", msg: e2 instanceof Error ? e2.message : String(e2) }, 400);
+          }
+        }
+        if (path === "/v5/panel/exec") {
+          if (/^(select|with)\b/i.test(bare) || /;(?![\s;]*$)/.test(bare) || /\b(attach|detach|pragma|vacuum|reindex)\b/i.test(bare)) return json({ error: "FORBIDDEN" }, 400);
+          try {
+            const cursor = this.core.sql.exec(panelSql);
+            return json({ changes: cursor.rowsWritten ?? 0 });
+          } catch (e2) {
+            return json({ error: "BAD_SQL", msg: e2 instanceof Error ? e2.message : String(e2) }, 400);
+          }
+        }
+        return json({ error: "BAD_REQUEST" }, 400);
+      }
             if(path.startsWith('/v5/auth/')){
                 if(request.method!=='POST'||!['/v5/auth/start','/v5/auth/exchange','/v5/auth/refresh'].includes(path))return json({error:'BAD_REQUEST'},400);
                 return json(await this.auth(path,await readJson(request),request.headers.get('CF-Connecting-IP')||'local'));
@@ -155,8 +247,24 @@ export class OnlineCoordinator {
             this.core.prune();this.core.run('DELETE FROM online_budgets WHERE minute<?',Math.floor(Date.now()/60000)-5);
             this.core.run('DELETE FROM online_turn WHERE expires<=?',Date.now());
         });
-        for(const e of this.core.events)for(const ws of this.ctx.getWebSockets())if(ws.deserializeAttachment()?.user===e.user)try{ws.send(JSON.stringify({event:e.event,body:e.body}));}catch{}
-        await this.ctx.storage.setAlarm(Date.now()+600000);
+    if (this.core.events.length) {
+      const byUser = /* @__PURE__ */ new Map();
+      for (const e of this.core.events) {
+        const list = byUser.get(e.user);
+        if (list) list.push(e);
+        else byUser.set(e.user, [e]);
+      }
+      for (const ws of this.ctx.getWebSockets()) {
+        const u = ws.deserializeAttachment()?.user;
+        const list = u && byUser.get(u);
+        if (!list) continue;
+        for (const e of list) try {
+          ws.send(JSON.stringify({ event: e.event, body: e.body }));
+        } catch {
+        }
+      }
+    }
+        await this.ctx.storage.setAlarm(monthlyRanked(this.core)?Math.min(Date.now()+600000,rankedMonthEnd(Date.now())):Date.now()+600000);
     }
 }
 export default {

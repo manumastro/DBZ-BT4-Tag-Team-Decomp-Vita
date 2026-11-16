@@ -18,7 +18,8 @@
 
 static TtRoom state;
 static uint32_t member;
-static int local_room, cpu_fill, cpu_difficulty = 2, configured_ffa;
+static int local_room, cpu_fill, cpu_difficulty = 2, configured_ffa, configured_quick;
+static int offline_mode, offline_custom, offline_beans; /* (BT4decomp 0.1.39.6: its dedicated offline menu's room) */
 static char room_code[7], error[128];
 
 /* ---- the room ---- */
@@ -34,23 +35,28 @@ int Port_TagConnect(const char *server) {
     return 1;
 }
 void Port_TagClose(void) {
+    offline_mode = 0;
     memset(&state, 0, sizeof(state));
     member = 0;
     local_room = 0;
     room_code[0] = error[0] = 0;
 }
 void Port_TagCPUOptions(int fill, int difficulty) { cpu_fill = fill == 1; cpu_difficulty = difficulty >= 0 && difficulty <= 4 ? difficulty : 2; }
-void Port_TagModeOptions(int free_for_all, int quick) { configured_ffa = free_for_all == 1; (void)quick; }
-void Port_TagOpen(int size, int limit, int delay, const char *name, uint64_t content) {
+void Port_TagModeOptions(int free_for_all, int quick) { configured_ffa = free_for_all == 1; configured_quick = quick == 1; }
+void Port_TagOpenWithRules(int size, int limit, int delay, const char *name, uint64_t content, unsigned rules) {
     (void)delay;
     if (!local_room) return;
-    if (configured_ffa) size = 3;
+    if (configured_ffa && configured_quick) size = 3;
     Tt_Open(&state, member, name, size, content);
     state.time = limit;
     state.delay = 0;
+    state.battle_rules = rules;
     Tt_SetMode(&state, member, state.epoch, configured_ffa);
     if (cpu_fill) Tt_FillCPU(&state, member, state.epoch, cpu_difficulty);
     memcpy(room_code, "LOCAL0", 7);
+}
+void Port_TagOpen(int size, int limit, int delay, const char *name, uint64_t content) {
+    Port_TagOpenWithRules(size, limit, delay, name, content, 0);
 }
 int Port_TagTeams(int left, int right) { return local_room && Tt_SetTeams(&state, member, state.epoch, left, right) == TT_OK; }
 void Port_TagInitialTeams(int left, int right) { Port_TagTeams(left, right); }
@@ -97,6 +103,67 @@ int Port_TagCancelSelect(void) {
     Port_TagCommand(TTW_CANCEL_SELECT, 0, 0);
     return !error[0];
 }
+
+/* ---- BT4decomp 0.1.39.6 R1 1.2: the dedicated offline menu's room (Port_TagStartOffline), a player's choice taken
+   back, the room's battle rules, and the private rooms' shared options. A local room has no shared options
+   (state.options.version 0): those read as the PC's local room reads them (the player's own settings, the defaults). */
+int Port_TagOfflineMode(void) { return local_room ? offline_mode : 0; }
+int Port_TagOfflineCustom(void) { return !Port_TagOfflineMode() || offline_custom; }
+int Port_TagOfflineBeans(void) { return Port_TagOfflineMode() ? offline_beans : 0; }
+int Port_TagStartOffline(int mode, int left, int right, int time_limit, int difficulty, int custom, int beans) {
+    int seat;
+    if (mode < 1 || mode > 4 || (mode == 4 && left < 2) || left < 1 || left > 5 || right < 1 || right > 5 ||
+        time_limit < 0 || time_limit > 4 || difficulty < 0 || difficulty > 4 || beans < 0 || beans > 5)
+        return 0;
+    if (!Port_TagConnect(NULL)) return 0;
+    offline_mode = 0;
+    offline_custom = custom != 0;
+    offline_beans = beans;
+    Tt_Open(&state, member, "Player 1", 2, 0);
+    state.time = time_limit;
+    state.delay = 0;
+    if (Tt_SetTeams(&state, member, state.epoch, left, right) != TT_OK) goto failed;
+    for (seat = 1; seat < left + right; ++seat)
+        if (Tt_SetSlot(&state, member, state.epoch, seat, 1, difficulty) != TT_OK) goto failed;
+    state.players[0].difficulty = difficulty;
+    if (Tt_BeginSelect(&state, member, state.epoch) != TT_OK) goto failed;
+    if (mode == 4)
+        for (seat = 0; seat < left + right; ++seat)
+            state.players[seat].team = seat < 2 || seat >= right + 2 ? 0 : 1;
+    offline_mode = mode == 4 ? 2 : mode;
+    memcpy(room_code, "LOCAL0", 7);
+    return 1;
+failed:
+    Port_TagClose();
+    return 0;
+}
+int Port_TagWithdrawSeat(int seat) {
+    extern int Port_TagHost(void), Port_TagSeat(void);
+    if (!local_room || state.phase != TT_SELECT || seat < 0 || seat >= Tt_Count(&state) || !state.players[seat].confirmed) return 0;
+    if (state.players[seat].cpu ? !Port_TagHost() : seat != Port_TagSeat()) return 0;
+    if (Tt_ChooseSeat(&state, member, state.epoch, seat, -1, 0)) return 0;
+    error[0] = 0;
+    return 1;
+}
+int Port_TagWithdrawChoice(void) { return Port_TagWithdrawSeat(Tt_Seat(&state, member)); }
+void Port_TagChoiceItems(int chara, int costume, const uint16_t items[8]) { (void)items; Port_TagCommand(TTW_CHOOSE, chara, costume); }
+const uint16_t *Port_TagPlayerItems(int actor) { return actor >= 0 && actor < Tt_Count(&state) && state.options.version ? state.players[actor].items : NULL; }
+unsigned Port_TagBattleRules(void) { return state.battle_rules; }
+int Port_TagSetBattleRules(unsigned rules) {
+    if (!local_room || configured_quick || rules > TT_RULE_MASK || state.phase != TT_LOBBY || member != state.host) return 0;
+    return Tt_SetBattleRules(&state, member, state.epoch, rules) == TT_OK;
+}
+int Port_TagRulesV2(void) { return state.options.version == TT_OPTION_COMBAT_VERSION; }
+int Port_TagSharedReady(void) { return state.options.version != 0; }
+unsigned Port_TagSharedCombat(int team, int slot, unsigned value, int save) { (void)team; (void)slot; (void)value; (void)save; return TT_COMBAT_DEFAULT; }
+unsigned Port_TagActorCombat(int actor) { (void)actor; return TT_COMBAT_DEFAULT; }
+int Port_TagSharedCombatTeam(int team, unsigned value) { (void)team; (void)value; return 0; }
+int Port_TagOption(const char *key, int fallback) { extern int Port_Setting(const char *, int); return Port_Setting(key, fallback); }
+int Port_TagSharedOption(const char *key, int fallback) { return Port_TagOption(key, fallback); }
+int Port_TagSharedSave(const char *key, int value) { extern void Port_SettingSave(const char *, int); Port_SettingSave(key, value); return 1; }
+int Port_TagSharedHealth(int team, int slot, int32_t values[5], int save) { (void)team; (void)slot; (void)values; (void)save; return 0; }
+int Port_TagSharedHealthAll(int32_t values[2][5][5]) { (void)values; return 0; }
+int Port_TagActorHealth(int actor, int32_t values[5]) { (void)actor; (void)values; return 0; }
 
 /* ---- what the menus and the battle read ---- */
 int Port_TagPhase(void) { return state.phase; }
@@ -161,3 +228,4 @@ void Port_TagWait(int phase, int menu, int cursor, int show) { (void)phase; (voi
 void Port_TagWaitClear(void) {}
 void Port_TagWaitResumed(void) {}
 void Port_TagYield(void) {}
+void Port_TagJointRecordMark(int tick) { (void)tick; }

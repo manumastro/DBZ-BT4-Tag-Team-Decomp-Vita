@@ -32,6 +32,7 @@
 #include <psp2/io/fcntl.h>
 #include "vita_read.h"
 #endif
+#include "game_profile.h"
 
 enum { ADXT_STAT_STOP = 0, ADXT_STAT_PLAYING = 3, ADXT_STAT_PLAYEND = 5 };
 #define MAX_PLAYERS 40
@@ -612,10 +613,13 @@ static int adx_piece(VitaReadJob *j, int got) {
    near-silent files each (0x87CA..0x87D3, 0x8D26..0x8D2F); 0x8D30 and on are the fight's streamed effects (the
    clash, a transformation's, the moves', a stage's), played the same for both voice sets: until 0.1.38 the range
    ran on to 0x8D4D, and online a player with the second set heard a guide's line in the place of those effects. */
+#include "gs_voice_files.h"
 static const char *voice_own_path(const char *path, char *buf, size_t size) {
     extern int Port_NetVoiceAlt(void); /* net.c */
-    const char *dir = strstr(path, "pzs3us2/"), *num;
+    const char *dir = strstr(path, "pzs4us0/"), *num;
+    int bt4=dir!=NULL,base=bt4?0x10CC0:0xD48;
     int fid, id, other = 0;
+    if(!dir)dir=strstr(path,"pzs3us2/");
 
     if (dir == NULL || !Port_NetVoiceAlt()) {
         return path;
@@ -624,17 +628,10 @@ static const char *voice_own_path(const char *path, char *buf, size_t size) {
     if (sscanf(num, "%d.bin", &fid) != 1) {
         return path;
     }
-    id = fid + 0xD48;
-    if (id >= 0x87D4 && id < 0x8D30) {
-        other = id - 0x55C;
-    } else if (id >= 0xCC32 && id < 0x10B16) {
-        other = id - 0x3EE4;
-    } else if (id >= 0x10B6C && id < 0x10BA4) {
-        other = id - 0x38;
-    } else {
-        return path;
-    }
-    snprintf(buf, size, "%.*s%05d.bin", (int)(num - path), path, other - 0xD48);
+    id = fid + base;
+    other=PortVoice_OtherStream(id,bt4);
+    if(!other)return path;
+    snprintf(buf, size, "%.*s%05d.bin", (int)(num - path), path, other - base);
     {
         FILE *fp = fopen(buf, "rb");
         if (fp == NULL) {
@@ -878,7 +875,8 @@ void ADXT_StartAfs(void *adxt, int patid, int fid) {
         int found = Port_FilePath(patid, fid, NULL, path, sizeof(path));
         if (found) {
             extern void PortA11y_StreamStart(const char *path); /* a11y_game.c: a voice with its line shown as text */
-            start(adxt, path);
+            char soundtrack[1800];
+            start(adxt, adxt==sPlayers&&Port_GameProfileAnimeMusicPath(patid,fid,soundtrack,sizeof(soundtrack)) ? soundtrack : path);
             PortA11y_StreamStart(path);
         } else {
             ADX_LOG("adx: player %d: archive %d file %d not found\n", (int)((Player *)adxt - sPlayers), patid, fid);
