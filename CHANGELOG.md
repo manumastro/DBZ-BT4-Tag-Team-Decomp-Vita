@@ -4,7 +4,7 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 ## Unreleased
 
-- **BT4decomp 0.1.39.6 R1 1.2 merged in** (the PC port this one is built on; built, not yet tested on the console):
+- **BT4decomp 0.1.39.6 R1 1.2 merged in** (the PC port this one is built on; run on the console in the 2 vs 2 demo fight and a 1 vs 1 duel: same speed, the beam special faster, no crash):
   Tag Team's crash fixes (the effects of fights with more than two fighters, Ginyu's Body Change), its expanded
   rules (joint attacks and fusions, on by default as on PC, also for the CPU fighters; cooperative revival, off by
   default), the new Tag Team HUD (the game's own gauges for the fighter and the allies, a new radar, the target's
