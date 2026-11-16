@@ -2,6 +2,19 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## Not released yet
+
+- **Clashes fixed for BT4**: the Vita Settings' Clashes option came from the BT3 port, where a clash counts turns of
+  the stick; BT4 counts presses (Triangle in a beam struggle, Square in a clash of blows). Its **Square** setting
+  (the default) took Square off the pad in a clash, so Square presses were lost in a clash of blows; now a press of
+  Square counts in both kinds of clash. **Stick** now turns the stick into presses, as BT4decomp's PC option does.
+- **Clash assist** (Vita Settings > Clashes, ON / OFF, off by default): Square or Triangle held in a clash is
+  pressed for you about ten times a second.
+- **Stick** (Vita Settings, below the four plates): a dead zone of 0 to 40% and an even or soft response, for sticks
+  that feel too quick. Off by default (the sticks as they were).
+- The log says what size the picture is drawn at and what the system shows (`display:` lines), and whether the
+  Sharpscale plugin is listed: a picture with black borders in fights only comes from its Integer or Real mode.
+
 ## v1.3 (2026-11-14)
 
 - **Unlock All from the menus**: hold SELECT for two seconds in the menus and the same screen shows over the game,

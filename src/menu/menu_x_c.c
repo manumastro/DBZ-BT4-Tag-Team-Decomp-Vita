@@ -322,15 +322,20 @@ static void Option_VitaKeysLeave(void) {
 /* "Vita Settings", the controller page's second row (the console's Vibration). Its page holds four plates of the
    console's two-way pickers, captioned from the second caption strip, whose rows take turns between two sets
    (vita_optart.c Vita_OptionCaptions):
-     level 1: Touch, Clashes / 2nd Pad, Mods, the four settings;
+     level 1: Touch, Clashes / 2nd Pad, Mods, the four settings; Down from the lower row (or Up from the upper) shows
+              level 7, Up or Down there comes back;
      level 2: Touch: L2, R2 / L3, R3, laid out as the rear pad's quarters; level 3: where the chosen one is touched,
               Rear / Front, Off (port/vita/vita_touch.c, which keeps it in ux0:data/bt3/touch.txt);
-     level 4: Clashes: Square / Stick, what wins a beam or rush clash (port/vita/vita_gfx.c, clash_square);
+     level 4: Clashes: Square / Stick, what wins a beam or rush clash, and ON / OFF below them, the clash assist
+              (port/vita/vita_gfx.c, clash_pad);
      level 5: 2nd Pad: ON / OFF, a second controller as player 2 (a PS TV's second DualShock);
-     level 6: Mods: ON / OFF, the files of ux0:data/bt3/mods (port/vita/vita_file.c), from the next start.
-   The last three are kept in ux0:data/bt3/bt3_settings.txt, not in the save. In each level Cross chooses (the setting
+     level 6: Mods: ON / OFF, the files of ux0:data/bt3/mods (port/vita/vita_file.c), from the next start;
+     level 7: Stick, the sticks' dead zone and response (vita_gfx.c, stick_shape); level 8: its one plate, Left /
+              Right the dead zone (0 to 40%), Up / Down the response, Cross keeps them.
+   All but Touch are kept in ux0:data/bt3/bt3_settings.txt, not in the save. In each level Cross chooses (the setting
    is taken at once), Triangle or Circle go back a level; the plate of the current setting is lit when a level opens.
-   The guide line says what the plate under the cursor does. */
+   The guide line says what the plate under the cursor does (no new captions can be drawn: those of the strips
+   only). */
 extern int Vita_TouchGetSpot(int b);
 extern void Vita_TouchSetSpot(int b, int spot);
 extern s32 Vita_OptionGuide(const char *text);
@@ -339,13 +344,19 @@ extern int Port_ClashSquare(void);
 extern void Port_ClashSquareSet(int on);
 extern int Vita_Pad2Setting(void);
 extern void Vita_Pad2SettingSet(int on);
+extern int Vita_ClashAssist(void);
+extern void Vita_ClashAssistSet(int on);
+extern int Vita_StickDeadzone(void);
+extern int Vita_StickCurve(void);
+extern void Vita_StickSet(int deadzone, int curve);
 extern int Port_Setting(const char *name, int def);
 extern void Port_SettingSave(const char *name, int value);
 extern void Port_SettingsWrite(void);
 extern void Vita_ModsSummary(char *out, int size);
-static s32 sVitaSetLevel; /* 0 closed, 1..6 above */
+static s32 sVitaSetLevel; /* 0 closed, 1..8 above */
 static s32 sVitaSetItem;  /* the setting chosen on level 1 */
 static s32 sVitaTouchBtn; /* the button chosen on level 2 */
+static s32 sVitaStickDz, sVitaStickCurve; /* level 8: the values shown, kept with Cross */
 
 static int Option_VitaModsOn(void) {
     return Port_Setting("mods", 1) != 0;
@@ -363,9 +374,10 @@ static void Option_VitaSetGuide(void) {
         if (v == 0) {
             sprintf(text, "Touch: where L2, R2, L3 and R3\nare touched.");
         } else if (v == 1) {
-            sprintf(text, "Clashes: %s\nwins beam and rush clashes.", Port_ClashSquare() ? "pressing Square fast" : "turning the left stick");
+            sprintf(text, "Clashes: %s\nwins them. Assist: %s.", Port_ClashSquare() ? "pressing Square fast" : "turning the left stick",
+                    Vita_ClashAssist() ? "ON" : "OFF");
         } else if (v == 2) {
-            sprintf(text, "2nd Pad: a second controller\nis player 2 (PS TV): %s.", Vita_Pad2Setting() ? "ON" : "OFF");
+            sprintf(text, "2nd Pad: a second controller\nis player 2 (PS TV): %s.\nDown: the sticks.", Vita_Pad2Setting() ? "ON" : "OFF");
         } else if (Option_VitaModsOn()) {
             s32 k, line = 0, sp = -1;
             Vita_ModsSummary(more, 50);
@@ -386,7 +398,7 @@ static void Option_VitaSetGuide(void) {
                 }
             }
         } else {
-            sprintf(text, "Mods: files in ux0:data/bt3/mods\nreplace the disc's: OFF.");
+            sprintf(text, "Mods: files in ux0:data/bt3/mods\nreplace the disc's: OFF.\nDown: the sticks.");
         }
         break;
     case 2: /* the button under the cursor, and where it is now */
@@ -413,13 +425,27 @@ static void Option_VitaSetGuide(void) {
             sprintf(text, "%s not on the touch panels.", kName[b]);
         }
         break;
-    case 4:
+    case 4: /* Square Stick / ON OFF (the assist) */
         sprintf(text, v == 0 ? "Square: press it again and again\nto win beam and rush clashes."
-                             : "Stick: turn the left stick round\nto win clashes, as on the PS2.");
+                      : v == 1 ? "Stick: turn the left stick round\nto win clashes (each quarter\nturned is a press)."
+                      : v == 2 ? "Assist ON: in a clash, Square\nor Triangle held down is\npressed for you, 10 a second."
+                               : "Assist OFF: in a clash each\npress is your own.");
         break;
     case 5:
         sprintf(text, v == 0 ? "ON: a second controller plays\nas player 2 (Versus: Multiplayer)."
                              : "OFF: a second controller is not\nused.");
+        break;
+    case 7: /* Stick, on its own below the four */
+        if (Vita_StickDeadzone() == 0 && !Vita_StickCurve()) {
+            sprintf(text, "Stick: as it is (no dead zone\nadded). Cross to change it.");
+        } else {
+            sprintf(text, "Stick: dead zone %d%%, response\n%s. Cross to change it.", Vita_StickDeadzone(),
+                    Vita_StickCurve() ? "soft" : "even");
+        }
+        break;
+    case 8: /* the stick's values, not kept yet */
+        sprintf(text, "Dead zone %d%% (Left / Right).\nResponse %s (Up / Down).\nCross keeps them.", sVitaStickDz,
+                sVitaStickCurve ? "soft" : "even");
         break;
     default:
         sprintf(text, v == 0 ? "ON: files in ux0:data/bt3/mods\nreplace the disc's, from the\nnext start."
@@ -458,6 +484,19 @@ static void Option_VitaTouchOpen(void) {
     Option_VitaSetLevel(1, 0);
 }
 
+/* back from Vita Settings to the controller page */
+static void Option_VitaSetLeave(void) {
+    OPT_PLATE(OPT_CLIP_PICK, "fl_off_start");
+    Snd_PlaySe(1, 2);
+    sVitaSetLevel = 0;
+    gOption->state = OPT_ITEM_CTRL;
+    gOption->cursor = OPT_ITEM_VIB;
+    Flash_GotoLabel(&gOption->flash[0], "fl_value_out", 1);
+    OPT_PLATE(OPT_CLIP_ROW_CTRL, "fl_on_start");
+    gOption->voiceLine = OPT_VIB_LINE;
+    OPT_VOICE(gOption->voiceLine);
+}
+
 static void Option_VitaTouchInput(void) {
     u32 pressed = gPad[0].gamePressed;
     s32 v = gOption->value;
@@ -467,6 +506,9 @@ static void Option_VitaTouchInput(void) {
     case 1: /* Touch Clashes / 2nd Pad Mods */
         if (pressed & (PADG_LEFT | PADG_RIGHT)) {
             Option_VitaSetMove(v ^ 1);
+        } else if (((pressed & PADG_DOWN) && v >= 2) || ((pressed & PADG_UP) && v < 2)) { /* past a row's end: Stick */
+            Snd_PlaySe(1, 0);
+            Option_VitaSetLevel(7, 0);
         } else if (pressed & (PADG_UP | PADG_DOWN)) {
             Option_VitaSetMove(v ^ 2);
         } else if (pressed & PADG_CROSS) {
@@ -475,15 +517,20 @@ static void Option_VitaTouchInput(void) {
             Option_VitaSetLevel(v == 0 ? 2 : v == 1 ? 4 : v == 2 ? 5 : 6,
                                 v == 0 ? 0 : v == 1 ? !Port_ClashSquare() : v == 2 ? !Vita_Pad2Setting() : !Option_VitaModsOn());
         } else if (back) { /* back to the page */
-            OPT_PLATE(OPT_CLIP_PICK, "fl_off_start");
-            Snd_PlaySe(1, 2);
-            sVitaSetLevel = 0;
-            gOption->state = OPT_ITEM_CTRL;
-            gOption->cursor = OPT_ITEM_VIB;
-            Flash_GotoLabel(&gOption->flash[0], "fl_value_out", 1);
-            OPT_PLATE(OPT_CLIP_ROW_CTRL, "fl_on_start");
-            gOption->voiceLine = OPT_VIB_LINE;
-            OPT_VOICE(gOption->voiceLine);
+            Option_VitaSetLeave();
+        }
+        break;
+    case 7: /* Stick, below the four */
+        if (pressed & (PADG_UP | PADG_DOWN)) { /* back to the four: Up the lower row, Down the upper */
+            Snd_PlaySe(1, 0);
+            Option_VitaSetLevel(1, (pressed & PADG_UP) ? 2 : 0);
+        } else if (pressed & PADG_CROSS) {
+            sVitaStickDz = Vita_StickDeadzone();
+            sVitaStickCurve = Vita_StickCurve();
+            Snd_PlaySe(1, 1);
+            Option_VitaSetLevel(8, 0);
+        } else if (back) {
+            Option_VitaSetLeave();
         }
         break;
     case 2: /* L2 R2 / L3 R3 */
@@ -522,11 +569,36 @@ static void Option_VitaTouchInput(void) {
             Option_VitaSetLevel(2, sVitaTouchBtn);
         }
         break;
-    default: /* 4 Square Stick, 5 and 6 ON OFF */
+    case 8: /* the stick's dead zone (Left / Right) and response (Up / Down) */
+        if (pressed & (PADG_LEFT | PADG_RIGHT)) {
+            s32 dz = sVitaStickDz + ((pressed & PADG_RIGHT) ? 10 : -10);
+            if (dz >= 0 && dz <= 40) {
+                sVitaStickDz = dz;
+                Snd_PlaySe(1, 0);
+                Option_VitaSetGuide();
+            }
+        } else if (pressed & (PADG_UP | PADG_DOWN)) {
+            sVitaStickCurve ^= 1;
+            Snd_PlaySe(1, 0);
+            Option_VitaSetGuide();
+        } else if (pressed & PADG_CROSS) {
+            Vita_StickSet(sVitaStickDz, sVitaStickCurve);
+            Snd_PlaySe(1, 1);
+            Option_VitaSetLevel(7, 0);
+        } else if (back) {
+            Snd_PlaySe(1, 2);
+            Option_VitaSetLevel(7, 0);
+        }
+        break;
+    default: /* 4 Square Stick / ON OFF, 5 and 6 ON OFF */
         if (pressed & (PADG_LEFT | PADG_RIGHT)) {
             Option_VitaSetMove(v ^ 1);
+        } else if (sVitaSetLevel == 4 && (pressed & (PADG_UP | PADG_DOWN))) {
+            Option_VitaSetMove(v ^ 2);
         } else if (pressed & PADG_CROSS) {
-            if (sVitaSetLevel == 4) {
+            if (sVitaSetLevel == 4 && v >= 2) {
+                Vita_ClashAssistSet(v == 2);
+            } else if (sVitaSetLevel == 4) {
                 Port_ClashSquareSet(v == 0);
             } else if (sVitaSetLevel == 5) {
                 Vita_Pad2SettingSet(v == 0);
@@ -1764,15 +1836,17 @@ static s32 sVitaPlatesHidden;
 
 static void Option_VitaTouchPlates(MFlash *flash) {
     /* per level: the plates used, and each plate's strip (0 the first, 1 the second) and row */
-    static const s8 kCount[7] = {0, 4, 4, 3, 2, 2, 2};
-    static const s8 kTex[7][4] = {{0}, {1, 1, 1, 1}, {1, 1, 1, 1}, {1, 1, 0, 0}, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}};
-    static const s8 kRow[7][4] = {{0}, {0, 1, 4, 5}, {0, 1, 4, 7}, {5, 6, 1, 0}, {6, 7, 0, 0}, {0, 1, 0, 0}, {0, 1, 0, 0}};
+    static const s8 kCount[9] = {0, 4, 4, 3, 4, 2, 2, 1, 1};
+    static const s8 kTex[9][4] = {{0}, {1, 1, 1, 1}, {1, 1, 1, 1}, {1, 1, 0, 0}, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0},
+                                  {1, 0, 0, 0}, {1, 0, 0, 0}};
+    static const s8 kRow[9][4] = {{0}, {0, 1, 4, 5}, {0, 1, 4, 7}, {5, 6, 1, 0}, {6, 7, 0, 1}, {0, 1, 0, 0}, {0, 1, 0, 0},
+                                  {7, 0, 0, 0}, {7, 0, 0, 0}};
     MFlashRef ref;
     MFlashUv uv;
     char name[0x40];
     s32 i, lv = sVitaSetLevel;
 
-    if (gOption->picker != 5 || lv < 1 || lv > 6) {
+    if (gOption->picker != 5 || lv < 1 || lv > 8) {
         if (sVitaPlatesHidden) {
             for (i = 0; i < 4; i++) {
                 sprintf(name, "mc_select_plate_%d", i + 1);
@@ -2675,7 +2749,9 @@ void Option_UpdateReset(void) {
                 for (i = 0; i < 4; i++) {
                     Vita_TouchSetSpot(i, 0); /* L2, R2, L3, R3 back on the rear pad */
                 }
-                Port_ClashSquareSet(1); /* clashes with Square, a second controller as player 2 (mods as they are) */
+                Port_ClashSquareSet(1); /* clashes with Square, no assist, the sticks as they are, a second controller */
+                Vita_ClashAssistSet(0); /* as player 2 (mods as they are) */
+                Vita_StickSet(0, 0);
                 Vita_Pad2SettingSet(1);
 #endif
                 for (i = 0; i < 2; i++) {

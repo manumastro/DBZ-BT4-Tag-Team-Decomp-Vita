@@ -175,14 +175,23 @@ On a PS TV, or with a DualShock paired, the controller's own L2, R2, L3 and R3 b
 
 - The rear touch pad's quarters are those of PS4 Remote Play, so the triggers and rear buttons of a grip attachment
   for it work as L2, R2, L3 and R3.
-- **Options → Controller → Vita Settings** has four settings:
+- **Options → Controller → Vita Settings** has these settings (the four plates, and **Stick** below them: press
+  Down from the lower row, or Up from the upper one):
   - **Touch**: for each of L2, R2, L3 and R3, where it is touched: its quarter of the rear pad, a corner of the
     front screen (L2 / R2 the bottom corners, L3 / R3 the top ones), or nowhere (Off). SELECT + L / R also give
     L2 / R2.
-  - **Clashes**: **Square** (the default) wins beam struggles and rush clashes by pressing Square again and again,
-    instead of turning the left stick; **Stick** turns the stick, as on the PS2.
+  - **Clashes**: BT4 counts button presses in a clash: Triangle (Ki Blast) in a beam struggle, Square (Fight) in a
+    clash of blows. **Square** (the default): Square counts in both, so pressing Square again and again wins any
+    clash (Triangle works as well). **Stick**: turning the left stick round wins them, each quarter turned counting
+    as a press. The buttons always work too.
+    Below them, **ON / OFF** is the **clash assist** (off by default): with it on, holding Square or Triangle in a
+    clash presses it for you about ten times a second.
   - **2nd Pad**: a second controller plays as player 2 (on by default).
   - **Mods**: the files in `ux0:data/bt4/mods/` are used (on by default; see [Mods](#mods)).
+  - **Stick**: makes the sticks less quick. Left / Right sets a **dead zone** of 0 (the default: the sticks as they
+    are) to 40%, the part of the stick's travel from the centre that does nothing, on top of the game's own; Up /
+    Down sets the **response**, even (the default) or soft (half way out gives a quarter, for finer control).
+    Cross keeps them, Circle leaves them as they were. Both sticks.
 - **Options → Controller → Control Type → Custom** assigns the actions to other buttons, as on the PS2.
 - In the menus, tap an item to move to it and tap it again to choose it; swipe to scroll, and tap with two
   fingers to go back. A tap skips a film.
@@ -227,20 +236,25 @@ not available.
   items with 7-Zip.
 - **"BT4's archive index was not found"**: `BIN/DBZ4.BIN` is missing from the unpacked files in `ux0:data/bt4/disc/`
   (copy the whole `BIN` folder), or the image is not B14 Rev2's.
-- **The picture fills only part of the screen**: the Sharpscale plugin is set to a resolution other than
-  "Original"; set it back to Original.
+- **The picture is smaller, with black borders, in fights only** (the menus fill the screen): the fights are drawn
+  at 640 x 368 and the system stretches them to the screen; the Sharpscale plugin in its Integer or Real scaling
+  mode shows them at their own size instead. Set Sharpscale's scaling mode back to Original, or put `fightres=960`
+  in `ux0:data/bt4/bt3.txt` (the fights drawn at the screen's own size: sharper, but they may run slower). When
+  reporting it, attach `ux0:data/bt4/log.txt`: its lines starting with `display:` and `vgl: the picture is drawn
+  at` say what size was drawn and what the system was given.
 - **The game stops** (the picture freezes, the music plays on): the game writes `ux0:data/bt4/hang.txt` when its
   picture stops for a few seconds. Attaching it and `log.txt` to a bug report helps a lot.
 
 ## Notes
 
-- Saves (a virtual memory card) and settings are kept in `ux0:data/bt4/`: `saves/`, `bt3_settings.txt` (Clashes,
-  2nd Pad, Mods) and `touch.txt` (Touch). `log.txt` there describes the last runs (`log-prev.txt` the ones before).
+- Saves (a virtual memory card) and settings are kept in `ux0:data/bt4/`: `saves/`, `bt3_settings.txt` (Clashes
+  and the assist, 2nd Pad, Mods, Stick) and `touch.txt` (Touch). `log.txt` there describes the last runs (`log-prev.txt` the ones before).
 - The game's shaders come already compiled in the package (`shbank.bin`): `libshacccg.suprx` is not needed.
 - The port runs the Vita at its standard maximum clocks (CPU 444 MHz, GPU 222 MHz); no overclocking plugin is
   used or needed.
 - Optional settings go in `ux0:data/bt4/bt3.txt`, one per line: `wide=0` shows the PS2's original 4:3 picture,
-  `disc=<folder>` reads the game files from another folder.
+  `disc=<folder>` reads the game files from another folder, `fightres=720` or `960` draws the fights at 720 x 408
+  or 960 x 544 instead of 640 x 368 (sharper, slower).
 
 ## Building
 

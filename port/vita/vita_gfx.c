@@ -136,19 +136,20 @@ int Vita_Pad2Present(void) {
     return (sPort[1] >= 0 && Vita_Pad2Setting()) || gVitaPad2Fake;
 }
 
-/* ---- Clashes with Square (setting clash_square: on unless set to 0; Options > Controller > Vita Settings).
-   z3xox's "Clashes: Square counts as a direction" of the PC build (port/src/gs/gs_input.c there), for the Vita,
-   whose sticks are not made to be turned round and round. In a clash (two beams or two rushes meeting: actions
-   0x130..0x132 and 0xFA..0xFC, the only ones that raise flag 0xE6, the turning-stick prompt) the game counts the
-   frames in which a direction is newly pressed (input 51; BtlAct_ClashStruggleHandler, BtlAct_ClashBlowsHandler).
-   With the setting on, while this player's fighter is in a clash, Square is taken off the pad and each press of it
-   holds the stick in the next of up, right, down, left for as long as it is held: one press, one newly pressed
-   direction, as a tap of the d-pad gives. The stick and the d-pad go on working beside it. A press is worth more
-   than one (clash_square_x in quarters: 4, 6, 7, 8 or 9, default 9 = 2.25, as upstream): what it is worth beyond
-   one is kept as credit, and each whole point owed puts the stick in the next direction for one frame without a
-   press; at most one new direction a frame (the game's own limit), credit capped at two points and dropped with
-   the clash. The game sees an ordinary pad. */
-static int sClashSquare = -1, sClashSquareX = -1;
+/* ---- Clashes (setting clash_square: on unless set to 0; Options > Controller > Vita Settings > Clashes).
+   BT4 counts presses in a clash, where BT3 counted newly pressed directions: in a beam or rush struggle (actions
+   0x130..0x132, BtlAct_ClashStruggleHandler, src/battle/btl_act_f.c) each press of Ki Blast (Triangle; input 0x50),
+   in a clash of blows (actions 0xFA..0xFC, BtlAct_ClashBlowsHandler, btl_act_e.c) each press of Fight (Square;
+   input 0x4F). The BT3 port's version of this option took Square off the pad in a clash and gave newly pressed
+   directions for it: in BT4 that lost the Square presses of a clash of blows and counted nothing in a struggle.
+     Square (on): while this player's fighter is in a clash, a press of Square is a press of Triangle as well, so
+       that Square wins both kinds, as the prompt then shows (src/battle/hud_a.c); Triangle works as it does.
+     Stick (off): BT4decomp's PC option clash_stick (port/src/gs/gs_input.c): each time the left stick, pushed far,
+       comes into another of its four quarters, a press of Square and Triangle, released the frame after; turning
+       the stick round gives four a turn. The buttons go on working beside it.
+   (A Custom control type that puts Fight or Ki Blast on other buttons: these are still Square and Triangle.)
+   The game sees an ordinary pad. */
+static int sClashSquare = -1;
 
 int Port_ClashSquare(void) {
     if (sClashSquare < 0) {
@@ -163,55 +164,141 @@ void Port_ClashSquareSet(int on) {
     Port_SettingsWrite();
 }
 
-static int clash_square_x(void) {
-    if (sClashSquareX < 0) {
-        int x = Port_Setting("clash_square_x", 9);
-        sClashSquareX = x == 4 || x == 6 || x == 7 || x == 8 || x == 9 ? x : 9;
+/* Clash assist (setting clash_assist: off unless set to 1; Vita Settings > Clashes, ON / OFF): in a clash, Square
+   or Triangle held down is pressed again for the player every CLASH_ASSIST_STEP frames (the pad is read once a
+   step of the fight, 30 a second: ten presses a second, a fast player's pace; the game takes a press only after a
+   frame with the button up). The first frame held is the player's own press. */
+#define CLASH_ASSIST_STEP 3
+static int sClashAssist = -1;
+
+int Vita_ClashAssist(void) {
+    if (sClashAssist < 0) {
+        sClashAssist = Port_Setting("clash_assist", 0) != 0;
     }
-    return sClashSquareX;
+    return sClashAssist;
 }
 
-static void clash_square(int socket, unsigned *btn, unsigned char *lx, unsigned char *ly) {
-    extern void *BtlChar_FindByObjId(int objId); /* the game: the fighter of a side, NULL outside a fight */
-    extern int BtlAct_GetCurrent(void *chr);   /* its action */
+void Vita_ClashAssistSet(int on) {
+    sClashAssist = on != 0;
+    Port_SettingSave("clash_assist", sClashAssist);
+    Port_SettingsWrite();
+}
+
+/* the fighter this socket plays, NULL outside a fight: the side's in a fight of two, in a Tag Team fight the
+   player's own (socket 0; the other players there are the computer) */
+static void *clash_fighter(int socket) {
+    extern void *BtlChar_FindByObjId(int objId), *BtlChar_FindBySide(int side); /* the game */
+    extern int TagBattle_Active(void), TagBattle_LocalActor(void);
+    if (TagBattle_Active()) {
+        return socket == 0 ? BtlChar_FindBySide(TagBattle_LocalActor()) : NULL;
+    }
+    return BtlChar_FindByObjId(socket);
+}
+
+/* rawX / rawY: the left stick as read, before stick_shape (below) */
+static void clash_pad(int socket, unsigned *btn, unsigned char rawX, unsigned char rawY) {
+    extern int BtlAct_GetCurrent(void *chr); /* the game: the fighter's action */
     extern int gVitaInMenus;
-    static int dir[2], was[2], credit[2];
-    int in = 0, down = (*btn & B_SQUARE) != 0, extra = 0;
+    static int held[2][2], sector[2] = {-1, -1}, pulse[2];
+    static const unsigned kMash[2] = {B_SQUARE, B_TRIANGLE};
+    int in = 0, k, x = (int)rawX - 128, y = (int)rawY - 128, next = -1;
     void *chr;
 
-    if (!Port_ClashSquare()) {
-        return;
-    }
-    if (!gVitaInMenus && (chr = BtlChar_FindByObjId(socket)) != NULL) {
+    if (!gVitaInMenus && (chr = clash_fighter(socket)) != NULL) {
         int action = BtlAct_GetCurrent(chr);
         in = (action >= 0x130 && action <= 0x132) || action == 0xFA || action == 0xFB || action == 0xFC;
     }
     if (!in) {
-        was[socket] = down; /* (a Square held into the clash is not a press in it) */
-        credit[socket] = 0;
+        held[socket][0] = held[socket][1] = 0;
+        sector[socket] = -1;
+        pulse[socket] = 0;
         return;
     }
-    if (down && !was[socket]) {
-        dir[socket] = (dir[socket] + 1) & 3;
-        credit[socket] += clash_square_x() - 4;
-        if (credit[socket] > 8) {
-            credit[socket] = 8;
-        }
-    } else if (credit[socket] >= 4) { /* a whole point owed: the next direction for this frame, without a press */
-        dir[socket] = (dir[socket] + 1) & 3;
-        credit[socket] -= 4;
-        extra = 1;
-    }
-    was[socket] = down;
-    *btn &= ~(unsigned)B_SQUARE;
-    if (down || extra) {
-        switch (dir[socket]) {
-        case 0: *ly = 0x00; break; /* up */
-        case 1: *lx = 0xFF; break; /* right */
-        case 2: *ly = 0xFF; break; /* down */
-        default: *lx = 0x00; break; /* left */
+    if (Vita_ClashAssist()) { /* held: down one frame in CLASH_ASSIST_STEP, up the others */
+        for (k = 0; k < 2; k++) {
+            if (!(*btn & kMash[k])) {
+                held[socket][k] = 0;
+            } else if (held[socket][k]++ % CLASH_ASSIST_STEP != 0) {
+                *btn &= ~kMash[k];
+            }
         }
     }
+    if (Port_ClashSquare()) {
+        if (*btn & B_SQUARE) {
+            *btn |= B_TRIANGLE;
+        }
+        return;
+    }
+    if (x > 80 || x < -80 || y > 80 || y < -80) { /* the quarter the stick is pushed far into */
+        next = (x < 0 ? -x : x) > (y < 0 ? -y : y) ? (x > 0 ? 1 : 3) : (y > 0 ? 2 : 0);
+    }
+    if (pulse[socket]) { /* (the frame after a press: the buttons up, so that the next one is a press) */
+        pulse[socket] = 0;
+        return;
+    }
+    if (next >= 0 && next != sector[socket]) {
+        *btn |= B_SQUARE | B_TRIANGLE;
+        pulse[socket] = 1;
+    }
+    sector[socket] = next;
+}
+
+/* ---- The sticks' dead zone and response (settings stick_deadzone, 0..40 percent in steps of 10, and stick_curve,
+   0 or 1; 0 and 0 unless set: the sticks as they are; Vita Settings > Stick). The game gives each axis a dead zone of
+   its own, 50 of 127.5 (39%, src/sys/pad.c), and takes a direction (the menus, dashes) when an axis is past 0.5 of
+   what is left. This makes the stick less quick on top of that: with m the stick's distance from the centre as the
+   larger of its two axes (0..1, so that the eight full tilts stay as they are), nothing below the dead zone d, then
+       out = (m - d) / (1 - d),   squared with stick_curve=1 (half way out gives a quarter)
+   in the stick's own direction. Both sticks; in the clashes the Stick option reads the stick as it is. ---- */
+static int sStickDz = -1, sStickCurve = -1;
+
+int Vita_StickDeadzone(void) {
+    if (sStickDz < 0) {
+        int d = Port_Setting("stick_deadzone", 0);
+        sStickDz = d < 0 ? 0 : d > 40 ? 40 : d / 10 * 10;
+        sStickCurve = Port_Setting("stick_curve", 0) != 0;
+    }
+    return sStickDz;
+}
+
+int Vita_StickCurve(void) {
+    Vita_StickDeadzone();
+    return sStickCurve;
+}
+
+void Vita_StickSet(int deadzone, int curve) {
+    sStickDz = deadzone < 0 ? 0 : deadzone > 40 ? 40 : deadzone / 10 * 10;
+    sStickCurve = curve != 0;
+    Port_SettingSave("stick_deadzone", sStickDz);
+    Port_SettingSave("stick_curve", sStickCurve);
+    Port_SettingsWrite();
+}
+
+static void stick_shape(unsigned char *bx, unsigned char *by) {
+    int dz = Vita_StickDeadzone();
+    float x, y, m, d, out, s;
+    int nx, ny;
+
+    if (dz == 0 && !sStickCurve) {
+        return; /* (the bytes as they are) */
+    }
+    x = (float)*bx - 127.5f;
+    y = (float)*by - 127.5f;
+    m = ((x < 0.0f ? -x : x) > (y < 0.0f ? -y : y) ? (x < 0.0f ? -x : x) : (y < 0.0f ? -y : y)) / 127.5f;
+    d = (float)dz / 100.0f;
+    if (m <= d || m <= 0.0f) {
+        *bx = *by = 0x80;
+        return;
+    }
+    out = ((m > 1.0f ? 1.0f : m) - d) / (1.0f - d);
+    if (sStickCurve) {
+        out *= out;
+    }
+    s = out / m;
+    nx = (int)(127.5f + x * s + 0.5f);
+    ny = (int)(127.5f + y * s + 0.5f);
+    *bx = (unsigned char)(nx < 0 ? 0 : nx > 255 ? 255 : nx);
+    *by = (unsigned char)(ny < 0 ? 0 : ny > 255 ? 255 : ny);
 }
 
 int Port_PadRead(int socket, unsigned char *data) {
@@ -264,7 +351,9 @@ int Port_PadRead(int socket, unsigned char *data) {
         extern unsigned Vita_TouchPad(void);
         btn |= Vita_TouchPad();
     }
-    clash_square(socket, &btn, &pad.lx, &pad.ly);
+    clash_pad(socket, &btn, pad.lx, pad.ly);
+    stick_shape(&pad.lx, &pad.ly);
+    stick_shape(&pad.rx, &pad.ry);
     memset(data, 0, 18);
     data[0] = (unsigned char)(~btn & 0xFF);
     data[1] = (unsigned char)(~(btn >> 8) & 0xFF);
