@@ -106,6 +106,31 @@ def wait_connected(note, seconds=240):
         time.sleep(20)
 
 
+def free_log_watches(note):
+    """The console keeps 4 log watches. After a crash and a restart, vita-agent-use's server arms the watches of the
+    runs that ended with the connection lost again on the new session, and nothing stops them: with all 4 taken, every
+    run fails at its start with "busy". Tried with a watch of our own; if refused, the watches stopped by number
+    (small after a restart) until one can be made again."""
+    def probe():
+        rc, objs = agent("call", "log.start", "--args", json.dumps({"path": LOG, "marker": "vita_agent_run probe"}), timeout=60)
+        r = last(objs)
+        wid = r.get("result", {}).get("watch_id")
+        if wid is not None:
+            agent("call", "log.stop", "--args", json.dumps({"watch_id": int(wid)}), timeout=60)
+            return True
+        return False
+    if probe():
+        return True
+    for wid in range(1, 65):
+        rc, objs = agent("call", "log.stop", "--args", json.dumps({"watch_id": wid}), timeout=60)
+        if last(objs).get("result", {}).get("stopped"):
+            note("a log watch left over on the console stopped:", wid)
+            if probe():
+                return True
+    note("THE CONSOLE REFUSES LOG WATCHES (all 4 taken): the run would fail with busy")
+    return False
+
+
 def put_back(src, out, note):
     """The console's own settings put back, and read back to be sure. Right after a crash the console is busy writing
     its dump and refuses changes for a while ("stale"): tried again, each time with a fresh transfer state, for up to
@@ -150,6 +175,8 @@ def main():
         note("vita-agent-use's serve is not connected (start `vita-agent serve` in the background first):", json.dumps(st)[:300])
         return 3
     agent("app", "close", o.title)
+    if not free_log_watches(note):
+        return 3
 
     # the settings: the console's kept, this run's sent (with exitafter, the end the run waits for)
     had = exists(SETTINGS)

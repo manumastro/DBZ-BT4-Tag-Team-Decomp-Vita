@@ -1270,7 +1270,8 @@ extern unsigned int gxm_back_buffer_index;
 static int sTexXf;             /* the primitive's texture is a picture drawn here: its coordinates moved into it (put) */
 static float sTexXfV[4];       /* s' = [0] + s * [1], t' = [2] + t * [3] */
 extern unsigned gVitaOl[4];
-static void rt_sync(void); /* (the render thread's work all done; see rt_start) */
+static void rt_sync_(int line); /* (the render thread's work all done; see rt_start) */
+#define rt_sync() rt_sync_(__LINE__) /* (the log: the waits by the line that asked for them) */
 static void rt_start(void);
 static int sRtOn;
 static void flush_vu(void) {
@@ -2948,7 +2949,24 @@ static void rt_commit(void) {
 static int rt_exec_one(void);
 /* the drawing thread: everything handed over is done (vitaGL is this thread's until it hands over again). When the
    render thread has done nothing for 2 ms, this thread makes the rest itself. */
-static void rt_sync(void) {
+static struct { int line; unsigned n; unsigned long long us; } sRtSyncAt[16]; /* (the log: the waits by line, the longest first) */
+static void rt_sync_at(int line, unsigned long long us) {
+    int k, low = 0;
+    for (k = 0; k < 16; k++) {
+        if (sRtSyncAt[k].line == line) {
+            sRtSyncAt[k].n++;
+            sRtSyncAt[k].us += us;
+            return;
+        }
+        if (sRtSyncAt[k].us < sRtSyncAt[low].us) {
+            low = k;
+        }
+    }
+    sRtSyncAt[low].line = line; /* (a place of little weight given up for it) */
+    sRtSyncAt[low].n = 1;
+    sRtSyncAt[low].us = us;
+}
+static void rt_sync_(int line) {
     if (sRtOn && sRtTail != sRtW) {
         unsigned long long t0 = sceKernelGetProcessTimeWide();
         uint32_t lastTail = sRtTail, spins = 0;
@@ -2972,6 +2990,7 @@ static void rt_sync(void) {
         gVitaDrawWhere = 0;
         gVitaRt[2]++;
         gVitaRt[3] += sceKernelGetProcessTimeWide() - t0;
+        rt_sync_at(line, sceKernelGetProcessTimeWide() - t0);
     }
     __sync_synchronize();
 }
@@ -3709,6 +3728,7 @@ __attribute__((hot)) static int state_of(int ctx, int type, State *d) {
             WtC *e = &sWtC[((uint32_t)(r[1] ^ r[5] ^ r[0] >> 3 ^ r[7] >> 1 ^ r[4]) * 0x9E3779B1u) >> 27];
             int wtRem = mode_now(gVitaWtRem), wtChk = 0;
             State chkSt;
+            ZM(48); /* (the zones of a state, 48..50: its registers and the way taken) */
             if (gVitaWtCOn && e->ok && (e->xfOn || wtRem) && e->frame == gGsFrame && e->ctx == ctx && e->type == type && e->wp == wpk && memcmp(r, e->r, sizeof(r)) == 0 &&
                 (e->kind == 2 ? e->s->drawn && !e->s->stale && e->s->tex == e->st.tex && (e->epoch == gGsEpoch || wt_sig(e->s) == e->s->sig)
                               : sOlTex[gxm_back_buffer_index % 3] == e->st.tex) &&
@@ -3738,6 +3758,7 @@ __attribute__((hot)) static int state_of(int ctx, int type, State *d) {
             sRejWhy = 0;
             sWorkChanged = 0;
             ok = state_of_(ctx, type, d);
+            ZM(49); /* (worked out, the work targets' way) */
             gVitaWtC[1]++;
             if (wtChk) {
                 gVitaWtRemN[1]++;
@@ -3815,7 +3836,9 @@ __attribute__((hot)) static int state_of(int ctx, int type, State *d) {
             }
         }
 #undef LAST_SAME
+        ZM(48);
         ok = state_of_cached(ctx, type, d, r, wpk);
+        ZM(50); /* (the table's way: found or worked out) */
         if (chk >= 0) {
             gVitaStL4N[1]++;
             gVitaStL4N[2] += !ok || memcmp(&last4[chk].st, d, sizeof(State)) != 0;
@@ -4455,6 +4478,28 @@ void Vita_AmLog(void) { /* vita_main.c: the model draws that read the picture's 
                      "for room in the ring %llu times (%llu ms); %llu made by the drawing thread itself\n", gVitaRtCore, gVitaRt[0], gVitaRt[1] >> 10, gVitaRt[6] / 1000,
                      gVitaRt[2], gVitaRt[3] / 1000, gVitaRt[4], gVitaRt[5] / 1000, gVitaRt[7]);
             memset(gVitaRt, 0, sizeof(gVitaRt));
+            {   /* the waits by the line of vita_vgl.c that asked for them, the longest first */
+                char buf[512];
+                int k, j, n = 0, used[16] = {0};
+                for (j = 0; j < 8; j++) {
+                    int best = -1;
+                    for (k = 0; k < 16; k++) {
+                        if (!used[k] && sRtSyncAt[k].n != 0 && (best < 0 || sRtSyncAt[k].us > sRtSyncAt[best].us)) {
+                            best = k;
+                        }
+                    }
+                    if (best < 0) {
+                        break;
+                    }
+                    used[best] = 1;
+                    n += snprintf(buf + n, sizeof(buf) - (size_t)n, " line %d: %u, %llu ms;", sRtSyncAt[best].line, sRtSyncAt[best].n, sRtSyncAt[best].us / 1000);
+                    if (n >= (int)sizeof(buf) - 64) {
+                        break;
+                    }
+                }
+                Vita_Log("vgl:   the waits for the render thread by the line asking (times, ms):%s\n", n ? buf : " none");
+                memset(sRtSyncAt, 0, sizeof(sRtSyncAt));
+            }
             Vita_Log("vgl:   swaps (rtswap): %u made by the render thread, %u the old way\n", gVitaRtSwapN[0], gVitaRtSwapN[1]);
             gVitaRtSwapN[0] = gVitaRtSwapN[1] = 0;
         }
@@ -10744,10 +10789,10 @@ void Vita_ProfSwitch(int n) {
 /* Zones: finer than the parts, for one measured list in 32 (no part switches then): Vita_Z(z) adds the cycles
    since the mark before to zone z. */
 volatile int gVitaZoneOn;   /* 1: the drawing thread's list is measured now, 2: the list reader's */
-uint64_t gVitaZone[48];
-unsigned gVitaZoneN[48], gVitaZoneLists;
-uint64_t gVitaZoneF[48];    /* the list reader's zones (its own marks) */
-unsigned gVitaZoneNF[48], gVitaZoneListsF;
+uint64_t gVitaZone[52];
+unsigned gVitaZoneN[52], gVitaZoneLists;
+uint64_t gVitaZoneF[52];    /* the list reader's zones (its own marks) */
+unsigned gVitaZoneNF[52], gVitaZoneListsF;
 static uint32_t sZLast, sZLastF;
 int gVitaZoneThread; /* (not used) */
 int gFeThreadId;     /* gs_core.c: the list reader's thread */
