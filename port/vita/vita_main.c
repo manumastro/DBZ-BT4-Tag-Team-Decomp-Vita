@@ -1000,8 +1000,8 @@ void Vita_VBlank(unsigned vblanks) {
                                     }
                                 }
                                 {
-                                    extern uint64_t gVitaZone[52];
-                                    extern unsigned gVitaZoneN[52], gVitaZoneLists;
+                                    extern uint64_t gVitaZone[56];
+                                    extern unsigned gVitaZoneN[56], gVitaZoneLists;
                                     static const char *const zn[31] = {"rest of the list", "kept part drawn directly", "frame end (draws, swap)",
                                         "list end", "consts built, to strip", "strip: state", "strip: flush", "GIF: image upload",
                                         "GIF: up to a register", "GIF: A+D register write", "GS prim: parse to draw", "GS prim: strips flushed", "upload: found unchanged", "GS prim: to state",
@@ -1031,6 +1031,15 @@ void Vita_VBlank(unsigned vblanks) {
                                             for (z = 48; z < 51; z++) {
                                                 if (gVitaZoneN[z]) {
                                                     logf_("vita:   zone %2u %-26s %7u k cycles per drawn list, %6u marks, %4u cycles each\n", z, zs[z - 48],
+                                                          (unsigned)(gVitaZone[z] / nl / 1000), gVitaZoneN[z] / nl, (unsigned)(gVitaZone[z] / gVitaZoneN[z]));
+                                                }
+                                            }
+                                        }
+                                        {   /* (zones 52..55: the later marks) */
+                                            static const char *const zl[4] = {"GS prim: kept parts handed", "kept part: to its constants", "", ""};
+                                            for (z = 52; z < 56; z++) {
+                                                if (gVitaZoneN[z]) {
+                                                    logf_("vita:   zone %2u %-26s %7u k cycles per drawn list, %6u marks, %4u cycles each\n", z, zl[z - 52],
                                                           (unsigned)(gVitaZone[z] / nl / 1000), gVitaZoneN[z] / nl, (unsigned)(gVitaZone[z] / gVitaZoneN[z]));
                                                 }
                                             }
@@ -1153,8 +1162,10 @@ void Vita_VBlank(unsigned vblanks) {
                             extern void Gs_GifShapesLog(void);
                             {
                                 extern unsigned gVitaDpGenN[1];
-                                logf_("vita:   fxclamp: %u runs, %u triangles | dpgen: %u state fields changed by kept parts\n", gVitaFxClampN[0], gVitaFxClampN[1], gVitaDpGenN[0]);
-                                gVitaDpGenN[0] = 0;
+                                extern unsigned gVitaSkipFastN[1];
+                                logf_("vita:   fxclamp: %u runs, %u triangles | dpgen: %u state fields changed by kept parts | skipfast: %u packets' corners not built\n", gVitaFxClampN[0], gVitaFxClampN[1], gVitaDpGenN[0],
+                                      gVitaSkipFastN[0]);
+                                gVitaDpGenN[0] = gVitaSkipFastN[0] = 0;
                             }
                             {
                                 extern unsigned gVitaHudBatchN[2], gVitaHudRunN[2];
@@ -1219,8 +1230,8 @@ void Vita_VBlank(unsigned vblanks) {
                                     }
                                 }
                                 {   /* the list reader's zones */
-                                    extern uint64_t gVitaZoneF[52];
-                                    extern unsigned gVitaZoneNF[52], gVitaZoneListsF;
+                                    extern uint64_t gVitaZoneF[56];
+                                    extern unsigned gVitaZoneNF[56], gVitaZoneListsF;
                                     static const char *const fn[31] = {"rest of the list", "up to a program call", "program call: buffers", "program 0: its batch read",
                                         "", "", "", "strip: up to the plan", "strip: the plan", "strip: the record", "", "", "program call: the rest", "", "", "",
                                         "program 0: a layer's registers", "", "program 4: its batch read", "", "DMA: the rest", "VIF commands", "unpack", "DIRECT data",
@@ -1675,6 +1686,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "wtsig") == 0) { /* the targets' signatures worked out only when GS memory changed: 0 off, 1 on, 2 soak B */
             extern int gVitaWtSig;
             gVitaWtSig = atoi(eq);
+        } else if (strcmp(line, "skipfast") == 0) { /* lists not drawn: the runs build only their last packet's corners: 0 off, 1 on, 2 soak B */
+            extern int gVitaSkipFast;
+            gVitaSkipFast = atoi(eq);
         } else if (strcmp(line, "dpgen") == 0) { /* a kept part's register changes bump the state's generation: 0 off, 1 on, 2 soak B */
             extern int gVitaDpGen;
             gVitaDpGen = atoi(eq);

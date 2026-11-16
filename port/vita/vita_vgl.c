@@ -5038,6 +5038,7 @@ static void GsGpu_Draw_impl(int type, int ctx, const GsVertex *v) {
     if (sBinCount != 0 || sDpItemN != 0) {
         flush_bins_c(0); /* the vertex programs' strips collected so far come first */
         am_write(0.0f, 0.0f, 512.0f, 448.0f, -1); /* (models: their alpha is not followed) */
+        ZM(52); /* (zone 52: the kept parts and strips handed over before a GS primitive) */
     }
     if (sGlowSkip) {
         return; /* the glow's own passes: drawn natively at its marker */
@@ -11021,10 +11022,10 @@ void Vita_ProfSwitch(int n) {
 /* Zones: finer than the parts, for one measured list in 32 (no part switches then): Vita_Z(z) adds the cycles
    since the mark before to zone z. */
 volatile int gVitaZoneOn;   /* 1: the drawing thread's list is measured now, 2: the list reader's */
-uint64_t gVitaZone[52];
-unsigned gVitaZoneN[52], gVitaZoneLists;
-uint64_t gVitaZoneF[52];    /* the list reader's zones (its own marks) */
-unsigned gVitaZoneNF[52], gVitaZoneListsF;
+uint64_t gVitaZone[56];
+unsigned gVitaZoneN[56], gVitaZoneLists;
+uint64_t gVitaZoneF[56];    /* the list reader's zones (its own marks) */
+unsigned gVitaZoneNF[56], gVitaZoneListsF;
 static uint32_t sZLast, sZLastF;
 int gVitaZoneThread; /* (not used) */
 int gFeThreadId;     /* gs_core.c: the list reader's thread */

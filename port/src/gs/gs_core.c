@@ -2701,6 +2701,15 @@ unsigned long long gVitaGifCyc[2]; /* lists measured part by part: cycles in the
 unsigned gVitaGifCnt[2];
 unsigned gVitaGifN[6]; /* GIF tags PACKED, REGLIST, IMAGE; A+D writes; REGLIST registers outside the runs; PACKED registers */
 unsigned gVitaTriRunN[2]; /* (the log) runs, triangles in them */
+/* bt3.txt skipfast: in a list not drawn (gVitaGsSkip) the runs below build only their last packet's corners, the ones the
+   registers are left with (gs.vtx); the others were built and not drawn. The register writes and the palettes' loads
+   (clut_note) stay as they are. 0 off, 1 on, 2 the soak's B battles. */
+int gVitaSkipFast;
+unsigned gVitaSkipFastN[1]; /* (the log) packets whose corners were not built */
+static inline int skipfast_now(void) {
+    extern int gVitaGsSkip, gVitaAbSide;
+    return gVitaGsSkip && (gVitaSkipFast == 2 ? gVitaAbSide == 1 : gVitaSkipFast != 0);
+}
 /* n packets of 7 quadwords at q (tag, register list, PRIM, TEX0, 3 x (RGBAQ, ST, XYZF2), NOP), the same PRIM and TEX0 */
 static void tri_run(const uint64_t *q, uint32_t n) {
     extern int gVitaGsSkip;
@@ -2709,6 +2718,7 @@ static void tri_run(const uint64_t *q, uint32_t n) {
     uint32_t i, j, k, texreg = (uint32_t)((q[1] >> 4) & 0xF);
     int ctx, type;
     float ox, oy;
+    const int lean = skipfast_now();
     gVitaTriRunN[0]++;
     gVitaTriRunN[1] += n;
     sStat[3] += n;
@@ -2755,6 +2765,10 @@ static void tri_run(const uint64_t *q, uint32_t n) {
             }
             sStat[4] += 9;
             sStat[5] += 3;
+            if (lean && i + j + 1 != n) { /* (skipfast) */
+                gVitaSkipFastN[0]++;
+                continue;
+            }
             for (k = 0; k < 3; k++) {
                 uint64_t c = pk[4 + 3 * k], st = pk[5 + 3 * k], xyz = pk[6 + 3 * k];
                 uint32_t qq = (uint32_t)(c >> 32), tt = (uint32_t)(st >> 32), ss = (uint32_t)st;
@@ -2808,6 +2822,7 @@ static void clamp_tri_run(const uint64_t *q, uint32_t n) {
     const uint64_t *last = q + 16 * (n - 1);
     int ctx;
     float ox, oy;
+    const int lean = skipfast_now();
     gVitaFxClampN[0]++;
     gVitaFxClampN[1] += n;
     sStat[3] += n;
@@ -2837,6 +2852,10 @@ static void clamp_tri_run(const uint64_t *q, uint32_t n) {
             }
             sStat[4] += 10;
             sStat[5] += 3;
+            if (lean && i + j + 1 != n) { /* (skipfast) */
+                gVitaSkipFastN[0]++;
+                continue;
+            }
             for (k = 0; k < 3; k++) {
                 uint64_t c = pk[5 + 3 * k], st = pk[6 + 3 * k], xyz = pk[7 + 3 * k];
                 uint32_t qq = (uint32_t)(c >> 32), tt = (uint32_t)(st >> 32), ss = (uint32_t)st;
@@ -2883,6 +2902,7 @@ static void flat_tri_run(const uint64_t *d, uint32_t ntri) {
     const int ctx = (int)((gs.prim >> 9) & 1);
     const float ox = (float)(gs.xyoffset[ctx] & 0xFFFF), oy = (float)((gs.xyoffset[ctx] >> 32) & 0xFFFF);
     const uint64_t *last = d + 6 * (ntri - 1);
+    const int lean = skipfast_now();
     gVitaHudRunN[0]++;
     gVitaHudRunN[1] += ntri;
     for (i = 0; i < ntri; i += 64) {
@@ -2892,6 +2912,10 @@ static void flat_tri_run(const uint64_t *d, uint32_t ntri) {
             GsVertex *v = &vb[3 * j];
             sStat[4] += 6;
             sStat[5] += 3;
+            if (lean && i + j + 1 != ntri) { /* (skipfast) */
+                gVitaSkipFastN[0]++;
+                continue;
+            }
             for (k = 0; k < 3; k++) {
                 uint64_t c = pk[2 * k], xyz = pk[2 * k + 1];
                 uint32_t qq = (uint32_t)(c >> 32);
@@ -2994,6 +3018,7 @@ static void quad_run(const uint64_t *q, uint32_t n, int flat) {
     const uint64_t *last = q + stride * (n - 1);
     int ctx;
     float ox, oy;
+    const int lean = skipfast_now();
     gVitaQuadRunN[0]++;
     gVitaQuadRunN[1] += n;
     sStat[3] += n;
@@ -3009,6 +3034,10 @@ static void quad_run(const uint64_t *q, uint32_t n, int flat) {
             GsVertex c4[4];
             if (i + j > 0 && (pk[3] >> 61)) {
                 clut_note(pk[3]);
+            }
+            if (lean && i + j + 1 != n) { /* (skipfast) */
+                gVitaSkipFastN[0]++;
+                continue;
             }
             for (k = 0; k < 4; k++) {
                 uint64_t c = flat ? pk[4] : pk[4 + 3 * k], st = flat ? pk[5 + 2 * k] : pk[5 + 3 * k], xyz = flat ? pk[6 + 2 * k] : pk[6 + 3 * k];
@@ -4938,6 +4967,7 @@ static void gr_exec(const GRec *r) {
             if (!fromRec) {
                 memcpy(sGrConsts, r + 1, 384);
             }
+            GZM(53); /* (zone 53: from the record to its constants) */
             { extern unsigned gVglConstGen; gVglConstGen++; }
             if (dp_part(r->c, fromRec ? (const float *)(const void *)(r + 1) : sGrConsts)) {
                 GZM(1);
