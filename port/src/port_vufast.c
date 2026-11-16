@@ -475,8 +475,85 @@ static int fx_Vu0Cur_ProjectInt(int32_t *o, const V4 *v) {
     o[0] = toi_vu(p.x, 1.0f); o[1] = toi_vu(p.y, 1.0f); o[2] = toi_vu(p.z, 1.0f); o[3] = toi_vu(p.w, 1.0f);
     return 1;
 }
-enum { G_ClipPlane, G_ProjectCur, G_ProjectInt, G_COUNT };
-static const char *const kName2[G_COUNT] = {"ClipPoly_ClipPlane", "ClipPoly_ProjectCur", "Vu0Cur_ProjectInt"};
+/* ---- the projections to the screen with the on-screen test (vu0_b.c Ref_Vu0Cur_ProjectPoint, ..Points, ..PointStq,
+   ..PointsStq): the effects' quads, four corners each (the fighters' auras ~500 calls a frame in a 2 vs 2 fight, the
+   particles, the ribbons), ~5 us a call in the library's. The current matrix applied, x, y, z times 1 / w, x and y
+   to 12.4 fixed point, z and the undivided w to integers; on screen: 0 < x < 4096, 0 < y < 4096, w > 0, all strict and
+   on the sign bit (-0 is not above 0). The several points' routines stop after storing the first point off the
+   screen (the rest of the output is not written) and return 1 only when every point was on it; ..PointsStq leaves
+   vf7.xyz as the last point's S, T, Q and stores vf7.w as it found it (the original's quirk), ..PointStq stores
+   uv.w. No other register is changed by them. ---- */
+extern int __real_Vu0Cur_ProjectPoint(int32_t *out, const V4 *v);
+extern int __real_Vu0Cur_ProjectPoints(int32_t *out, const V4 *v, int n);
+extern int __real_Vu0Cur_ProjectPointStq(int32_t *out, V4 *stq, const V4 *v, const V4 *uv);
+extern int __real_Vu0Cur_ProjectPointsStq(int32_t *out, V4 *stq, const V4 *v, const V4 *uv, int n);
+static inline int onscr_bits(float d) {
+    uint32_t b = fbits(d);
+    return ((b & 0x7FFFFFFFu) == 0) | (int)(b >> 31);
+}
+/* one point: its screen position in o, 1 / w in *q; 0 when a number met is not finite (nothing worth keeping) */
+static inline int proj_pt(const V4 *R, V4 v, int32_t *o, float *q, int *on) {
+    V4 p = apply(R, v, 0);
+    float d;
+    int bad;
+    if (bad4(p.x, p.y, p.z, p.w)) {
+        return 0;
+    }
+    *q = div_vu(VF(0).w, p.w);
+    p.x = p.x * *q; p.y = p.y * *q; p.z = p.z * *q;
+    if (bad4(p.x, p.y, p.z, *q)) {
+        return 0;
+    }
+    d = p.x - 0.0f; bad = onscr_bits(d);
+    d = p.y - 0.0f; bad |= onscr_bits(d);
+    d = p.w - 0.0f; bad |= onscr_bits(d);
+    d = 4096.0f - p.x; bad |= onscr_bits(d);
+    d = 4096.0f - p.y; bad |= onscr_bits(d);
+    *on = !bad;
+    o[0] = toi_vu(p.x, 16.0f); o[1] = toi_vu(p.y, 16.0f); o[2] = toi_vu(p.z, 1.0f); o[3] = toi_vu(p.w, 1.0f);
+    return 1;
+}
+/* n points (1..16; stq NULL: without), stopping after the first off the screen; *ret as the library returns */
+static int fx_project_n(int *ret, int32_t *out, V4 *stq, const V4 *v, const V4 *uv, int n, int stqW) {
+    V4 R[4], S[16];
+    int32_t I[16][4];
+    float q = 0.0f, sw = stqW ? 0.0f : VF(7).w;
+    int i, m, on = 1;
+    if (n <= 0 || n > 16) {
+        return 0;
+    }
+    R[0] = VF(16); R[1] = VF(17); R[2] = VF(18); R[3] = VF(19);
+    for (i = 0; i < n; i++) {
+        if (!proj_pt(R, v[i], I[i], &q, &on)) {
+            return 0;
+        }
+        if (stq != 0) {
+            S[i].x = uv[i].x * q; S[i].y = uv[i].y * q; S[i].z = VF(1).z * q; S[i].w = stqW ? uv[i].w : sw;
+            if (bad4(S[i].x, S[i].y, S[i].z, 0.0f)) {
+                return 0;
+            }
+        }
+        if (!on) {
+            i++;
+            break;
+        }
+    }
+    m = i;
+    for (i = 0; i < m; i++) {
+        if (stq != 0) {
+            stq[i] = S[i];
+        }
+        out[i * 4 + 0] = I[i][0]; out[i * 4 + 1] = I[i][1]; out[i * 4 + 2] = I[i][2]; out[i * 4 + 3] = I[i][3];
+    }
+    if (stq != 0 && !stqW) {
+        VF(7).x = S[m - 1].x; VF(7).y = S[m - 1].y; VF(7).z = S[m - 1].z;
+    }
+    *ret = on;
+    return 1;
+}
+enum { G_ClipPlane, G_ProjectCur, G_ProjectInt, G_ProjectPoint, G_ProjectPoints, G_ProjectPointStq, G_ProjectPointsStq, G_COUNT };
+static const char *const kName2[G_COUNT] = {"ClipPoly_ClipPlane", "ClipPoly_ProjectCur", "Vu0Cur_ProjectInt", "Vu0Cur_ProjectPoint",
+                                            "Vu0Cur_ProjectPoints", "Vu0Cur_ProjectPointStq", "Vu0Cur_ProjectPointsStq"};
 static unsigned char sOn2[G_COUNT];
 #define GATE2(k) (__builtin_expect(!sOn2[k], 0) && !(sTested ? 0 : vuf_test(), sOn2[k]))
 
@@ -498,6 +575,34 @@ void VuFast_Vu0Cur_ProjectInt(int32_t *o, const V4 *v) {
     if (GATE2(G_ProjectInt) || !fx_Vu0Cur_ProjectInt(o, v)) {
         FALL(__real_Vu0Cur_ProjectInt(o, v));
     }
+}
+int VuFast_Vu0Cur_ProjectPoint(int32_t *o, const V4 *v) {
+    int r;
+    if (GATE2(G_ProjectPoint) || !fx_project_n(&r, o, 0, v, 0, 1, 0)) {
+        FALL(r = __real_Vu0Cur_ProjectPoint(o, v));
+    }
+    return r;
+}
+int VuFast_Vu0Cur_ProjectPoints(int32_t *o, const V4 *v, int n) {
+    int r;
+    if (GATE2(G_ProjectPoints) || !fx_project_n(&r, o, 0, v, 0, n, 0)) {
+        FALL(r = __real_Vu0Cur_ProjectPoints(o, v, n));
+    }
+    return r;
+}
+int VuFast_Vu0Cur_ProjectPointStq(int32_t *o, V4 *stq, const V4 *v, const V4 *uv) {
+    int r;
+    if (GATE2(G_ProjectPointStq) || !fx_project_n(&r, o, stq, v, uv, 1, 1)) {
+        FALL(r = __real_Vu0Cur_ProjectPointStq(o, stq, v, uv));
+    }
+    return r;
+}
+int VuFast_Vu0Cur_ProjectPointsStq(int32_t *o, V4 *stq, const V4 *v, const V4 *uv, int n) {
+    int r;
+    if (GATE2(G_ProjectPointsStq) || !fx_project_n(&r, o, stq, v, uv, n, 0)) {
+        FALL(r = __real_Vu0Cur_ProjectPointsStq(o, stq, v, uv, n));
+    }
+    return r;
 }
 /* ---- the rotations: Mtx_RotateX/Y/Z, Vu0Cur_RotateX/Y/Z and the sine and cosine they begin with. The
    library's are 14 KB of code each (every vector instruction of the unit modelled in line), 250 calls a fight frame:
@@ -704,6 +809,34 @@ static void rmtx(M4 *m) {
     }
 }
 /* the registers a stand-in may change, and the outputs */
+/* (the self-test) a projection of kind G_ProjectPoint.. on the polygon's positions and uvs, the library's way (lib) or
+   the stand-in's (falling back as the game's calls do); returns what the routine returns */
+static int proj_case(int k, int lib, const CV *pa, int n, int32_t (*o)[4], V4 *st, unsigned *fell) {
+    V4 v[16], uv[16];
+    int j, r = 0, ok = 1;
+    for (j = 0; j < 16; j++) {
+        v[j] = pa[j].pos;
+        uv[j] = pa[j].uv;
+    }
+    if (lib) {
+        if (k == G_ProjectPoint) { r = __real_Vu0Cur_ProjectPoint(o[0], v); }
+        else if (k == G_ProjectPoints) { r = __real_Vu0Cur_ProjectPoints(o[0], v, n); }
+        else if (k == G_ProjectPointStq) { r = __real_Vu0Cur_ProjectPointStq(o[0], st, v, uv); }
+        else { r = __real_Vu0Cur_ProjectPointsStq(o[0], st, v, uv, n); }
+        return r;
+    }
+    if (k == G_ProjectPoint) { ok = fx_project_n(&r, o[0], 0, v, 0, 1, 0); }
+    else if (k == G_ProjectPoints) { ok = fx_project_n(&r, o[0], 0, v, 0, n, 0); }
+    else if (k == G_ProjectPointStq) { ok = fx_project_n(&r, o[0], st, v, uv, 1, 1); }
+    else { ok = fx_project_n(&r, o[0], st, v, uv, n, 0); }
+    if (!ok) {
+        if (fell != 0) {
+            (*fell)++;
+        }
+        r = proj_case(k, 1, pa, n, o, st, 0);
+    }
+    return r;
+}
 typedef struct { RefVec4 vf[16]; RefVec4 acc; uint8_t out[64]; } Snap;
 static void snap(Snap *s, const void *out, unsigned n) {
     memcpy(s->vf, &gRefVu0.vf[4], sizeof(s->vf));
@@ -876,6 +1009,10 @@ static int vuf_test(void) {
                         }
                     }
                     cur.r[3].w = 500.0f + (float)(rnd() % 5000);
+                    if (k >= G_ProjectPoint && kind == 3) { /* (the projections: most points on the screen) */
+                        cur.r[3].x = cur.r[3].w * 2048.0f;
+                        cur.r[3].y = cur.r[3].w * 1800.0f;
+                    }
                 }
                 rvec(&r13);
                 memcpy(pb, pa, sizeof(pa));
@@ -885,6 +1022,7 @@ static int vuf_test(void) {
                 memcpy(&gRefVu0.vf[13], &r13, sizeof(r13));
                 if (k == G_ClipPlane) { ra = __real_ClipPoly_ClipPlane(pa, &pl, n); }
                 else if (k == G_ProjectCur) { __real_ClipPoly_ProjectCur(ia, sa, pa, n); }
+                else if (k >= G_ProjectPoint) { ra = proj_case(k, 1, pa, n, ia, sa, 0); }
                 else { __real_Vu0Cur_ProjectInt(ia[0], &pa[0].pos); }
                 snap(&xa, &ra, 4);
                 memcpy(&gRefVu0.vf[4], keep + 4, 12 * sizeof(RefVec4));
@@ -892,9 +1030,10 @@ static int vuf_test(void) {
                 memcpy(&gRefVu0.vf[13], &r13, sizeof(r13));
                 if (k == G_ClipPlane) { if (!fx_ClipPoly_ClipPlane(&rb, pb, &pl, n)) { fell++; rb = __real_ClipPoly_ClipPlane(pb, &pl, n); } }
                 else if (k == G_ProjectCur) { if (!fx_ClipPoly_ProjectCur(ib, sb, pb, n)) { fell++; __real_ClipPoly_ProjectCur(ib, sb, pb, n); } }
+                else if (k >= G_ProjectPoint) { rb = proj_case(k, 0, pb, n, ib, sb, &fell); }
                 else { if (!fx_Vu0Cur_ProjectInt(ib[0], &pb[0].pos)) { fell++; __real_Vu0Cur_ProjectInt(ib[0], &pb[0].pos); } }
                 snap(&xb, &rb, 4);
-                cut += k == G_ClipPlane && ra != 0 && ra != n;
+                cut += (k == G_ClipPlane && ra != 0 && ra != n) || (k >= G_ProjectPoint && ra != 0); /* (the projections: all on the screen) */
                 if (!same(&xa, &xb) || memcmp(pa, pb, sizeof(pa)) != 0 || memcmp(ia, ib, sizeof(ia)) != 0 || memcmp(sa, sb, sizeof(sa)) != 0) {
                     diff = i + 1;
                 }
@@ -921,6 +1060,7 @@ static int vuf_test(void) {
                     memcpy(pw, p0, 3 * sizeof(CV));
                     if (k == G_ClipPlane) { (void)__real_ClipPoly_ClipPlane(pw, &pl, 3); }
                     else if (k == G_ProjectCur) { __real_ClipPoly_ProjectCur(sc, st, pw, 3); }
+                    else if (k >= G_ProjectPoint) { (void)proj_case(k, 1, pw, 3, sc, st, 0); }
                     else { __real_Vu0Cur_ProjectInt(sc[0], &pw[0].pos); }
                 }
                 t1 = sceKernelGetProcessTimeWide();
@@ -929,6 +1069,7 @@ static int vuf_test(void) {
                     memcpy(pw, p0, 3 * sizeof(CV));
                     if (k == G_ClipPlane) { if (!fx_ClipPoly_ClipPlane(&r, pw, &pl, 3)) { (void)__real_ClipPoly_ClipPlane(pw, &pl, 3); } }
                     else if (k == G_ProjectCur) { if (!fx_ClipPoly_ProjectCur(sc, st, pw, 3)) { __real_ClipPoly_ProjectCur(sc, st, pw, 3); } }
+                    else if (k >= G_ProjectPoint) { (void)proj_case(k, 0, pw, 3, sc, st, 0); }
                     else { if (!fx_Vu0Cur_ProjectInt(sc[0], &pw[0].pos)) { __real_Vu0Cur_ProjectInt(sc[0], &pw[0].pos); } }
                 }
                 t2 = sceKernelGetProcessTimeWide();

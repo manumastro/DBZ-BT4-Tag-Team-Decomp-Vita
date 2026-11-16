@@ -180,6 +180,33 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   copies of the list's pieces at the handover) 1.9 -> 2.9, the fighters drawn 1.4 -> 2.4, the scene 1.2 -> 2.3, the
   HUD, objects and computer players 1.5 -> 3.6. Of `snap_make`'s 2.9 ms, 1.4 are its images' sums (~380 images a
   list, read whole each time), 0.9 its walk of the chain, 0.1 its copies.
+- 2026-11-16, `snapcut` (development build, default 0, kept off): `snap_make` cut down, an image not summed when its
+  sum was the same 32 lists running (one list in 16 summed all the same), and the model calls (`CALL` tags) not
+  walked (no image was ever found inside one). Stage 0, 2 vs 2: `snap_make` 2.9 -> 1.5 ms a step, but no picture
+  gained (22.0 -> 21.4 a second: the drawing thread is the limit). Stage 12 with `snapcut=3` (the sums made all the
+  same and compared): of 1,142,842 sums skipped, 17 were of an image that had changed (read in place, not copied:
+  a wrong picture possible for one frame), so the skip is not safe as it is. With `snapcut=1` on stage 0 the graphics chip crashed
+  (`psp2core-*-GPUCRASH`, no CPU thread at fault) ~97 s in, during a super attack (the battle clock held at ~870
+  ticks, then the scene's effects), at clock 1205; the same fight with `snapcut=0` (the demo is deterministic: the same
+  health at the same ticks) went past that point. The last log line before the crash read 5 MB of video memory free
+  (37 MB a minute before); the run without snapcut had no reading there. One crash, one run each: the cause is not
+  known; with the 17 misses and no picture gained, snapcut stays off and is not worth more runs.
+- 2026-11-16, the effects on the game's thread (the log's "effect tasks' update / draw callbacks" lines, from
+  `port/src/port_fast.c`'s wrapped `BtlTaskList_Update` / `_Draw`; their run-time addresses are the map's plus
+  0x10000, plus 1 for Thumb), stage 0, 2 vs 2, us a frame: `EftAuraTask_Draw` (the fighters' auras) 3,800,
+  `EftPtcl_Draw` (particles) 1,070, `EftAuraTask_Update` 920, `EftPtcl_Update` 350, `EftAnimPart_Draw` 350,
+  `EftSurf_Draw` 320. The aura projects the four corners of each flame (up to 50 a fighter) with
+  `Vu0Cur_ProjectPoint`, which had no fast stand-in (~5 us a call in the library's). `port_vufast.c` now has
+  `Vu0Cur_ProjectPoint`, `..Points`, `..PointStq`, `..PointsStq` (the particles, ribbons, quads), checked at start
+  against the library's on 3,000 operand sets each like the others (all 34 stand-ins used). The same fight (the demo is
+  deterministic): the game's thread 30.2 -> 27.4 ms a step, the scene drawn 5.9 -> 3.2, the aura's draw 3.8 -> 2.1;
+  the game's speed from 30 s on 93.6% -> 97.4% (stretches under 90%: 11 of 43 -> 5 of 45); pictures 21.3 -> 21.2 a
+  second (the drawing thread is the limit). Runs `port/build/runs/tp0`, `pp0`.
+- `vita_agent_run.py` after that crash: the console refused to take its settings back while it wrote the dump
+  ("stale"), and the runner stopped, leaving the run's `bt3.txt` on the console for hours. It now puts them back in
+  a `finally`, tries again for ~3 minutes with a fresh transfer state, reads them back to compare, and exits 5 if it
+  could not; it refuses to start (exit 4) when the console's `bt3.txt` holds `exitafter=` or `mode=` (an earlier run's
+  left over, which it would otherwise keep as the console's own).
 - `zones=1`: the zones of the drawing thread and the list reader (one drawn list in 8) timed by the system's clock
   when libperf is not there (a reading costs ~0.7 us, so the small zones come out too large; libperf's counter costs
   ~95 cycles a mark).

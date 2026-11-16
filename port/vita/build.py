@@ -321,7 +321,8 @@ FAST_WRAPS = "StgFrustum_TestBox StgFrustum_TestPart BtlTaskList_Update BtlTaskL
 # Vector-library functions with an exact faster equivalent (port/src/port_vufast.c; the jumps: vita_vufast_wrap.c).
 VUFAST_WRAPS = """ClipPoly_ClipPlane ClipPoly_ProjectCur Mtx_Mul Mtx_MulVec3 Mtx_MulVec4 Mtx_RotateX Mtx_RotateXYZ Mtx_RotateY Mtx_RotateZ
     Mtx_RotateZXY Vec3_Add Vec3_Cross Vec3_Dist Vec3_DistSq Vec3_Dot Vec3_Length Vec3_LengthSq Vec3_Normalize Vec3_Scale Vec3_Sub Vec4_Add
-    Vec4_Mul Vec4_Scale Vec4_Sub Vu0Cur_MulMtx Vu0Cur_MulMtxRev Vu0Cur_MulVec3 Vu0Cur_MulVec4 Vu0Cur_ProjectInt Vu0Cur_RotateX
+    Vec4_Mul Vec4_Scale Vec4_Sub Vu0Cur_MulMtx Vu0Cur_MulMtxRev Vu0Cur_MulVec3 Vu0Cur_MulVec4 Vu0Cur_ProjectInt Vu0Cur_ProjectPoint
+    Vu0Cur_ProjectPoints Vu0Cur_ProjectPointStq Vu0Cur_ProjectPointsStq Vu0Cur_RotateX
     Vu0Cur_RotateXYZ Vu0Cur_RotateY Vu0Cur_RotateZ Vu0Cur_RotateZXY""".split()
 # The port's own entry points around the game's (headless.c, vita_main.c) and the renderer's hooks.
 PORT_WRAPS = "Progress_Main main exit Port_GsVif1Chain sceMpegGetPicture GsVu1_Call".split()
