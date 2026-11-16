@@ -27,8 +27,8 @@ events.jsonl (the run's events: performance samples, crash dumps, dialogs), hang
 Runs over an hour (vita-agent-use's run timeout) are launched and watched without a run (no run-owned metrics).
 Exit codes: 0 done, 1 a crash dump, 2 / 3 not started, 4 the console's bt3.txt holds a test run's lines (exitafter=,
 mode=: an earlier run did not put the developer's back; nothing is done), 5 the console's settings could not be put
-back (after a crash the console refuses changes while it writes its dump: tried for about three minutes). A batch of
-runs stops at anything but 0.
+back (after a crash the console refuses changes while it writes its dump: tried for about three minutes), 6 the game
+did not write its `vita: exitafter:` line (not launched, hung or closed). A batch of runs stops at anything but 0.
 """
 import argparse
 import datetime
@@ -46,10 +46,15 @@ SETTINGS = "ux0:data/bt4/bt3.txt"
 TERMINAL = {"completed", "cancelled", "failed", "connection_lost"}
 
 
-def agent(*args, check=False):
+def agent(*args, check=False, timeout=180):
     """Runs the vita-agent CLI; returns (exit code, the JSON objects it printed)."""
     exe = os.environ.get("VITA_AGENT") or shutil.which("vita-agent") or "vita-agent"
-    p = subprocess.run([exe, *[str(a) for a in args]], capture_output=True, text=True)
+    try:
+        p = subprocess.run([exe, *[str(a) for a in args]], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if check:
+            raise RuntimeError("vita-agent %s: no answer in %d s" % (" ".join(map(str, args)), timeout))
+        return 124, []
     objs = []
     for line in p.stdout.splitlines():
         line = line.strip()
@@ -82,12 +87,33 @@ def exists(path):
     return rc == 0 and last(objs).get("status") == "ok"
 
 
+def connected():
+    rc, objs = agent("server", "status", timeout=60)
+    st = last(objs)
+    return bool(st.get("connected") or st.get("result", {}).get("connected"))
+
+
+def wait_connected(note, seconds=240):
+    """True as soon as the console answers again; False after `seconds` without it (switched off, asleep, crashed
+    hard): then there is no point in trying for longer, a person has to look at it."""
+    end = time.monotonic() + seconds
+    while True:
+        if connected():
+            return True
+        if time.monotonic() > end:
+            note("THE CONSOLE IS NOT ANSWERING (for %d s): is it on and awake?" % seconds)
+            return False
+        time.sleep(20)
+
+
 def put_back(src, out, note):
     """The console's own settings put back, and read back to be sure. Right after a crash the console is busy writing
     its dump and refuses changes for a while ("stale"): tried again, each time with a fresh transfer state, for up to
     about three minutes. False (and a loud line) if they could not be put back."""
     want = src.read_bytes()
     for attempt in range(12):
+        if not wait_connected(note):
+            break
         try:
             upload(src, SETTINGS, out, overwrite=True)
         except RuntimeError as e:
@@ -161,7 +187,7 @@ def main():
             if o.eboot:
                 spec["prepare"] = {"upload": {"source": str(eboot), "destination": "ux0:app/%s/eboot.bin" % o.title, "overwrite": True}}
             (out / "run.json").write_text(json.dumps(spec, indent=2))
-            rc, objs = agent("run", "start", out / "run.json", *(["--yes"] if o.eboot else []))
+            rc, objs = agent("run", "start", out / "run.json", *(["--yes"] if o.eboot else []), timeout=600)
             run_id = last(objs).get("run_id") or last(objs).get("result", {}).get("run_id")
             if not run_id:
                 note("the run did not start:", json.dumps(last(objs))[:400])
@@ -217,7 +243,7 @@ def main():
                 f.write(json.dumps(e) + "\n")
 
         # the log, the watchdog's file, the settings put back
-        agent("fs", "download", LOG, out / "log-all.txt")
+        agent("fs", "download", LOG, out / "log-all.txt", timeout=600)
         if exists("ux0:data/bt4/hang-vgl.txt"):
             agent("fs", "download", "ux0:data/bt4/hang-vgl.txt", out / "hang.txt")
     finally:
@@ -238,7 +264,14 @@ def main():
          "| crash dumps:", len(dumps), "| shots:", len(list((out / "shots").glob("*.jpg"))), "| files in", out)
     if not restored:
         return 5
-    return 0 if not dumps else 1
+    if dumps:
+        return 1
+    ended = (out / "log.txt").is_file() and "vita: exitafter:" in (out / "log.txt").read_text(encoding="utf-8", errors="replace")
+    if not ended:  # (no crash dump, but the game did not reach its own end either: not launched, hung, closed)
+        note("the log has no `vita: exitafter:` line: the game did not end the run itself; run error:",
+             json.dumps(status.get("error") or status.get("result", {}).get("error"))[:300])
+        return 6
+    return 0
 
 
 if __name__ == "__main__":

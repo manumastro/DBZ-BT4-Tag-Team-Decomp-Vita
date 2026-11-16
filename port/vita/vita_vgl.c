@@ -2554,6 +2554,27 @@ static volatile int gVitaDrawWhere;
 /* (the watchdog: vitaGL's free memory as last looked at, once a second, by the drawing thread: the watchdog itself
    calls nothing of vitaGL, which may be what is stuck) */
 static volatile unsigned sMemVramK, sMemRamK, sMemSeen;
+/* (the log) the lowest free video and main memory seen since the last report, read every eighth picture (two
+   graphics-chip crashes in 2 vs 2 fights on stage 0; the first one's last reading was 5 MB of video memory free) */
+unsigned gVitaMemLow[2] = {0xFFFFFFFFu, 0xFFFFFFFFu};
+static void mem_sample(void) {
+    unsigned v, m;
+    if (++sMemSeen % 8 != 0) {
+        return;
+    }
+    v = (unsigned)(vglMemFree(VGL_MEM_VRAM) >> 10);
+    m = (unsigned)(vglMemFree(VGL_MEM_RAM) >> 10);
+    if (v < gVitaMemLow[0]) {
+        gVitaMemLow[0] = v;
+    }
+    if (m < gVitaMemLow[1]) {
+        gVitaMemLow[1] = m;
+    }
+    if (sMemSeen % 64 == 0) {
+        sMemVramK = v;
+        sMemRamK = m;
+    }
+}
 /* (the minute line of the log, vita_main.c: what the texture tables hold, read as they are, and the memory) */
 int Vita_VglTables(char *out, int size) {
     int k, idx = 0, pal = 0;
@@ -2575,10 +2596,7 @@ static inline void wt_swap(void) {
     pace_swap(1);
     gVitaDrawWhere = 0;
     gVitaWall[0] += sceKernelGetProcessTimeWide() - t0;
-    if (++sMemSeen % 60 == 0) {
-        sMemVramK = (unsigned)(vglMemFree(VGL_MEM_VRAM) >> 10);
-        sMemRamK = (unsigned)(vglMemFree(VGL_MEM_RAM) >> 10);
-    }
+    mem_sample();
 }
 /* bt3.txt rtswap=1: a fight picture's swap and the next picture's clear made by the render thread, in its ring after
    the picture's last draws, so that the drawing thread goes on with the next list at once instead of waiting for the
@@ -2597,10 +2615,7 @@ static void rt_swap_exec(const RtSwap *s) {
     vglSwapBuffers(GL_FALSE);
     pace_swap_rt(s, 1);
     gVitaWall[0] += sceKernelGetProcessTimeWide() - t0;
-    if (++sMemSeen % 60 == 0) {
-        sMemVramK = (unsigned)(vglMemFree(VGL_MEM_VRAM) >> 10);
-        sMemRamK = (unsigned)(vglMemFree(VGL_MEM_RAM) >> 10);
-    }
+    mem_sample();
     frame_begin_gl();
 }
 /* What one draw of a batch reads (flush_impl): its state and its data. */
@@ -2874,7 +2889,7 @@ void Vita_VglState(char *b, int n) {
                  sRtWhere, sRtHead, sRtTail, sRtW, sRtSleep ? "marked asleep" : "not marked asleep");
     if (k > 0 && k < n) {
         k += snprintf(b + k, (size_t)(n - k), "vita: WATCHDOG:   pictures shown %u, drawn %u; textures %d; free %u KB video, %u KB main (%u pictures ago); kept parts %u KB, fighters %u, stage %u\n",
-                      gVitaShown, sMemSeen, sTexCount, sMemVramK, sMemRamK, sMemSeen % 60, (unsigned)(sDpIboUsed >> 10), (unsigned)sFtUsed, (unsigned)sStageUsed);
+                      gVitaShown, sMemSeen, sTexCount, sMemVramK, sMemRamK, sMemSeen % 64, (unsigned)(sDpIboUsed >> 10), (unsigned)sFtUsed, (unsigned)sStageUsed);
     }
     if (k > 0 && k < n) {
         Gs_QueueState(b + k, n - k);
@@ -3647,11 +3662,25 @@ static int state_of_cached(int ctx, int type, State *d, const uint64_t *r, int w
 unsigned gVitaStLast;
 unsigned gVitaWtWay[5]; /* the work targets' way: a work target as the texture, the picture, page 0, page 0x70; drawn into a target not kept */
 int gVitaStLastOn = 1, gVitaFl6 = 1, gVitaStXOn = 1, gVitaWtCOn = 1;
+/* bt3.txt wtrem (0 off, 1 on, 2 the soak's B battles, 3 a check): the work targets' reads remembered also when they need
+   no texture transform (a target read at its own size: the effects' program 4 strips, 18,000-31,000 states worked out
+   in two seconds of a 2 vs 2 fight's heavy effects, 5,000-8,000 cycles each); 3 works each out all the same and
+   compares. stl4 (the same values): the state of the call before kept for the four last register sets, not one (a
+   fighter's strips take turns between two textures, which emptied the one place each time). */
+int gVitaWtRem, gVitaStL4;
+unsigned gVitaWtRemN[3], gVitaStL4N[3]; /* (the log) taken, checked, differed */
+static int mode_now(int m) {
+    extern int gVitaAbSide;
+    return m == 1 || m == 3 || (m == 2 && gVitaAbSide == 1);
+}
 /* the work targets' way's reads remembered (above in state_of) */
 static int work_mark(uint32_t fbp);
-typedef struct WtC { uint64_t r[11]; unsigned frame, epoch; int ctx, type, wp, kind, ok; WorkTarget *s; float xf[4]; State st; } WtC;
+typedef struct WtC { uint64_t r[11]; unsigned frame, epoch; int ctx, type, wp, kind, ok, xfOn; WorkTarget *s; float xf[4]; State st; } WtC;
 static WtC sWtC[32];
-unsigned gVitaWtC[3]; /* (the log) the work targets' way: states remembered taken, worked out, remembered */ /* (tests: bt3.txt stlast=, fl6=) */
+unsigned gVitaWtC[3]; /* (the log) the work targets' way: states remembered taken, worked out, remembered */
+unsigned gVitaVuSt[3][2]; /* (the log) strips' states by program (0, 4, 6): the usual way, the work targets' way */
+unsigned gVitaWtNoRem[8]; /* (the log) the work targets' way: a state worked out and not remembered, why: refused, no texture transform,
+                           no texture, not a picture as the texture, no picture yet, no target found, the target's texture another */ /* (tests: bt3.txt stlast=, fl6=) */
 __attribute__((hot)) static int state_of(int ctx, int type, State *d) {
     uint64_t r[11];
     int ok, pageT, wpk;
@@ -3678,33 +3707,55 @@ __attribute__((hot)) static int state_of(int ctx, int type, State *d) {
                its memory as its last draw left it; the picture: the same copy of it) */
             uint32_t fbp5 = (uint32_t)(r[5] & 0x1FF);
             WtC *e = &sWtC[((uint32_t)(r[1] ^ r[5] ^ r[0] >> 3 ^ r[7] >> 1 ^ r[4]) * 0x9E3779B1u) >> 27];
-            if (gVitaWtCOn && e->ok && e->frame == gGsFrame && e->ctx == ctx && e->type == type && e->wp == wpk && memcmp(r, e->r, sizeof(r)) == 0 &&
+            int wtRem = mode_now(gVitaWtRem), wtChk = 0;
+            State chkSt;
+            if (gVitaWtCOn && e->ok && (e->xfOn || wtRem) && e->frame == gGsFrame && e->ctx == ctx && e->type == type && e->wp == wpk && memcmp(r, e->r, sizeof(r)) == 0 &&
                 (e->kind == 2 ? e->s->drawn && !e->s->stale && e->s->tex == e->st.tex && (e->epoch == gGsEpoch || wt_sig(e->s) == e->s->sig)
                               : sOlTex[gxm_back_buffer_index % 3] == e->st.tex) &&
                 /* the shadows' work page shares its page with the glow's first target: read as the target only
                    where state_of_ would not take it for the work page (outside a shadow's markers) */
                 ((r[1] & 0x3FFF) != WP_FBP * 32 || !sWpReady || (sWtOn && sWpMarked && sWpAgain < 0 && sWpSlot == WP_OTHER && !FX_WT_OFF))) {
-                if (gGsMainFbp >= 0 && fbp5 != (uint32_t)gGsMainFbp) {
-                    work_mark(fbp5); /* (as state_of_: the game drew into that buffer) */
+                if (!e->xfOn && gVitaWtRem == 3) {
+                    wtChk = 1; /* (the check: worked out below all the same, and compared) */
+                    chkSt = e->st;
+                } else {
+                    if (gGsMainFbp >= 0 && fbp5 != (uint32_t)gGsMainFbp) {
+                        work_mark(fbp5); /* (as state_of_: the game drew into that buffer) */
+                    }
+                    e->epoch = gGsEpoch;
+                    sTexXf = e->xfOn;
+                    if (e->xfOn) {
+                        memcpy(sTexXfV, e->xf, sizeof(e->xf));
+                    } else {
+                        gVitaWtRemN[0]++;
+                    }
+                    gVitaWt[e->kind == 2 ? 2 : 4]++;
+                    gVitaWtC[0]++;
+                    *d = e->st;
+                    return 1;
                 }
-                e->epoch = gGsEpoch;
-                sTexXf = 1;
-                memcpy(sTexXfV, e->xf, sizeof(e->xf));
-                gVitaWt[e->kind == 2 ? 2 : 4]++;
-                gVitaWtC[0]++;
-                *d = e->st;
-                return 1;
             }
             sRejWhy = 0;
             sWorkChanged = 0;
             ok = state_of_(ctx, type, d);
             gVitaWtC[1]++;
-            if (ok && sTexXf && d->tme && d->pad_[0] != 0 && gGsMainFbp >= 0) {
+            if (wtChk) {
+                gVitaWtRemN[1]++;
+                gVitaWtRemN[2] += !ok || sTexXf || memcmp(&chkSt, d, sizeof(State)) != 0;
+            }
+            if (!(ok && (sTexXf || wtRem) && d->tme && d->pad_[0] != 0 && gGsMainFbp >= 0)) { /* (the log: why not remembered) */
+                gVitaWtNoRem[!ok ? 0 : !(sTexXf || wtRem) ? 1 : !d->tme ? 2 : d->pad_[0] == 0 ? 3 : 4]++;
+            }
+            if (ok && (sTexXf || wtRem) && d->tme && d->pad_[0] != 0 && gGsMainFbp >= 0) {
                 WorkTarget *ws = wt_find(tb, (uint32_t)((r[1] >> 14) & 0x3F));
                 int kind = ws != NULL && ws->tex == d->tex ? 2 : sOlTex[gxm_back_buffer_index % 3] == d->tex ? 3 : 0;
+                if (kind == 0) {
+                    gVitaWtNoRem[ws == NULL ? 5 : 6]++;
+                }
                 if (kind != 0) {
                     memcpy(e->r, r, sizeof(r));
                     e->frame = gGsFrame; e->epoch = gGsEpoch; e->ctx = ctx; e->type = type; e->wp = wpk; e->kind = kind; e->s = ws; e->ok = 1;
+                    e->xfOn = sTexXf;
                     memcpy(e->xf, sTexXfV, sizeof(e->xf));
                     e->st = *d;
                     gVitaWtC[2]++;
@@ -3743,20 +3794,41 @@ __attribute__((hot)) static int state_of(int ctx, int type, State *d) {
     }
     {   /* the state of the call before, when the registers are its registers: before the table (whose 1024
            places lie in 150 KB, a cache miss or two a look) */
-        static struct { uint64_t r[11]; unsigned frame, epoch, gen; int ctx, type, wp, ok; State st; } last;
-        if (last.ok && gVitaStLastOn && last.gen == sStCacheGen && last.frame == gGsFrame && last.ctx == ctx && last.type == type && last.wp == wpk &&
-            (last.epoch == gGsEpoch || !((r[0] >> 4) & 1)) && memcmp(r, last.r, sizeof(r)) == 0) {
-            gVitaStOf[2]++;
-            gVitaStLast++;
-            *d = last.st;
-            return 1;
+        typedef struct { uint64_t r[11]; unsigned frame, epoch, gen; int ctx, type, wp, ok; State st; } Last;
+        static Last last4[4];
+        static unsigned lastNext;
+        Last *lp = &last4[0];
+        int n4 = mode_now(gVitaStL4) ? 4 : 1, k4, chk = -1;
+#define LAST_SAME(e) ((e)->ok && (e)->gen == sStCacheGen && (e)->frame == gGsFrame && (e)->ctx == ctx && (e)->type == type && (e)->wp == wpk && \
+                      ((e)->epoch == gGsEpoch || !((r[0] >> 4) & 1)) && memcmp(r, (e)->r, sizeof(r)) == 0)
+        for (k4 = 0; k4 < n4 && gVitaStLastOn; k4++) {
+            if (LAST_SAME(&last4[k4])) {
+                if (k4 != 0 && gVitaStL4 == 3) {
+                    chk = k4; /* (the check: the table's way all the same, and compared) */
+                    break;
+                }
+                gVitaStOf[2]++;
+                gVitaStLast++;
+                gVitaStL4N[0] += k4 != 0;
+                *d = last4[k4].st;
+                return 1;
+            }
         }
+#undef LAST_SAME
         ok = state_of_cached(ctx, type, d, r, wpk);
-        last.ok = ok;
-        if (ok) {
-            memcpy(last.r, r, sizeof(r));
-            last.frame = gGsFrame; last.epoch = gGsEpoch; last.gen = sStCacheGen; last.ctx = ctx; last.type = type; last.wp = wpk;
-            last.st = *d;
+        if (chk >= 0) {
+            gVitaStL4N[1]++;
+            gVitaStL4N[2] += !ok || memcmp(&last4[chk].st, d, sizeof(State)) != 0;
+        } else if (n4 > 1 && ok && last4[0].ok) {
+            last4[1 + lastNext++ % 3] = last4[0]; /* (place 0 is the very last, as before; the three before it in turn) */
+        }
+        if (chk < 0) {
+            lp->ok = ok;
+            if (ok) {
+                memcpy(lp->r, r, sizeof(r));
+                lp->frame = gGsFrame; lp->epoch = gGsEpoch; lp->gen = sStCacheGen; lp->ctx = ctx; lp->type = type; lp->wp = wpk;
+                lp->st = *d;
+            }
         }
         return ok;
     }
@@ -10229,7 +10301,11 @@ __attribute__((hot)) static void vu_draw_impl(int kind, int layer, int ctx, cons
     gVglSamePos = 0;
     ZM(4);
     sWpAllow = kind == 0 && layer == 2; /* the fighters' silhouettes into the work page (program 2); planned too */
-    b = count >= 3 && count <= 1024 && state_of(ctx, 3, &d);
+    {
+        unsigned wtWas = gVitaStOf[0];
+        b = count >= 3 && count <= 1024 && state_of(ctx, 3, &d);
+        gVitaVuSt[kind > 2 ? 2 : kind][gVitaStOf[0] != wtWas]++; /* (the log: strips by program, the work targets' way or not) */
+    }
     sWpAllow = 0;
     if (b && d.target) {
         wp_emit_clear(); /* the page's clear held back: drawn first */

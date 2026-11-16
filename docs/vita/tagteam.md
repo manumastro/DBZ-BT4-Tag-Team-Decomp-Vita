@@ -207,6 +207,31 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   a `finally`, tries again for ~3 minutes with a fresh transfer state, reads them back to compare, and exits 5 if it
   could not; it refuses to start (exit 4) when the console's `bt3.txt` holds `exitafter=` or `mode=` (an earlier run's
   left over, which it would otherwise keep as the console's own).
+- 2026-11-16, the states of the fighters' and effects' strips (the log's "strips' states (program 0 / 4 / 6)" line):
+  in the effect bursts of stage 0's 2 vs 2 the drawing thread's zone 5 ("strip: state") reaches ~15 ms, 6,535 strips
+  a list, most of them program 4 strips reading a work target, whose states are worked out each time: the work
+  targets' memory (`sWtC`) keeps only states with a texture transform and `pad_[0] != 0`, and these fail on
+  `pad_[0] == 0` ("not a picture as texture", the work-targets line's "not:" reasons). Two settings tried, both
+  default 0 and kept off:
+  - `wtrem=1` (`3` the check): the work targets' memory keeps states without a transform too. As it is it takes
+    none (the same `pad_[0]` test); it would need that understood first.
+  - `stl4=1` (`3` the check): the "state of the call before" shortcut keeps the last four calls' states, not one.
+    It took 13,000-16,000 states a stretch; the check compared ~60,000 at and after the fight's start, none
+    different.
+  The graphics chip crashed (`psp2core-*-GPUCRASH`, no CPU thread at fault, the console switched itself off after
+  the dump) at the fight's start (frame 776, ~35.5 s) in all three runs with either setting on: `wtrem=3`+`stl4=3`,
+  `stl4=1`, `wtrem=3` alone; never in the ~16 runs without them (3 short ones made for this, `fs_d1`-`fs_d3`) nor in
+  the one with `stl4=3` alone. Video memory was not short (42 MB free). The cause is not known: neither setting
+  changes what is drawn before that frame, and no report covers the frame itself; the next step would be a line per
+  frame from 770 to 780 (states taken, textures let go, memory stores). Until then neither may be used. Runs
+  `port/build/runs/wc0`, `so1`, `fs_*`; dumps `port/build/dumps/gpucrash-1794812820`, `-1794820760`, `-1794825400`.
+- The log's "memory free, the lowest since the last report" line: video and main memory sampled every 8 pictures
+  (the lowest kept), not only every 60.
+- `vita_agent_run.py` after the console switched itself off in a run: every vita-agent call now has a time limit (3
+  minutes; 10 for the run's start with its upload and the log's download), and putting the settings back waits at
+  most 4 minutes for the console to answer before giving up ("THE CONSOLE IS NOT ANSWERING", exit 5). Before, each
+  try hung ~10 minutes, for hours. It exits 6 when the log has no `vita: exitafter:` line (the run ended otherwise).
+  Seen working in run `fs_w3`: the console off after a crash, switched on again, the settings put back and read back.
 - `zones=1`: the zones of the drawing thread and the list reader (one drawn list in 8) timed by the system's clock
   when libperf is not there (a reading costs ~0.7 us, so the small zones come out too large; libperf's counter costs
   ~95 cycles a mark).

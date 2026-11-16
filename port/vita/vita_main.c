@@ -1094,8 +1094,33 @@ void Vita_VBlank(unsigned vblanks) {
                 {
                     extern unsigned gVitaWtC[3];
                     extern unsigned gVitaRunEstN;
-                    logf_("vita:   the work targets' way: %u states remembered taken, %u worked out, %u remembered; runs' first triangles the quick way %u\n",
-                          gVitaWtC[0], gVitaWtC[1], gVitaWtC[2], gVitaRunEstN);
+                    extern unsigned gVitaWtNoRem[8];
+                    logf_("vita:   the work targets' way: %u states remembered taken, %u worked out, %u remembered (not: %u refused, %u no texture transform, %u no texture, "
+                          "%u not a picture as texture, %u no picture yet, %u no target found, %u the target's texture another); runs' first triangles the quick way %u\n",
+                          gVitaWtC[0], gVitaWtC[1], gVitaWtC[2], gVitaWtNoRem[0], gVitaWtNoRem[1], gVitaWtNoRem[2], gVitaWtNoRem[3], gVitaWtNoRem[4],
+                          gVitaWtNoRem[5], gVitaWtNoRem[6], gVitaRunEstN);
+                    memset(gVitaWtNoRem, 0, sizeof(gVitaWtNoRem));
+                    {
+                        extern unsigned gVitaVuSt[3][2];
+                        logf_("vita:   strips' states (program 0 / 4 / 6): the usual way %u / %u / %u, the work targets' way %u / %u / %u\n",
+                              gVitaVuSt[0][0], gVitaVuSt[1][0], gVitaVuSt[2][0], gVitaVuSt[0][1], gVitaVuSt[1][1], gVitaVuSt[2][1]);
+                        memset(gVitaVuSt, 0, sizeof(gVitaVuSt));
+                    }
+                    {
+                        extern unsigned gVitaMemLow[2];
+                        logf_("vita:   memory free, the lowest since the last report: %u KB video, %u KB main\n", gVitaMemLow[0], gVitaMemLow[1]);
+                        gVitaMemLow[0] = gVitaMemLow[1] = 0xFFFFFFFFu;
+                    }
+                    {
+                        extern int gVitaWtRem, gVitaStL4;
+                        extern unsigned gVitaWtRemN[3], gVitaStL4N[3];
+                        if (gVitaWtRem != 0 || gVitaStL4 != 0) {
+                            logf_("vita:   wtrem: %u states without a transform taken (check: %u, %u differed); stl4: %u states of an earlier call taken (check: %u, %u differed)\n",
+                                  gVitaWtRemN[0], gVitaWtRemN[1], gVitaWtRemN[2], gVitaStL4N[0], gVitaStL4N[1], gVitaStL4N[2]);
+                        }
+                        memset(gVitaWtRemN, 0, sizeof(gVitaWtRemN));
+                        memset(gVitaStL4N, 0, sizeof(gVitaStL4N));
+                    }
                     gVitaRunEstN = 0;
                     memset(gVitaWtC, 0, sizeof(gVitaWtC));
                 }
@@ -1575,6 +1600,12 @@ static void read_settings(void) {
         } else if (strcmp(line, "stx") == 0) { /* 0: no states kept from one picture to the next */
             extern int gVitaStXOn;
             gVitaStXOn = atoi(eq) != 0;
+        } else if (strcmp(line, "wtrem") == 0) { /* the work targets' reads without a texture transform remembered: 0 off, 1 on, 2 soak B, 3 a check */
+            extern int gVitaWtRem;
+            gVitaWtRem = atoi(eq);
+        } else if (strcmp(line, "stl4") == 0) { /* the state of the call before for four register sets: 0 off, 1 on, 2 soak B, 3 a check */
+            extern int gVitaStL4;
+            gVitaStL4 = atoi(eq);
         } else if (strcmp(line, "stlast") == 0) { /* 0: no state of the call before (as an earlier version) */
             extern int gVitaStLastOn;
             gVitaStLastOn = atoi(eq) != 0;
