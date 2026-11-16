@@ -3431,7 +3431,7 @@ static void quad_run(const uint64_t *q, uint32_t n, int flat) {
    vertex() treats otherwise (a palette painted in GS memory: no texture, a 64-pixel-wide buffer), nor with a corner
    already in the queue. 0 off, 1 on, 2 the soak's B battles, 3 on and each state taken worked out all the same and
    compared (vita_vgl.c). ---- */
-int gVitaSprRun;
+int gVitaSprRun = 1;
 static int sprrun_on(void) {
     extern int gVitaAbSide;
     return gVitaSprRun == 2 ? gVitaAbSide == 1 : gVitaSprRun != 0;
