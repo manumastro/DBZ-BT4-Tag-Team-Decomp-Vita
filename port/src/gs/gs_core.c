@@ -3643,17 +3643,67 @@ static void cc_end(CallCache *e) {
 }
 
 /* Send what the call to e->addr made, with the constants of now: one record (the back end walks the kept ones). */
-static void cc_replay(CallCache *e) {
+/* bt3.txt skipcc: in a list not drawn, a call the cache keeps is not walked tag by tag either: it goes as its part's
+   record (cc_replay) flagged 1, of which the drawing thread runs only the register writes and GIF packets (what a list
+   not drawn does with the GS), not the strips. A list not drawn read every kept call the long way (~1,400 a list in a
+   2 vs 2 fight: the list reader 22-24 ms a list not drawn against 30 a list drawn). 0 off, 1 on, 2 the soak's B */
+int gVitaSkipCc;
+unsigned gVitaSkipCcN[1]; /* (the log) kept calls sent as their registers in lists not drawn */
+static int skipcc_on(void) {
+    extern int gVitaAbSide;
+    return gVitaSkipCc == 2 ? gVitaAbSide == 1 : gVitaSkipCc != 0;
+}
+/* (skipcc: a call's entry found without taking a place, giving one up or retiring what was kept: cc_find, es_find) */
+static CallCache *cc_peek(uint32_t addr) {
+    const uint32_t mask = (1u << gVitaCcBits) - 1;
+    uint32_t h = (addr * 0x9E3779B1u) >> (32 - gVitaCcBits), k;
+    for (k = 0; k < 16; k++, h = (h + 1) & mask) {
+        CallCache *e = &sCC[h];
+        if (e->addr == addr) {
+            return e->gen == gVitaChipGen ? e : NULL;
+        }
+        if (e->addr == 0) {
+            return NULL;
+        }
+    }
+    return NULL;
+}
+static CallCache *es_peek(uint32_t addr, uint32_t gen) {
+    uint32_t h, k, es = gen | 0x10000u;
+    if (sEsTab == NULL) {
+        return NULL;
+    }
+    h = (addr * 0x9E3779B1u) >> (32 - 13);
+    if (gen & 0x4000u) {
+        h ^= (gen >> 12) & 3;
+    }
+    for (k = 0; k < 64; k++, h = (h + 1) & (8192 - 1)) {
+        CallCache *e = &sEsTab[h];
+        if (e->addr == addr && ((e->es ^ es) & 0x7000u) == 0) {
+            return e->es == es && e->gen == gVitaChipGen ? e : NULL;
+        }
+        if (e->addr == 0) {
+            return NULL;
+        }
+    }
+    return NULL;
+}
+static void cc_replay(CallCache *e, int skip) {
     const uint8_t *k = GsVu1_Consts();
     GRec *o = gr_alloc(384);
     o->type = GR_PART;
+    o->flags = (uint16_t)(skip ? 1 : 0); /* (1: skipcc, a list not drawn) */
     o->a = (uint32_t)(uintptr_t)e->data;
     o->b = e->bytes;
     o->c = e->serial;
     memcpy(o + 1, k, 384);
     gr_put(o);
     sFeHave = 0; /* (the back end's constants are these now, not fe_vu's last ones) */
-    gVitaCc[0]++;
+    if (skip) {
+        gVitaSkipCcN[0]++;
+    } else {
+        gVitaCc[0]++;
+    }
 }
 void GsFE_DrawVu6(int ctx, const float *v, uint32_t count, const float *consts) { fe_vu(6, 0, ctx, v, count, consts, 16); }
 
@@ -3669,6 +3719,19 @@ extern unsigned gVitaDp[8];
 unsigned gVitaDpMiss[34]; /* for the log: kept parts found in another state, by the first GS field that differed */
 #define DP_NF 34
 unsigned gVitaDpBusy; /* for the log: parts not recorded, their place (serial & sDpMask) another part's in use */
+unsigned gVitaDpBusyL[2]; /* (the log, the line printed always) the same; parts given their second place (dpways) */
+/* bt3.txt dpways: a part whose place (serial & sDpMask) is another part's in use takes a second place, its number
+   mixed (dp_alt). dp_pick_serial gives a new part a place not in use, but a part not drawn for 16 frames gives its
+   place up, and when it comes back while the new one lives one of the two was walked the long way every frame: ~420
+   parts a picture in a 2 vs 2 fight's beam special, 12-15 ms of the drawing thread's. 0 off, 1 on, 2 the soak's B */
+int gVitaDpWays = 1;
+int gVitaSilGate = 1;          /* bt3.txt silgate (gs_vu1.c): 0 off, 1 on, 2 the soak's B battles */
+unsigned gVitaSilGateN[2];     /* (the log) shadow-page strips held back by silgate, gone through */
+unsigned gVitaSilProbe = 16;   /* bt3.txt silprobe: with silgate, one frame in this many (a power of two) sends the strips all */
+static inline int dpways_on(void) {
+    extern int gVitaAbSide;
+    return gVitaDpWays == 2 ? gVitaAbSide == 1 : gVitaDpWays != 0;
+}
 unsigned gVitaDpWalk[3]; /* for the log: parts walked as not to be recorded (kept parts off or their indices' room full), refused before; refused now as changing */
 /* what a kept part's match compares comes first and packed (n fields: their numbers, their values): the
    drawing thread looked it up in a 1 MB table, field by field across 272 bytes, 2,400 cycles a part */
@@ -3708,6 +3771,24 @@ static void dp_alloc(void) {
     }
 }
 static int sDpOn = -1;
+static inline uint32_t dp_alt(uint32_t serial) { /* a part's second place: never its first */
+    uint32_t a = ((serial * 0x9E3779B1u) >> 11) & sDpMask;
+    return a == (serial & sDpMask) ? a ^ 1u : a;
+}
+/* the place that holds the part numbered `serial`: its first, its second (dpways), or NULL */
+static inline DpSlot *dp_slot_of(uint32_t serial) {
+    DpSlot *s = &sDp[serial & sDpMask];
+    if (s->serial == serial) {
+        return s;
+    }
+    if (dpways_on()) {
+        s = &sDp[dp_alt(serial)];
+        if (s->serial == serial) {
+            return s;
+        }
+    }
+    return NULL;
+}
 
 /* A kept call's number, which also names its part's place (serial & sDpMask): the next number whose place is not
    another part's in use (drawn in the last 16 frames, as dp_cap_begin takes it) nor given out lately. The numbers
@@ -3835,8 +3916,8 @@ static int dp_part(uint32_t serial, const float *consts) {
         return 0;
     }
     sDpFrameNow = gVitaDpFrame == 2 ? gVitaAbSide == 1 : gVitaDpFrame != 0;
-    s = &sDp[serial & sDpMask];
-    if (s->serial != serial) {
+    s = dp_slot_of(serial);
+    if (s == NULL) {
         return 0;
     }
     {
@@ -3897,8 +3978,17 @@ static int dp_cap_begin(uint32_t serial) {
     }
     s = &sDp[serial & sDpMask];
     if (s->serial != serial && s->serial != 0 && sFrame - s->seen < 16) {
-        gVitaDpBusy++;
-        return 0; /* (the place is another part's, in use) */
+        DpSlot *a = dpways_on() ? &sDp[dp_alt(serial)] : NULL;
+        if (a != NULL && (a->serial == serial || a->serial == 0 || sFrame - a->seen >= 16)) {
+            s = a; /* (dpways: its second place, its own already, empty, or given up) */
+            gVitaDpBusyL[1]++;
+        } else {
+            gVitaDpBusy++;
+            gVitaDpBusyL[0]++;
+            return 0; /* (the place is another part's, in use) */
+        }
+    } else if (s->serial != serial && dpways_on() && sDp[dp_alt(serial)].serial == serial) {
+        s = &sDp[dp_alt(serial)]; /* (it lives in its second place: kept there) */
     }
     if (s->serial != serial) {
         int k2;
@@ -3921,7 +4011,7 @@ static int dp_cap_begin(uint32_t serial) {
     return 1;
 }
 static void dp_cap_end(uint32_t serial) {
-    DpSlot *s = &sDp[serial & sDpMask];
+    DpSlot *s = dp_slot_of(serial);
     DpForm *f;
     void *gpu = NULL;
     sDpCap = 0;
@@ -3930,7 +4020,7 @@ static void dp_cap_end(uint32_t serial) {
     } else {
         GsGpu_DpCapAbort();
     }
-    if (s->serial != serial) {
+    if (s == NULL) {
         GsGpu_DpFree(gpu);
         return;
     }
@@ -4526,6 +4616,18 @@ static void gr_exec(const GRec *r) {
     case GR_PART: { /* a model part as one record: its constants once, then the strips the front end kept (gs_core.c cc_replay) */
         const uint8_t *p = (const uint8_t *)(uintptr_t)r->a, *q = p + r->b;
         int cap;
+        if (r->flags & 1) { /* skipcc: a list not drawn: the part's register writes and GIF packets only, no strips */
+            memcpy(sGrConsts, r + 1, 384);
+            { extern unsigned gVglConstGen; gVglConstGen++; }
+            while (p < q) {
+                const GRec *s = (const GRec *)(const void *)p;
+                if (s->type == GR_REG || s->type == GR_GIFC || s->type == GR_GIFP) {
+                    gr_exec(s);
+                }
+                p += s->size;
+            }
+            break;
+        }
         if (sDp != NULL) {   /* (its kept form fetched while the constants are copied) */
             const uint8_t *sl = (const uint8_t *)&sDp[r->c & sDpMask];
             const DpSlot *ds = (const DpSlot *)(const void *)sl;
@@ -5789,7 +5891,24 @@ static void run_chain(uint32_t tadr, int tte) {
         }
 #endif
 #ifdef PORT_VITA
-        if (id == 5 && ccOn && gGsSplit && !gVitaGsSkipF && sp > 0 && sCcCap < 0) {
+        if (id == 5 && ccOn && gGsSplit && gVitaGsSkipF && sp > 0 && sCcCap < 0 && skipcc_on()) {
+            extern int Vita_InBattle(void);
+            extern int gT116Fe;
+            CallCache *e = NULL;
+            if (Vita_InBattle() && !(gT116Fe & 2)) { /* (as below) */
+                e = (sEsMark & 0x18000u) == 0x18000u ? es_peek(addr, sEsMark & 0x7FFFu) : NULL;
+                if (e == NULL) {
+                    e = cc_peek(addr);
+                }
+            }
+            if (e != NULL && e->state == 2 && e->data != NULL) {
+                e->used = sFeListSeq;
+                GZM2(20);
+                cc_replay(e, 1);
+                GZM2(24);
+                tadr = stack[--sp]; /* (the chain itself is not read) */
+            }
+        } else if (id == 5 && ccOn && gGsSplit && !gVitaGsSkipF && sp > 0 && sCcCap < 0) {
             extern int Vita_InBattle(void), Vita_ChipResetDue(void);
             extern int gT116Fe;
             int inb = Vita_InBattle() && !(gT116Fe & 2);
@@ -5804,7 +5923,7 @@ static void run_chain(uint32_t tadr, int tte) {
             if (e != NULL && e->state == 2 && e->gen == gVitaChipGen &&
                 (e->es != 0 ? gVitaEsCheck <= 0 || ++e->uses % (unsigned)gVitaEsCheck != 0 : ++e->uses % 64 != 0)) {
                 GZM2(20);
-                cc_replay(e);
+                cc_replay(e, 0);
                 if (e->es != 0) {
                     gVitaEs[0]++;
                 }

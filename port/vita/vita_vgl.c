@@ -1272,6 +1272,7 @@ static int sTexXf;             /* the primitive's texture is a picture drawn her
 static float sTexXfV[4];       /* s' = [0] + s * [1], t' = [2] + t * [3] */
 extern unsigned long long gVitaTexLong[7]; /* (the log: the textures made the long way; below) */
 static volatile unsigned sMemVramK, sMemRamK, sMemSeen; /* (the memory as last read; mem_sample, below) */
+extern volatile unsigned gVglWpUsed; /* (the work page last used; below) */
 extern unsigned gVitaOl[4];
 static void rt_sync_(int line); /* (the render thread's work all done; see rt_start) */
 #define rt_sync() rt_sync_(__LINE__) /* (the log: the waits by the line that asked for them) */
@@ -1456,7 +1457,7 @@ static void wp_init(void) {
    display buffer (the scene drawing it has ended: the switch to the target ends it). In a fight only. ---- */
 #define WT_MAX 12
 #define WT_BASE 16 /* State.target: 0 the picture, 1..6 the shadow page's slots, 16 + n the work target n */
-typedef struct WorkTarget { uint32_t fbp, fbw; int w, h; GLuint tex, fbo; uint8_t drawn, stale; uint32_t sig; unsigned last; float cov; } WorkTarget;
+typedef struct WorkTarget { uint32_t fbp, fbw; int w, h; GLuint tex, fbo; uint8_t drawn, stale, sigOk; uint32_t sig; unsigned last; float cov; uint32_t sigC; unsigned sigEp; } WorkTarget; /* (sigC, sigEp, sigOk: wtsig) */
 static WorkTarget sWt[WT_MAX];
 static int sWtN;
 static unsigned gVitaBoneBad;      /* fighters' bones or vertices that were not finite */
@@ -1482,13 +1483,32 @@ static void tbl_count(uint32_t cbp, int drawn) {
 }
 unsigned gVitaWt[10];       /* for the log: 0 primitives drawn into targets, 1 refused (a pass missed), 2 reads given a target, 3 reads refused (stale or overwritten),
                                4 reads of the picture, 5 table passes, 6 of them from the fog, 7 copies of the ids, 8 table passes refused, 9 targets made */
-static uint32_t wt_sig(const WorkTarget *t) { /* (the pages' memory as the uploads left it, see wp_sig) */
+static uint32_t wt_sig_(const WorkTarget *t) { /* (the pages' memory as the uploads left it, see wp_sig) */
     extern uint32_t gGsPageSig[512];
     uint32_t h = 2166136261u, k, pages = (uint32_t)(t->w * t->h * 4 + 8191) / 8192;
     for (k = 0; k < pages; k++) {
         h = (h ^ gGsPageSig[(t->fbp + k) & 511]) * 16777619u;
     }
     return h;
+}
+/* bt3.txt wtsig: a target's signature (up to 112 pages hashed) worked out again only when GS memory changed: every
+   change of gGsPageSig (gs_core.c: the uploads, the palette paints) bumps gGsEpoch too. It was worked out for every
+   primitive drawn into a target and every read of one (~2,500 and ~1,200 every 2 s in a 2 vs 2 special move).
+   0 off, 1 on, 2 the soak's B battles */
+int gVitaWtSig;
+unsigned gVitaWtSigN[2]; /* (the log) signatures taken as they were, worked out */
+static uint32_t wt_sig(WorkTarget *t) {
+    extern unsigned gGsEpoch;
+    extern int gVitaAbSide;
+    if ((gVitaWtSig == 2 ? gVitaAbSide == 1 : gVitaWtSig != 0) && t->sigOk && t->sigEp == gGsEpoch) {
+        gVitaWtSigN[0]++;
+        return t->sigC;
+    }
+    t->sigC = wt_sig_(t);
+    t->sigEp = gGsEpoch;
+    t->sigOk = 1;
+    gVitaWtSigN[1]++;
+    return t->sigC;
 }
 static int ok_cacheable_wt(const WorkTarget *t) {
     (void)t;
@@ -2252,7 +2272,7 @@ unsigned gVitaClutSub; /* for the log: textures made with the palette of the GS'
    with its indices, its palette and waits for the render thread. With it on, the key leaves out TBP0 and CBP: the
    contents are `gen` already (the ids of the blocks the image and the palette occupy, gs_core.c). 0 off, 1 on, 2 the
    soak's B battles */
-int gVitaTexCont;
+int gVitaTexCont = 1;
 unsigned gVitaTexContN[3]; /* (the log) textures found at another place than they were made at, made, looked up the long way */
 static inline int texcont_now(void) {
     extern int gVitaAbSide;
@@ -4107,6 +4127,7 @@ static int state_of_(int ctx, int type, State *d) {
                 return 0;
             }
             gVitaWp[3]++;
+            gVglWpUsed = gGsFrame;
             pageTex = 1;
             pageSlot = sWpAgain >= 0 ? sWpAgain : sWpSlot;
             if (sWpAgain < 0 && sWpSlot < WP_OTHER) {
@@ -4298,6 +4319,7 @@ static void flush_bins(void);
 static void flush_bins_c(int why);
 extern int gDpCapture;        /* (direct parts, below) */
 volatile int gVglL2Drawn;     /* a strip of program 2 (fighters' flat shadow / silhouette, layer 2) was drawn: gs_vu1.c sends them all */
+volatile unsigned gVglWpUsed; /* the frame the work page was last drawn into or read (gs_vu1.c silgate) */
 unsigned gVglL2[2];           /* for the log: layer-2 strips drawn, dropped */
 static int sDpRecBad, sDpItemN;
 static int sDsOn;             /* (direct strips, below) */
@@ -5052,6 +5074,7 @@ static void GsGpu_Draw_impl(int type, int ctx, const GsVertex *v) {
     }
     if (i && d.target) { /* into the work page: drawn as it is (none of the picture's shortcuts) */
         gVitaWp[0]++;
+        gVglWpUsed = gGsFrame;
         if (type == 6 && !d.tme && !d.blend && d.mask == 15) { /* a clear: the page whole again once it all is */
             float cx0 = v[0].x < 0.0f ? 0.0f : v[0].x, cx1 = v[1].x > 256.0f ? 256.0f : v[1].x;
             float cy0 = v[0].y < 0.0f ? 0.0f : v[0].y, cy1 = v[1].y > 256.0f ? 256.0f : v[1].y;
@@ -10330,9 +10353,21 @@ static int rt_put_dp(void) {
         gVitaDpRtN[4] += nc * 4u + nj * (uint32_t)sizeof(DpJob);
     }
     rt_commit();
-    rt_kick();
+    {   /* bt3.txt rtkick: the render thread not woken for every kept part handed over (a system call while it sleeps,
+           ~90 a picture): rt_commit wakes it every 4 hand-overs or 64 KB, flush_bins and rt_sync always. 0 off, 1 on,
+           2 the soak's B battles */
+        extern int gVitaRtKick, gVitaAbSide;
+        extern unsigned gVitaRtKickN[1];
+        if (gVitaRtKick == 2 ? gVitaAbSide == 1 : gVitaRtKick != 0) {
+            gVitaRtKickN[0]++;
+        } else {
+            rt_kick();
+        }
+    }
     return 1;
 }
+int gVitaRtKick;
+unsigned gVitaRtKickN[1]; /* (the log) kept parts handed over without waking the render thread (rtkick) */
 static void rt_exec_dp(uint8_t *p) {
     const RtDp *d = (const RtDp *)(const void *)p;
     if (d->nj != 0) {

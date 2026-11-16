@@ -874,7 +874,17 @@ __attribute__((hot)) static int hle_program2(void) {
         extern int gGsSplit;
         static unsigned n;
         extern int gVitaBisect;
-        int skip = gGsSplit && !gVglL2Drawn && (++n & 63) != 0;
+        /* bt3.txt silgate: nor while the renderer has not drawn into the shadow page nor read it for 60 frames (in a 2 vs
+           2 fight the page is spoiled every picture: ~2,500 of these a list read, sent and drawn for nothing, against 88
+           reads every 2 s in 1 vs 1); one frame in 16 sends them all, so that the page can come back into use */
+        extern int gVitaSilGate, gVitaAbSide;
+        extern volatile unsigned gVglWpUsed;
+        extern unsigned gGsFrame;
+        extern unsigned gVitaSilGateN[2];
+        extern unsigned gVitaSilProbe; /* (bt3.txt silprobe: the frames between two that send them all, a power of two; 16) */
+        int gate = (gVitaSilGate == 2 ? gVitaAbSide == 1 : gVitaSilGate != 0) && gGsSplit && gGsFrame - gVglWpUsed > 60 && (gGsFrame & (gVitaSilProbe - 1)) != 0;
+        int skip = gGsSplit && ((!gVglL2Drawn && (++n & 63) != 0) || gate);
+        gVitaSilGateN[gate ? 0 : 1]++;
         if (skip && gVitaBisect == 2) {
             gif_ad(vview(top, 2, NULL)); /* (as before) */
             Gs_RegWrite(0, (tag[0] >> 47) & 0x7FF);

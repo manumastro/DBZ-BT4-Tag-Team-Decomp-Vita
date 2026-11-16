@@ -1142,6 +1142,17 @@ void Vita_VBlank(unsigned vblanks) {
                         }
                         memset(gVitaTexContN, 0, sizeof(gVitaTexContN));
                     }
+                    {
+                        extern unsigned gVitaDpBusyL[2], gVitaSilGateN[2], gVitaSkipCcN[1], gVitaWtSigN[2], gVitaRtKickN[1];
+                        logf_("vita:   kept parts not recorded (their place another's in use): %u; given their second place (dpways): %u | shadow-page strips held back (silgate): %u, gone through %u\n",
+                              gVitaDpBusyL[0], gVitaDpBusyL[1], gVitaSilGateN[0], gVitaSilGateN[1]);
+                        logf_("vita:   kept calls sent as their registers in lists not drawn (skipcc): %u | targets' signatures taken as they were (wtsig): %u, worked out %u | kept parts handed over without waking the render thread (rtkick): %u\n",
+                              gVitaSkipCcN[0], gVitaWtSigN[0], gVitaWtSigN[1], gVitaRtKickN[0]);
+                        memset(gVitaDpBusyL, 0, sizeof(gVitaDpBusyL));
+                        memset(gVitaSilGateN, 0, sizeof(gVitaSilGateN));
+                        gVitaSkipCcN[0] = gVitaRtKickN[0] = 0;
+                        memset(gVitaWtSigN, 0, sizeof(gVitaWtSigN));
+                    }
                     gVitaRunEstN = 0;
                     memset(gVitaWtC, 0, sizeof(gVitaWtC));
                 }
@@ -1624,6 +1635,27 @@ static void read_settings(void) {
         } else if (strcmp(line, "wtrem") == 0) { /* the work targets' reads without a texture transform remembered: 0 off, 1 on, 2 soak B, 3 a check */
             extern int gVitaWtRem;
             gVitaWtRem = atoi(eq);
+        } else if (strcmp(line, "dpways") == 0) { /* a kept part's second place when its first is another's: 0 off, 1 on, 2 soak B */
+            extern int gVitaDpWays;
+            gVitaDpWays = atoi(eq);
+        } else if (strcmp(line, "silgate") == 0) { /* the shadow page's strips not sent while the page is not used: 0 off, 1 on, 2 soak B */
+            extern int gVitaSilGate;
+            gVitaSilGate = atoi(eq);
+        } else if (strcmp(line, "silprobe") == 0) { /* with silgate, one frame in this many sends the strips all (a power of two, 2-256; 16) */
+            extern unsigned gVitaSilProbe;
+            unsigned v = (unsigned)atoi(eq);
+            if (v >= 2 && v <= 256 && (v & (v - 1)) == 0) {
+                gVitaSilProbe = v;
+            }
+        } else if (strcmp(line, "skipcc") == 0) { /* kept calls sent as their registers in lists not drawn: 0 off, 1 on, 2 soak B */
+            extern int gVitaSkipCc;
+            gVitaSkipCc = atoi(eq);
+        } else if (strcmp(line, "wtsig") == 0) { /* the targets' signatures worked out only when GS memory changed: 0 off, 1 on, 2 soak B */
+            extern int gVitaWtSig;
+            gVitaWtSig = atoi(eq);
+        } else if (strcmp(line, "rtkick") == 0) { /* the render thread not woken for every kept part: 0 off, 1 on, 2 soak B */
+            extern int gVitaRtKick;
+            gVitaRtKick = atoi(eq);
         } else if (strcmp(line, "texcont") == 0) { /* a texture found by its contents wherever GS memory holds them: 0 off, 1 on, 2 soak B */
             extern int gVitaTexCont;
             gVitaTexCont = atoi(eq);

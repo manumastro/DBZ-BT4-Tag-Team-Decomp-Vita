@@ -251,6 +251,29 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   cost was waited for at the picture's end. The film's pictures of B during the beam, the explosion and the flame
   show the effects' textures right; only one pair of A and B fell on the same moment, and it is the same picture.
   Default 0 until a 1 vs 1 run.
+- 2026-11-16, the kept parts walked and the shadow page's strips (one batch of runs, 120 s each, 2 vs 2 on stage 0,
+  `texcont=1` in all; the means over 40-118 s; one run each):
+
+  | Run | Settings | Pictures a second | Stretches under 20 | Beam (38-44 s) | Drawing thread / list reader, ms a drawn list |
+  |---|---|---|---|---|---|
+  | `b0` | `texcont=1` | 22.7 | 10 of 39 | 11.5 | 43.9 / 31.0 |
+  | `dw1` | + `dpways=1` | 24.9 | 4 | 11.8 | 40.7 / 27.4 |
+  | `sg1` | + `silgate=1` | 27.2 | 1 | 19.0 | 36.3 / 19.8 |
+  | `ds1` | + both | 27.6 | 1 | 19.3 | 35.8 / 19.7 |
+  | `da1` | + both, `audiocore=0` | 27.2 | 1 | 20.3 | 36.6 / 18.9 |
+
+  `dpways`: a kept part whose place is another's in use takes a second place; the parts walked record by record
+  1,659 -> 826 every 2 s (busy places 1,543 -> 623). `silgate`: in 2 vs 2 the shadow page is spoiled every picture
+  and never read ("0 given the page"), yet ~2,500 program-2 strips a list were read, sent and drawn: held back
+  ~80,000 every 2 s, the list reader 31 -> 20 ms a list. With both, the stretches at 30 pictures a second are most of
+  the fight; what is left is the beam (17-22 a second, the drawing thread 43-53 ms a list: the effects' GS packets
+  ~31 ms of it, the kept parts ~20) and the stretch after it. `audiocore=0` changes nothing measurable. The film
+  (`dsf`, `film=30`, all three on) shows the fighters, the auras, the beams and the HUD right. A first try of `b0`
+  hung at 77 s (the watchdog's dump: the list reader in its delay loop with the 8 MB ring full, the drawing thread in
+  `GR_FRAMEEND` waiting; dump `crash-1794837838`, run `b0_hang`); not seen again in the 7 runs after it.
+  In 1 vs 1 (`ds1v1`, all three on) the shadow page is drawn and read (~100 reads every 2 s), `silgate` holds back
+  ~50 strips every 2 s and the fight runs as before: 29.7 pictures a second against 29.6 (`s1v1`). The three are on by
+  default since.
 - The log's "memory free, the lowest since the last report" line: video and main memory sampled every 8 pictures
   (the lowest kept), not only every 60.
 - `vita_agent_run.py` after the console switched itself off in a run: every vita-agent call now has a time limit (3
