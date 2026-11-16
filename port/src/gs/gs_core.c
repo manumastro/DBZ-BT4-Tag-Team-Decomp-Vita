@@ -3041,6 +3041,85 @@ static void quad_run(const uint64_t *q, uint32_t n, int flat) {
     gs.vcount = 0;
     gs.strip = 3;
 }
+/* ---- bt3.txt sprrun: the GS's sprites read as runs. Two packet shapes carry most of a fight's GS sprites (the glow's
+   and the blurs' passes, the depth byte's strips: ~525 a drawn list in a 2 vs 2 fight): one GIF tag "REGLIST, 4
+   registers, UV, XYZ2, UV, XYZ2" (a textured sprite a loop) or "REGLIST, 2 registers, XYZ2, XYZ2" (one without UV),
+   PRIM a sprite set before it (a REGLIST tag's PRE is not looked at). Register by register each sprite was four or two
+   register writes and two vertex() calls, then the renderer's full way, its state worked out again though only the
+   corners change inside the packet. Here the corners are made as vertex() makes them (the seams' exact positions
+   too) and handed over at once (vita_vgl.c GsGpu_DrawSprRun: each sprite still drawn the GS's way, the state of the
+   one before taken while it holds); after the run the registers are as the last sprite leaves them. Not for a sprite
+   vertex() treats otherwise (a palette painted in GS memory: no texture, a 64-pixel-wide buffer), nor with a corner
+   already in the queue. 0 off, 1 on, 2 the soak's B battles, 3 on and each state taken worked out all the same and
+   compared (vita_vgl.c). ---- */
+int gVitaSprRun;
+static int sprrun_on(void) {
+    extern int gVitaAbSide;
+    return gVitaSprRun == 2 ? gVitaAbSide == 1 : gVitaSprRun != 0;
+}
+/* nl sprites at d: 4 words a sprite (UV, XYZ2, UV, XYZ2) when uvs, else 2 (XYZ2, XYZ2) */
+static void spr_run(const uint64_t *d, uint32_t nl, int uvs) {
+    extern int gVitaGsSkip;
+    extern unsigned gVitaSprRunN[7];
+    extern void GsGpu_DrawSprRun(int ctx, const GsVertex *v, uint32_t n);
+    static GsVertex vb[2 * 64];
+    const int ctx = (int)((gs.prim >> 9) & 1);
+    const uint32_t stride = uvs ? 4u : 2u;
+    const float ox = (float)(gs.xyoffset[ctx] & 0xFFFF), oy = (float)((gs.xyoffset[ctx] >> 32) & 0xFFFF);
+    uint64_t uv = gs.uv;
+    uint8_t seam[2] = {0, 0};
+    GsVertex c; /* (what the corners take from the registers not written here) */
+    uint32_t i, j, k;
+    memset(&c, 0, sizeof(c));
+    c.r = gs.rgbaq & 0xFF; c.g = (gs.rgbaq >> 8) & 0xFF; c.b = (gs.rgbaq >> 16) & 0xFF; c.a = (gs.rgbaq >> 24) & 0xFF;
+    memcpy(&c.s, &gs.st, 4);
+    { uint32_t tt = (uint32_t)(gs.st >> 32); memcpy(&c.t, &tt, 4); }
+    c.q = gs.q;
+    sStat[4] += stride * nl;
+    sStat[5] += 2 * nl;
+    if (!gVitaGsSkip) {
+        gVitaSprRunN[0]++;
+    }
+    for (i = 0; i < nl; i += 64) {
+        uint32_t m = nl - i < 64 ? nl - i : 64;
+        for (j = 0; j < m; j++) {
+            const uint64_t *pk = d + stride * (i + j);
+            for (k = 0; k < 2; k++) {
+                uint64_t xyz = uvs ? pk[2 * k + 1] : pk[k];
+                uint32_t x = (uint32_t)(xyz & 0xFFFF), y = (uint32_t)((xyz >> 16) & 0xFFFF), z = (uint32_t)(xyz >> 32);
+                GsVertex *v = &vb[2 * j + k];
+                if (uvs) {
+                    uv = pk[2 * k];
+                }
+                *v = c;
+                v->x = ((float)(int)x - ox) / 16.0f; /* (as vertex()) */
+                v->y = ((float)(int)y - oy) / 16.0f;
+                v->z = z;
+                seam[k] = 0;
+                if (__builtin_expect(sSeamAny, 0)) {
+                    float fx, fy;
+                    seam[k] = (uint8_t)seam_exact(x, y, z, &fx, &fy);
+                    if (seam[k]) {
+                        v->x = fx - ox / 16.0f;
+                        v->y = fy - oy / 16.0f;
+                    }
+                }
+                v->u = (int)(uv & 0x3FFF);
+                v->v = (int)((uv >> 16) & 0x3FFF);
+            }
+        }
+        if (!gVitaGsSkip) {
+            GsGpu_DrawSprRun(ctx, vb, m);
+        }
+    }
+    gs.uv = uv; /* (the registers as the last sprite leaves them) */
+    gs.vtx[0] = vb[2 * ((nl - 1) % 64)];
+    gs.vtx[1] = vb[2 * ((nl - 1) % 64) + 1];
+    sVtxSeam[0] = seam[0];
+    sVtxSeam[1] = seam[1];
+    gs.vcount = 0;
+    gs.strip += 2 * nl;
+}
 #endif
 static uint64_t sGifTagLo, sGifTagHi; /* current tag: persists across runs */
 static uint32_t sGifLoops, sGifReg;    /* loops left, register index within the loop */
@@ -3141,6 +3220,18 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
             flat_tri_run(q + 2, nl / 3);
             q += 2 + 2 * nl;
             qwc -= 1 + nl;
+            continue;
+        }
+        if (loops == 0 && sGpu && !sDpCap && sVtxDbg == 0 && (gs.prim & 7) == 6 && gs.vcount == 0 && (q[0] & 0x7FFF) >= 2 &&
+            ((q[0] >> 58) == 0x11 ? (q[1] & 0xFFFF) == 0x5353 : ((q[0] >> 58) == 0x09 && (q[1] & 0xFF) == 0x55)) &&
+            qwc >= 1 + (uint32_t)(q[0] & 0x7FFF) * (uint32_t)(q[0] >> 61) && ((gs.prim & 0x10) || ((gs.frame[(gs.prim >> 9) & 1] >> 16) & 0x3F) != 1) &&
+            sprrun_on()) {
+            uint32_t nl = (uint32_t)(q[0] & 0x7FFF), qpl = (uint32_t)(q[0] >> 61); /* (sprrun: NREG 4 or 2, quadwords a loop 2 or 1) */
+            sStat[3]++;
+            gVitaGifN[1]++;
+            spr_run(q + 2, nl, qpl == 2);
+            q += 2 + 2 * qpl * nl;
+            qwc -= 1 + qpl * nl;
             continue;
         }
 #endif

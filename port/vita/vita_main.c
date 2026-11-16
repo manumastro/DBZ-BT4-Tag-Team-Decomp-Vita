@@ -1157,6 +1157,12 @@ void Vita_VBlank(unsigned vblanks) {
                                 gVitaDpGenN[0] = 0;
                             }
                             {
+                                extern unsigned gVitaSprRunN[7];
+                                logf_("vita:   sprrun: %u packets, %u sprites the run's way (%u early, %u refused, %u tail, %u other); check: %u differed\n", gVitaSprRunN[0],
+                                      gVitaSprRunN[1], gVitaSprRunN[2], gVitaSprRunN[3], gVitaSprRunN[4], gVitaSprRunN[5], gVitaSprRunN[6]);
+                                memset(gVitaSprRunN, 0, sizeof(gVitaSprRunN));
+                            }
+                            {
                                 extern unsigned gVitaHudBatchN[2], gVitaHudRunN[2];
                                 logf_("vita:   hudbatch: %u packets of plain shapes, %u triangles in them | hudrun: %u runs, %u triangles\n", gVitaHudBatchN[0], gVitaHudBatchN[1],
                                       gVitaHudRunN[0], gVitaHudRunN[1]);
@@ -1678,6 +1684,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "dpgen") == 0) { /* a kept part's register changes bump the state's generation: 0 off, 1 on, 2 soak B */
             extern int gVitaDpGen;
             gVitaDpGen = atoi(eq);
+        } else if (strcmp(line, "sprrun") == 0) { /* the GS's sprite packets read as runs: 0 off, 1 on, 2 soak B, 3 on and a check */
+            extern int gVitaSprRun;
+            gVitaSprRun = atoi(eq);
         } else if (strcmp(line, "dpptr") == 0) { /* the kept parts' groups handed over by their place: 0 off, 1 on, 2 soak B */
             extern int gVitaDpPtr;
             gVitaDpPtr = atoi(eq);
