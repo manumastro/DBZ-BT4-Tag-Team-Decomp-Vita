@@ -238,6 +238,19 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   under 15 a second 5-7 -> 3 of 39 (one run each). The reading itself grows with the heap's pieces, 3 ms at the
   fight's start to 46 ms two minutes in; it was every 60th picture (the watchdog's, release too), every 8th for a few
   runs today, and is now every 1024th in a fight.
+- 2026-11-16, the special moves (screenshots of run `sh0`: a beam with an explosion dome at 38-44 s runs at 10-13
+  pictures a second, a giant flame at 63-67 s at 14-18, the intro with as many models at 26-27): the drawing thread
+  is the wall there (2.0 s of processor in every 2 s, never waiting for the list reader, which is at ~82%). Against
+  the intro, the extra is the effects' GS packets (~1,430 against 714 a list, 24-32 ms against 8 by the drawing
+  thread's records), the kept parts that alternate with them (25-36 ms against 10) and the state lookups. The effects'
+  images and palettes are given places in GS memory a frame at a time, so the texture table made the same images
+  again at each new place. `texcont=1` keys the table by contents (runs `tc0`, `tc1`, A/B, 120 s, `film=30` both):
+  new textures 134 -> 8 every 2 s, their making 56 -> 2 ms; the beam 10.4 -> 11.3 pictures a second, the drawing
+  thread 82 -> 76 ms a list there; the whole fight 19.5 -> 19.8 (inside the noise; `film` costs both runs ~3 a
+  second). The waits for the render thread rose in the bursts (103 -> 152 ms every 2 s): what the textures no longer
+  cost was waited for at the picture's end. The film's pictures of B during the beam, the explosion and the flame
+  show the effects' textures right; only one pair of A and B fell on the same moment, and it is the same picture.
+  Default 0 until a 1 vs 1 run.
 - The log's "memory free, the lowest since the last report" line: video and main memory sampled every 8 pictures
   (the lowest kept), not only every 60.
 - `vita_agent_run.py` after the console switched itself off in a run: every vita-agent call now has a time limit (3

@@ -1133,6 +1133,15 @@ void Vita_VBlank(unsigned vblanks) {
                         memset(gVitaWtRemN, 0, sizeof(gVitaWtRemN));
                         memset(gVitaStL4N, 0, sizeof(gVitaStL4N));
                     }
+                    {
+                        extern int gVitaTexCont;
+                        extern unsigned gVitaTexContN[3];
+                        if (gVitaTexCont != 0) {
+                            logf_("vita:   texcont: %u textures found at another place than they were made at; %u made, %u looked up the long way\n",
+                                  gVitaTexContN[0], gVitaTexContN[1], gVitaTexContN[2]);
+                        }
+                        memset(gVitaTexContN, 0, sizeof(gVitaTexContN));
+                    }
                     gVitaRunEstN = 0;
                     memset(gVitaWtC, 0, sizeof(gVitaWtC));
                 }
@@ -1615,6 +1624,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "wtrem") == 0) { /* the work targets' reads without a texture transform remembered: 0 off, 1 on, 2 soak B, 3 a check */
             extern int gVitaWtRem;
             gVitaWtRem = atoi(eq);
+        } else if (strcmp(line, "texcont") == 0) { /* a texture found by its contents wherever GS memory holds them: 0 off, 1 on, 2 soak B */
+            extern int gVitaTexCont;
+            gVitaTexCont = atoi(eq);
         } else if (strcmp(line, "stl4") == 0) { /* the state of the call before for four register sets: 0 off, 1 on, 2 soak B, 3 a check */
             extern int gVitaStL4;
             gVitaStL4 = atoi(eq);
