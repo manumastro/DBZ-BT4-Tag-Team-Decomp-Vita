@@ -2846,7 +2846,7 @@ static inline void wt_swap(void) {
    render thread to finish this picture (1.5 ms a picture in 2 vs 2) and for the swap. Only when nothing else at the
    picture's end needs vitaGL on the drawing thread (the log's pictures, the film, the GPU profile, a change of size,
    the movie): those the old way (fe_sync). 0: the old way; 2: in the soak's B battles. */
-int gVitaRtSwap = 0;
+int gVitaRtSwap = 1;
 unsigned gVitaRtSwapN[2]; /* for the log: pictures swapped by the render thread, the old way */
 typedef struct RtSwap { unsigned seq; int paced; } RtSwap;
 static void pace_swap_pre(RtSwap *s);
