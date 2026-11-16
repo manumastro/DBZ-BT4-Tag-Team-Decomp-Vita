@@ -289,6 +289,8 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   | `hudbatch=1` | `e2` / `e2b` | 28.5 / 28.2 | 21.5 / 20.4 | the radar one packet a picture (292 triangles) instead of ~280 |
   | `hudrun=1` | `f1` / `f0` | 28.9 / 28.6 | 22.0 / 21.2 | the radar's triangles the runs' way |
   | `adfast=1` | `g1` / `g0` | 28.7 / 28.6 | 22.3 / 21.9 | no stretch under 20 a second |
+  | `dpptr=1`, `dpcrec=1` | `h1` / `h0` | 28.6 / 28.6 | 23.3 / 22.3 | a kept part's match (zone 32) 1,630 -> 1,055 cycles, ~1,400 parts a list; the flame 28.1 -> 29.5 |
+  | `dpgen=1` | `h2` / `h0` | 28.7 / 28.6 | 22.0 / 22.3 | a correctness fix: ~7,000 state fields every 2 s changed by kept parts without the state's generation bumped |
 
   One at a time most are inside the noise between two runs (~0.3 a second); together, from `c0` to `g1`, 28.1 -> 28.7
   and the beam 19.2 -> 22.3. Where the drawing thread's time went in the beam was found with `gifshapes=1` (the GIF tags

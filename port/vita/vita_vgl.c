@@ -8993,6 +8993,21 @@ int GsGpu_DpRtOn(void) {
     extern int gVitaAbSide;
     return gVitaDpRt == 2 ? gVitaAbSide == 1 : gVitaDpRt != 0;
 }
+/* bt3.txt dpptr, dpcrec: dprt's two halves that add no work to the render thread, on their own (dprt as a whole tested
+   worse: the render thread working out the fighters' blocks). dpptr: the kept parts' groups handed to the render thread
+   by their place instead of copied into the ring (~135 KB a list in a 2 vs 2 beam special); dpcrec: gs_core.c's GR_PART
+   reads a kept part's constants from its record instead of copying them (384 bytes a part, ~1,350 parts a list) into
+   sGrConsts first (copied when the part is walked; the next strip record carries its constants again: cc_replay).
+   0 off, 1 on, 2 the soak's B battles; dprt=1 turns both on too. */
+int gVitaDpPtr = 1, gVitaDpCrec = 1;
+int GsGpu_DpPtrOn(void) {
+    extern int gVitaAbSide;
+    return GsGpu_DpRtOn() || (gVitaDpPtr == 2 ? gVitaAbSide == 1 : gVitaDpPtr != 0);
+}
+int GsGpu_DpCrecOn(void) {
+    extern int gVitaAbSide;
+    return GsGpu_DpRtOn() || (gVitaDpCrec == 2 ? gVitaAbSide == 1 : gVitaDpCrec != 0);
+}
 typedef struct DpJob { const DpUb *ub; uint32_t c, o; uint16_t floats; uint8_t clipOff, pad_; } DpJob; /* (c: in the constants, o: in the blocks, in floats) */
 #define DP_JOBS 2048
 #define DP_CFLOATS (96 * 1024)
@@ -10403,7 +10418,7 @@ static void dp_jobs_run(float *u, const float *cst, const DpJob *j, uint32_t nj,
    their place, the fighters' blocks left to fill, with the constants and the jobs that fill them) */
 typedef struct RtDp { int n, prof; uint32_t uf, frame, nj, ou, oc, oj; } RtDp;
 static int rt_put_dp(void) {
-    const int ptrs = GsGpu_DpRtOn();
+    const int ptrs = GsGpu_DpPtrOn(); /* (dpptr, or dprt) */
     const uintptr_t ds0 = (uintptr_t)sDsGroup, ds1 = (uintptr_t)(sDsGroup + DP_ITEMS);
     uint32_t n = (uint32_t)sDpItemN, uf = (uint32_t)sDpUN, nj = (uint32_t)sDpJobN, nc = (uint32_t)sDpCN, i, ng = n, at, holes = 0;
     uint32_t oi, og, ou, oc, oj, total;

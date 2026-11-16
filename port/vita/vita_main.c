@@ -1151,7 +1151,11 @@ void Vita_VBlank(unsigned vblanks) {
                         {
                             extern unsigned gVitaDpTexaN[2], gVitaTexRtN[3], gVitaFxClampN[2];
                             extern void Gs_GifShapesLog(void);
-                            logf_("vita:   fxclamp: %u runs, %u triangles\n", gVitaFxClampN[0], gVitaFxClampN[1]);
+                            {
+                                extern unsigned gVitaDpGenN[1];
+                                logf_("vita:   fxclamp: %u runs, %u triangles | dpgen: %u state fields changed by kept parts\n", gVitaFxClampN[0], gVitaFxClampN[1], gVitaDpGenN[0]);
+                                gVitaDpGenN[0] = 0;
+                            }
                             {
                                 extern unsigned gVitaHudBatchN[2], gVitaHudRunN[2];
                                 logf_("vita:   hudbatch: %u packets of plain shapes, %u triangles in them | hudrun: %u runs, %u triangles\n", gVitaHudBatchN[0], gVitaHudBatchN[1],
@@ -1671,6 +1675,15 @@ static void read_settings(void) {
         } else if (strcmp(line, "wtsig") == 0) { /* the targets' signatures worked out only when GS memory changed: 0 off, 1 on, 2 soak B */
             extern int gVitaWtSig;
             gVitaWtSig = atoi(eq);
+        } else if (strcmp(line, "dpgen") == 0) { /* a kept part's register changes bump the state's generation: 0 off, 1 on, 2 soak B */
+            extern int gVitaDpGen;
+            gVitaDpGen = atoi(eq);
+        } else if (strcmp(line, "dpptr") == 0) { /* the kept parts' groups handed over by their place: 0 off, 1 on, 2 soak B */
+            extern int gVitaDpPtr;
+            gVitaDpPtr = atoi(eq);
+        } else if (strcmp(line, "dpcrec") == 0) { /* a kept part's constants read from its record: 0 off, 1 on, 2 soak B */
+            extern int gVitaDpCrec;
+            gVitaDpCrec = atoi(eq);
         } else if (strcmp(line, "adfast") == 0) { /* GIF tags of A+D writes written in one loop: 0 off, 1 on, 2 soak B */
             extern int gVitaAdFast;
             gVitaAdFast = atoi(eq);
