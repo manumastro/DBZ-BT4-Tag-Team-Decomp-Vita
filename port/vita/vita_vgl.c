@@ -1269,6 +1269,8 @@ static GLuint sOlTex[3];       /* (the display buffers as textures, below) */
 extern unsigned int gxm_back_buffer_index;
 static int sTexXf;             /* the primitive's texture is a picture drawn here: its coordinates moved into it (put) */
 static float sTexXfV[4];       /* s' = [0] + s * [1], t' = [2] + t * [3] */
+extern unsigned long long gVitaTexLong[7]; /* (the log: the textures made the long way; below) */
+static volatile unsigned sMemVramK, sMemRamK, sMemSeen; /* (the memory as last read; mem_sample, below) */
 extern unsigned gVitaOl[4];
 static void rt_sync_(int line); /* (the render thread's work all done; see rt_start) */
 #define rt_sync() rt_sync_(__LINE__) /* (the log: the waits by the line that asked for them) */
@@ -2373,6 +2375,7 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
     unsigned long long tmake = sceKernelGetProcessTimeWide();
     extern unsigned long long gVitaRt[8];
     const unsigned long long tmakeW = gVitaRt[3]; /* (the waits for the render thread from here on are not the texture's making: gVitaTexEarly) */
+    unsigned long long tReadUs = 0, tGlUs = 0; /* (the log: the textures made the long way, below) */
     if (sT125PicFrame != gGsFrame) {
         sT125PicFrame = gGsFrame;
         sT125Pic = 0;
@@ -2459,7 +2462,8 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
     {
         unsigned long long tr = sceKernelGetProcessTimeWide();
         Gs_VramReadRect(tbp, tbw, psm, tw, th, px); /* block by block, then converted in place */
-        gVitaTexReadUs += sceKernelGetProcessTimeWide() - tr;
+        tReadUs = sceKernelGetProcessTimeWide() - tr;
+        gVitaTexReadUs += tReadUs;
         gVitaTexPx += tw * th;
     }
     if (bits <= 8) { /* the palette with its alpha rule applied once, not per pixel */
@@ -2493,8 +2497,10 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
     {
         static unsigned made;
         if (made < 24 || made % 100 == 0) { /* (a line in the log costs more than the texture) */
-            Vita_Log("vgl: frame %u: texture %u: %u x %u, format %02x, at %04x; %d cached; free memory: %u KB video, %u KB main\n", gGsFrame, made, tw, th, psm, tbp,
-                     sTexCount, (unsigned)(vglMemFree(VGL_MEM_VRAM) >> 10), (unsigned)(vglMemFree(VGL_MEM_RAM) >> 10));
+            /* (the memory as last read, every 64th picture: vglMemFree walks vitaGL's whole heap, and here, for the first 24
+               textures made this way, it took 40-66 ms each, in the release too) */
+            Vita_Log("vgl: frame %u: texture %u: %u x %u, format %02x, at %04x; %d cached; free memory (as last read): %u KB video, %u KB main\n", gGsFrame, made, tw, th, psm, tbp,
+                     sTexCount, sMemVramK, sMemRamK);
         }
         made++;
     }
@@ -2522,7 +2528,8 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
     } else {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)tw, (GLsizei)th, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     }
-      gVitaWall[3] += sceKernelGetProcessTimeWide() - w0; }
+      tGlUs = sceKernelGetProcessTimeWide() - w0;
+      gVitaWall[3] += tGlUs; }
     {
         uint32_t h = bucket_of(t0, texa, gen);
         while (sTexBucket[h] != 0) {
@@ -2537,6 +2544,15 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
         unsigned long long made = sceKernelGetProcessTimeWide() - tmake - (gVitaRt[3] - tmakeW);
         gVitaTexMakeUs += made;
         sTexBudgetUs += made;
+        gVitaTexLong[0]++; /* (the log: the textures made the long way, and the slowest of them) */
+        gVitaTexLong[1] += made;
+        if (made > gVitaTexLong[2]) {
+            gVitaTexLong[2] = made;
+            gVitaTexLong[3] = tReadUs;
+            gVitaTexLong[4] = tGlUs;
+            gVitaTexLong[5] = (unsigned long long)tw << 32 | (unsigned long long)th << 16 | (unsigned long long)psm << 8 | (unsigned long long)(bits & 0xFF);
+            gVitaTexLong[6] = (unsigned long long)tbp << 32 | gGsFrame;
+        }
     }
     if (sLogMore) { /* the frames in which the first textures are drawn, batch by batch too */
         sLogMore = 0;
@@ -2546,35 +2562,46 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
     return t->id;
 }
 
+/* (the log) the textures made the long way (their pixels read and converted here, not the palette's way): how many,
+   us in all, and the slowest: us, us reading GS memory, us in glTexImage2D, width << 32 | height << 16 | format << 8 |
+   bits, page << 32 | frame */
+unsigned long long gVitaTexLong[7];
 /* ---- batches ---- */
 /* wall-clock microseconds the drawing thread spends in calls that can wait (for the log): swap, buffer maps, draw submission, texture creation */
 unsigned long long gVitaWall[6];
 unsigned long long gVitaWallK[4][2]; /* draw submissions by kind: stage, fighters, other models, GS primitives: microseconds, count */
 static inline void *wt_map(GLenum t, GLenum a) { unsigned long long t0 = sceKernelGetProcessTimeWide(); void *r = glMapBuffer(t, a); gVitaWall[1] += sceKernelGetProcessTimeWide() - t0; return r; }
 static volatile int gVitaDrawWhere;
-/* (the watchdog: vitaGL's free memory as last looked at, once a second, by the drawing thread: the watchdog itself
-   calls nothing of vitaGL, which may be what is stuck) */
-static volatile unsigned sMemVramK, sMemRamK, sMemSeen;
-/* (the log) the lowest free video and main memory seen since the last report, read every eighth picture (two
+/* (sMemVramK, sMemRamK, declared above: the watchdog's and the log's vitaGL free memory as last looked at, every 64th
+   picture, by the drawing thread: the watchdog itself calls nothing of vitaGL, which may be what is stuck) */
+/* (the log) the lowest free video and main memory seen since the last report, read every 64th picture (two
    graphics-chip crashes in 2 vs 2 fights on stage 0; the first one's last reading was 5 MB of video memory free) */
-unsigned gVitaMemLow[2] = {0xFFFFFFFFu, 0xFFFFFFFFu};
+unsigned gVitaMemLow[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0}; /* (and [2], the longest reading in us) */
 static void mem_sample(void) {
     unsigned v, m;
-    if (++sMemSeen % 8 != 0) {
+    extern int Vita_InBattle(void);
+    unsigned long long t0;
+    /* vglMemFree walks vitaGL's whole heap (sceClibMspaceMallocStats): 3 ms at a fight's start, 46 ms two minutes into
+       a 2 vs 2 one on stage 0 (a picture lost each time). It was every 60th picture (every 8th for a while): in a
+       fight now every 1024th, ~40 s */
+    if (++sMemSeen % (Vita_InBattle() ? 1024 : 64) != 0) {
         return;
     }
+    t0 = sceKernelGetProcessTimeWide();
     v = (unsigned)(vglMemFree(VGL_MEM_VRAM) >> 10);
     m = (unsigned)(vglMemFree(VGL_MEM_RAM) >> 10);
+    t0 = sceKernelGetProcessTimeWide() - t0;
+    if (t0 > gVitaMemLow[2]) {
+        gVitaMemLow[2] = (unsigned)t0; /* (the log: the longest reading, us) */
+    }
     if (v < gVitaMemLow[0]) {
         gVitaMemLow[0] = v;
     }
     if (m < gVitaMemLow[1]) {
         gVitaMemLow[1] = m;
     }
-    if (sMemSeen % 64 == 0) {
-        sMemVramK = v;
-        sMemRamK = m;
-    }
+    sMemVramK = v;
+    sMemRamK = m;
 }
 /* (the minute line of the log, vita_main.c: what the texture tables hold, read as they are, and the memory) */
 int Vita_VglTables(char *out, int size) {
@@ -4498,6 +4525,12 @@ void Vita_AmLog(void) { /* vita_main.c: the model draws that read the picture's 
                     }
                 }
                 Vita_Log("vgl:   the waits for the render thread by the line asking (times, ms):%s\n", n ? buf : " none");
+                if (gVitaTexLong[0] != 0) {
+                    const unsigned long long *L = gVitaTexLong;
+                    Vita_Log("vgl:   textures made the long way: %llu, %llu ms; the slowest %llu us (reading GS memory %llu, glTexImage2D %llu): %llu x %llu, format %02llx, %llu bits, page %04llx, frame %llu\n",
+                             L[0], L[1] / 1000, L[2], L[3], L[4], L[5] >> 32, (L[5] >> 16) & 0xFFFF, (L[5] >> 8) & 0xFF, L[5] & 0xFF, L[6] >> 32, L[6] & 0xFFFFFFFFu);
+                }
+                memset(gVitaTexLong, 0, sizeof(gVitaTexLong));
                 memset(sRtSyncAt, 0, sizeof(sRtSyncAt));
             }
             Vita_Log("vgl:   swaps (rtswap): %u made by the render thread, %u the old way\n", gVitaRtSwapN[0], gVitaRtSwapN[1]);

@@ -225,6 +225,19 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   changes what is drawn before that frame, and no report covers the frame itself; the next step would be a line per
   frame from 770 to 780 (states taken, textures let go, memory stores). Until then neither may be used. Runs
   `port/build/runs/wc0`, `so1`, `fs_*`; dumps `port/build/dumps/gpucrash-1794812820`, `-1794820760`, `-1794825400`.
+- 2026-11-16, where the drawing thread's time goes in 2 vs 2 on stage 0 (zones 48-50 inside the state lookup, the
+  render-thread waits by line, the textures made the long way; runs `zs0`, `rs0`, `tl0`, `tm0`): the stretches under
+  14 pictures a second take ~75 ms a drawn list on the drawing thread and ~40 ms on the list reader (~42 and ~25 in
+  the stretches at 20-26), spread over many zones. The waits for the render thread are 3-5 ms a list there, most of
+  them before a palette texture's indices and palette are put in the chip's memory (vitaGL's allocator is not for two
+  threads) and at a picture's end (`rtswap` off). The spikes were the log: the first 24 textures made the long way
+  (8-bit, their palette's way refused) each logged vitaGL's free memory, and `vglMemFree` walks vitaGL's whole heap
+  (`sceClibMspaceMallocStats`, no custom heap in our vitaGL build): 40-66 ms each, in the release too (`Vita_Log` is
+  not compiled out), 330-730 ms in a 2 s stretch. The line now shows the memory as last read: texture making 545-733
+  -> 90 ms in the worst stretch, 2,451-3,563 -> 1,493 ms over the run, 20.2-21.5 -> 22.3 pictures a second, stretches
+  under 15 a second 5-7 -> 3 of 39 (one run each). The reading itself grows with the heap's pieces, 3 ms at the
+  fight's start to 46 ms two minutes in; it was every 60th picture (the watchdog's, release too), every 8th for a few
+  runs today, and is now every 1024th in a fight.
 - The log's "memory free, the lowest since the last report" line: video and main memory sampled every 8 pictures
   (the lowest kept), not only every 60.
 - `vita_agent_run.py` after the console switched itself off in a run: every vita-agent call now has a time limit (3
