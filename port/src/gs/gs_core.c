@@ -3500,9 +3500,46 @@ static void spr_run(const uint64_t *d, uint32_t nl, int uvs) {
     gs.strip += 2 * nl;
 }
 #endif
+#ifdef PORT_VITA
+/* ---- bt3.txt gifahead: the GIF packets cut into pieces ahead by the list reader. The list reader goes through each GIF
+   record it copies into the queue (GsFE_GifHashed, GsFE_Gif) and cuts it where the drawing thread's walk below would
+   take a run (the triangle runs, the effects' quads, fxclamp's triangles, the A+D packets, the HUD's runs, the sprite
+   runs), each found by its packets' bytes alone, the spans between them being tags none of the runs takes. The pieces
+   (a word each: kind and quadwords) go behind the record's bytes. The drawing thread then goes from piece to piece
+   (gif_ahead_run): it no longer tests each tag against every run's shape, nor counts a run's packets, and walks the
+   spans without the tests. What depends on its own state (PRIM, the corners in the queue, a kept part being recorded,
+   the settings) it still looks at: a run whose test fails there is walked the old way, as is a record whose first
+   tag it does not find where the reader did (a packet left open by another path). No pieces for a record that begins
+   inside a packet, nor inside a call being recorded (its copy is compared with the one kept). 0 off, 1 on, 2 the
+   soak's B battles, 3 the pieces made and checked: the drawing thread walks the old way, noting each run it takes,
+   and compares them with the pieces. ---- */
+int gVitaGifAhead;
+unsigned gVitaGifAheadN[14]; /* for the log: records cut; not cut: begun inside a packet, in a call recorded, too many
+                                pieces; words of pieces; records walked by their pieces, their first tag not found
+                                (walked the old way); runs taken, walked the old way (the state's tests), spans walked
+                                without the tests; check: records compared, differences, runs the same, the pieces'
+                                runs the old way did not take */
+enum { GA_RAW, GA_TRI, GA_QUAD, GA_CLAMP, GA_AD, GA_HUD, GA_SPR };
+static int sGaTraceOn, sGaTraceOver; /* (gifahead=3: the runs the walk takes, noted) */
+static unsigned sGaTraceN;
+static const uint64_t *sGaTraceBase;
+static struct { uint32_t off, kind, len; } sGaTrace[1024];
+static void ga_trace(uint32_t kind, const uint64_t *at, uint32_t len) {
+    if (sGaTraceN == 1024) {
+        sGaTraceOver = 1;
+        return;
+    }
+    sGaTrace[sGaTraceN].off = (uint32_t)(at - sGaTraceBase) / 2;
+    sGaTrace[sGaTraceN].kind = kind;
+    sGaTrace[sGaTraceN].len = len;
+    sGaTraceN++;
+}
+#define GA_TRACE(k, at, len) do { if (__builtin_expect(sGaTraceOn, 0)) { ga_trace((k), (at), (len)); } } while (0)
+#endif
 static uint64_t sGifTagLo, sGifTagHi; /* current tag: persists across runs */
 static uint32_t sGifLoops, sGifReg;    /* loops left, register index within the loop */
-__attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
+/* runs 0: without the runs' tests (gifahead's spans, in which the list reader found none) */
+static inline __attribute__((always_inline)) void gif_walk(const uint8_t *p, uint32_t qwc, const int runs) {
 #define tag_lo sGifTagLo
 #define tag_hi sGifTagHi
 #define loops sGifLoops
@@ -3534,12 +3571,13 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
            eft_d.c: one GIF tag "REGLIST, 12 registers": PRIM, TEX0, three times RGBAQ, ST, XYZF2, and a NOP), all with
            the same PRIM and TEX0: the registers written as the GIF would write them, and each triangle drawn, without the
            register-by-register walk (the sea of Kame House: 1,400 of them a picture). */
-        if (loops == 0 && qwc >= 7 && sGpu && !sDpCap && sVtxDbg == 0 && gVitaTriRun &&
+        if (runs && loops == 0 && qwc >= 7 && sGpu && !sDpCap && sVtxDbg == 0 && gVitaTriRun &&
             (q[0] == 0xC400000000008001ull || q[0] == 0xC400000000000001ull) && (q[1] == 0xF42142142160ull || q[1] == 0xF42142142170ull)) {
             uint32_t n = 1, maxn = qwc / 7;
             while (n < maxn && q[14 * n] == q[0] && q[14 * n + 1] == q[1] && q[14 * n + 2] == q[2] && q[14 * n + 3] == q[3]) {
                 n++;
             }
+            GA_TRACE(GA_TRI, q, 7 * n);
             if (gVitaZoneOn & 1) { /* */
                 unsigned c0 = 0, c1 = 0;
                 Vita_PmonGet(0, 31, &c0);
@@ -3554,7 +3592,7 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
             qwc -= 7 * n;
             continue;
         }
-        if (loops == 0 && qwc >= 7 && sGpu && !sDpCap && sVtxDbg == 0 && (q[2] & 7) == 4 && Gs_FxRunOn() &&
+        if (runs && loops == 0 && qwc >= 7 && sGpu && !sDpCap && sVtxDbg == 0 && (q[2] & 7) == 4 && Gs_FxRunOn() &&
             (((q[0] == 0xE400000000008001ull || q[0] == 0xE400000000000001ull) && qwc >= 8 && (q[1] == 0x42142142142160ull || q[1] == 0x42142142142170ull)) ||
              ((q[0] == 0xC400000000008001ull || q[0] == 0xC400000000000001ull) && (q[1] == 0xF42424242160ull || q[1] == 0xF42424242170ull)))) {
             int flat = (q[0] >> 60) == 0xC;
@@ -3562,26 +3600,29 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
             while (n < maxn && q[stride * n] == q[0] && q[stride * n + 1] == q[1] && q[stride * n + 2] == q[2] && q[stride * n + 3] == q[3]) {
                 n++;
             }
+            GA_TRACE(GA_QUAD, q, (stride / 2) * n);
             quad_run(q, n, flat);
             q += stride * n;
             qwc -= (stride / 2) * n;
             continue;
         }
-        if (loops == 0 && qwc >= 8 && sGpu && !sDpCap && sVtxDbg == 0 && (q[2] & 7) == 3 && !((q[2] >> 8) & 1) &&
+        if (runs && loops == 0 && qwc >= 8 && sGpu && !sDpCap && sVtxDbg == 0 && (q[2] & 7) == 3 && !((q[2] >> 8) & 1) &&
             (q[0] == 0xE400000000008001ull || q[0] == 0xE400000000000001ull) && (q[1] == 0xF8421421421860ull || q[1] == 0xF9421421421970ull) && fxclamp_on()) {
             uint32_t n = 1, maxn = qwc / 8; /* (fxclamp) */
             while (n < maxn && q[16 * n] == q[0] && q[16 * n + 1] == q[1] && q[16 * n + 2] == q[2] && q[16 * n + 3] == q[3] && q[16 * n + 4] == q[4]) {
                 n++;
             }
+            GA_TRACE(GA_CLAMP, q, 8 * n);
             clamp_tri_run(q, n);
             q += 16 * n;
             qwc -= 8 * n;
             continue;
         }
-        if (loops == 0 && (q[0] & 0xFFFFC00000000000ull) == 0x1000000000000000ull && q[1] == 0xE && (q[0] & 0x7FFF) != 0 &&
+        if (runs && loops == 0 && (q[0] & 0xFFFFC00000000000ull) == 0x1000000000000000ull && q[1] == 0xE && (q[0] & 0x7FFF) != 0 &&
             qwc >= 1 + (uint32_t)(q[0] & 0x7FFF) && adfast_on()) {
             uint32_t nl = (uint32_t)(q[0] & 0x7FFF), i; /* (adfast: PACKED, NREG 1, A+D, no PRE) */
             const uint64_t *d = q + 2;
+            GA_TRACE(GA_AD, q, 1 + nl);
             sStat[3]++;
             gVitaGifN[0]++;
             gVitaGifN[3] += nl;
@@ -3592,20 +3633,22 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
             qwc -= 1 + nl;
             continue;
         }
-        if (loops == 0 && sGpu && !sDpCap && sVtxDbg == 0 && (q[0] & ~0xFFFFull) == 0x2400000000000000ull && q[1] == 0x51 && (gs.prim & 7) == 3 &&
+        if (runs && loops == 0 && sGpu && !sDpCap && sVtxDbg == 0 && (q[0] & ~0xFFFFull) == 0x2400000000000000ull && q[1] == 0x51 && (gs.prim & 7) == 3 &&
             !((gs.prim >> 4) & 1) && (q[0] & 0x7FFF) >= 3 && (q[0] & 0x7FFF) % 3 == 0 && qwc >= 1 + (uint32_t)(q[0] & 0x7FFF) && hudrun_on()) {
             uint32_t nl = (uint32_t)(q[0] & 0x7FFF); /* (hudrun: REGLIST RGBAQ, XYZ2, a corner a quadword) */
+            GA_TRACE(GA_HUD, q, 1 + nl);
             sStat[3]++;
             flat_tri_run(q + 2, nl / 3);
             q += 2 + 2 * nl;
             qwc -= 1 + nl;
             continue;
         }
-        if (loops == 0 && sGpu && !sDpCap && sVtxDbg == 0 && (gs.prim & 7) == 6 && gs.vcount == 0 && (q[0] & 0x7FFF) >= 2 &&
+        if (runs && loops == 0 && sGpu && !sDpCap && sVtxDbg == 0 && (gs.prim & 7) == 6 && gs.vcount == 0 && (q[0] & 0x7FFF) >= 2 &&
             ((q[0] >> 58) == 0x11 ? (q[1] & 0xFFFF) == 0x5353 : ((q[0] >> 58) == 0x09 && (q[1] & 0xFF) == 0x55)) &&
             qwc >= 1 + (uint32_t)(q[0] & 0x7FFF) * (uint32_t)(q[0] >> 61) && ((gs.prim & 0x10) || ((gs.frame[(gs.prim >> 9) & 1] >> 16) & 0x3F) != 1) &&
             sprrun_on()) {
             uint32_t nl = (uint32_t)(q[0] & 0x7FFF), qpl = (uint32_t)(q[0] >> 61); /* (sprrun: NREG 4 or 2, quadwords a loop 2 or 1) */
+            GA_TRACE(GA_SPR, q, 1 + qpl * nl);
             sStat[3]++;
             gVitaGifN[1]++;
             spr_run(q + 2, nl, qpl == 2);
@@ -3720,6 +3763,266 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
 #undef loops
 #undef reg
 }
+__attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
+    gif_walk(p, qwc, 1);
+}
+#ifdef PORT_VITA
+/* (gifahead) the list reader: the piece at q, a tag there and qwc quadwords left in the record, as gif_walk's tests
+   find it by the bytes alone (the same tests, in the same order): its kind and quadwords */
+static uint32_t ga_shape(const uint64_t *q, uint32_t qwc, uint32_t *kind) {
+    const uint64_t t = q[0];
+    const uint32_t nl = (uint32_t)(t & 0x7FFF);
+    if (qwc >= 7 && (t == 0xC400000000008001ull || t == 0xC400000000000001ull) && (q[1] == 0xF42142142160ull || q[1] == 0xF42142142170ull)) {
+        uint32_t n = 1, maxn = qwc / 7;
+        while (n < maxn && q[14 * n] == q[0] && q[14 * n + 1] == q[1] && q[14 * n + 2] == q[2] && q[14 * n + 3] == q[3]) {
+            n++;
+        }
+        *kind = GA_TRI;
+        return 7 * n;
+    }
+    if (qwc >= 7 && (q[2] & 7) == 4 &&
+        (((t == 0xE400000000008001ull || t == 0xE400000000000001ull) && qwc >= 8 && (q[1] == 0x42142142142160ull || q[1] == 0x42142142142170ull)) ||
+         ((t == 0xC400000000008001ull || t == 0xC400000000000001ull) && (q[1] == 0xF42424242160ull || q[1] == 0xF42424242170ull)))) {
+        const uint32_t stride = (t >> 60) == 0xC ? 14u : 16u, maxn = qwc / (stride / 2);
+        uint32_t n = 1;
+        while (n < maxn && q[stride * n] == q[0] && q[stride * n + 1] == q[1] && q[stride * n + 2] == q[2] && q[stride * n + 3] == q[3]) {
+            n++;
+        }
+        *kind = GA_QUAD;
+        return (stride / 2) * n;
+    }
+    if (qwc >= 8 && (q[2] & 7) == 3 && !((q[2] >> 8) & 1) && (t == 0xE400000000008001ull || t == 0xE400000000000001ull) &&
+        (q[1] == 0xF8421421421860ull || q[1] == 0xF9421421421970ull)) {
+        uint32_t n = 1, maxn = qwc / 8;
+        while (n < maxn && q[16 * n] == q[0] && q[16 * n + 1] == q[1] && q[16 * n + 2] == q[2] && q[16 * n + 3] == q[3] && q[16 * n + 4] == q[4]) {
+            n++;
+        }
+        *kind = GA_CLAMP;
+        return 8 * n;
+    }
+    if ((t & 0xFFFFC00000000000ull) == 0x1000000000000000ull && q[1] == 0xE && nl != 0 && qwc >= 1 + nl) {
+        *kind = GA_AD;
+        return 1 + nl;
+    }
+    if ((t & ~0xFFFFull) == 0x2400000000000000ull && q[1] == 0x51 && nl >= 3 && nl % 3 == 0 && qwc >= 1 + nl) {
+        *kind = GA_HUD;
+        return 1 + nl;
+    }
+    if (nl >= 2 && ((t >> 58) == 0x11 ? (q[1] & 0xFFFF) == 0x5353 : ((t >> 58) == 0x09 && (q[1] & 0xFF) == 0x55)) && qwc >= 1 + nl * (uint32_t)(t >> 61)) {
+        *kind = GA_SPR;
+        return 1 + nl * (uint32_t)(t >> 61);
+    }
+    {   /* any other tag: its packet, as gif_walk goes through it (to the record's end if it goes on in the next one) */
+        const uint32_t flg = (uint32_t)(t >> 58) & 3, nreg = ((uint32_t)(t >> 60) & 15) != 0 ? (uint32_t)(t >> 60) & 15 : 16u;
+        const uint32_t len = 1 + (flg == 0 ? nl * nreg : flg == 1 ? (nl * nreg + 1) / 2 : nl);
+        *kind = GA_RAW;
+        return len < qwc ? len : qwc;
+    }
+}
+#define GA_SEGS 2048
+static uint32_t sGaPlan[1 + GA_SEGS]; /* (the pieces being made: their count, then a word each, kind | quadwords << 3) */
+static int sCcCap; /* (below: the call being recorded) */
+static int ga_make(void) {
+    extern int gVitaAbSide;
+    return gVitaGifAhead == 2 ? gVitaAbSide == 1 : gVitaGifAhead != 0;
+}
+/* the record's pieces into sGaPlan: their words, 0 none */
+static uint32_t ga_build(const uint8_t *p, uint32_t qwc) {
+    const uint64_t *q = (const uint64_t *)(const void *)p;
+    uint32_t left = qwc, n = 0, raw = 0;
+    if (sFeGifLeft != 0) { /* (begun inside a packet: the image of a tag sent before, mostly) */
+        gVitaGifAheadN[1]++;
+        return 0;
+    }
+    if (sCcCap >= 0) {
+        gVitaGifAheadN[2]++;
+        return 0;
+    }
+    while (left != 0) {
+        uint32_t kind, c = ga_shape(q, left, &kind);
+        if (kind == GA_RAW) {
+            raw += c;
+        } else {
+            if (raw != 0) {
+                sGaPlan[++n] = raw << 3 | GA_RAW;
+                raw = 0;
+            }
+            if (kind == GA_AD && n != 0 && (sGaPlan[n] & 7) == GA_AD) {
+                sGaPlan[n] += c << 3; /* (A+D packets one after another: one piece) */
+            } else {
+                sGaPlan[++n] = c << 3 | kind;
+            }
+        }
+        if (n >= GA_SEGS - 2) {
+            gVitaGifAheadN[3]++;
+            return 0;
+        }
+        q += 2 * c;
+        left -= c;
+    }
+    if (raw != 0) {
+        sGaPlan[++n] = raw << 3 | GA_RAW;
+    }
+    sGaPlan[0] = n;
+    gVitaGifAheadN[0]++;
+    gVitaGifAheadN[4] += n + 1;
+    return n + 1;
+}
+/* the drawing thread: a record by its pieces. Each run is taken as gif_walk would take it (the same tests of the
+   state, the same calls and counts); the spans are walked without the runs' tests */
+static void gif_ahead_run(const uint8_t *p, uint32_t qwc, const uint32_t *plan) {
+    const uint64_t *q = (const uint64_t *)(const void *)p;
+    const uint32_t nseg = plan[0];
+    uint32_t i;
+    if (sGifLoops != 0) { /* (inside a packet: the reader took the record's first quadword for a tag) */
+        gVitaGifAheadN[6]++;
+        Gs_Gif(p, qwc);
+        return;
+    }
+    gVitaGifAheadN[5]++;
+    for (i = 1; i <= nseg; i++) {
+        const uint32_t kind = plan[i] & 7, c = plan[i] >> 3;
+        const int base = sGpu && !sDpCap && sVtxDbg == 0;
+        int take;
+        switch (kind) {
+        case GA_TRI: take = base && gVitaTriRun; break;
+        case GA_QUAD: take = base && Gs_FxRunOn(); break;
+        case GA_CLAMP: take = base && fxclamp_on(); break;
+        case GA_AD: take = adfast_on(); break;
+        case GA_HUD: take = base && (gs.prim & 7) == 3 && !((gs.prim >> 4) & 1) && hudrun_on(); break;
+        case GA_SPR:
+            take = base && (gs.prim & 7) == 6 && gs.vcount == 0 && ((gs.prim & 0x10) || ((gs.frame[(gs.prim >> 9) & 1] >> 16) & 0x3F) != 1) && sprrun_on();
+            break;
+        default: take = 0; break;
+        }
+        if (kind == GA_RAW) {
+            gVitaGifAheadN[9]++;
+            gif_walk((const uint8_t *)q, c, 0);
+        } else if (!take) {
+            gVitaGifAheadN[8]++;
+            Gs_Gif((const uint8_t *)q, c); /* (the old way: its tests fail there as here) */
+        } else {
+            gVitaGifAheadN[7]++;
+            switch (kind) {
+            case GA_TRI:
+                if (gVitaZoneOn & 1) { /* (as gif_walk) */
+                    unsigned c0 = 0, c1 = 0;
+                    Vita_PmonGet(0, 31, &c0);
+                    tri_run(q, c / 7);
+                    Vita_PmonGet(0, 31, &c1);
+                    gVitaGifCyc[0] += c1 - c0;
+                    gVitaGifCnt[0] += c / 7;
+                } else {
+                    tri_run(q, c / 7);
+                }
+                break;
+            case GA_QUAD: {
+                const int flat = (q[0] >> 60) == 0xC;
+                quad_run(q, c / (flat ? 7u : 8u), flat);
+                break;
+            }
+            case GA_CLAMP: clamp_tri_run(q, c / 8); break;
+            case GA_AD: {
+                const uint64_t *t = q, *const e = q + 2 * c;
+                while (t < e) {
+                    const uint32_t nl = (uint32_t)(t[0] & 0x7FFF);
+                    const uint64_t *d = t + 2;
+                    uint32_t k;
+                    __builtin_prefetch((const char *)t + 256);
+                    sStat[3]++;
+                    gVitaGifN[0]++;
+                    gVitaGifN[3] += nl;
+                    for (k = 0; k < nl; k++, d += 2) {
+                        reg_write((uint32_t)(d[1] & 0xFF), d[0]);
+                    }
+                    t = d;
+                }
+                break;
+            }
+            case GA_HUD:
+                sStat[3]++;
+                flat_tri_run(q + 2, (uint32_t)(q[0] & 0x7FFF) / 3);
+                break;
+            default: /* GA_SPR */
+                sStat[3]++;
+                gVitaGifN[1]++;
+                spr_run(q + 2, (uint32_t)(q[0] & 0x7FFF), (q[0] >> 61) == 2);
+                break;
+            }
+        }
+        q += 2 * c;
+    }
+}
+/* gifahead=3: the record walked the old way (and drawn so), the runs it takes noted and compared with the pieces: each
+   run taken must be a piece of its kind, place and length; a piece's run not taken is counted apart (its test of the
+   state failed there, as it would in the pieces' way) */
+static void gif_ahead_check(const uint8_t *p, uint32_t qwc, const uint32_t *plan) {
+    extern void Vita_Log(const char *fmt, ...);
+    static unsigned lines;
+    const uint32_t nseg = plan[0];
+    uint32_t i, j = 0, m = 0, k, off = 0, bad = 0;
+    if (sGifLoops != 0) {
+        gVitaGifAheadN[6]++;
+        Gs_Gif(p, qwc);
+        return;
+    }
+    sGaTraceBase = (const uint64_t *)(const void *)p;
+    sGaTraceN = 0;
+    sGaTraceOver = 0;
+    sGaTraceOn = 1;
+    Gs_Gif(p, qwc);
+    sGaTraceOn = 0;
+    if (sGaTraceOver) {
+        return;
+    }
+    gVitaGifAheadN[10]++;
+    for (k = 0; k < sGaTraceN; k++) { /* (the A+D packets one after another: one piece, as the reader makes them) */
+        if (m != 0 && sGaTrace[k].kind == GA_AD && sGaTrace[m - 1].kind == GA_AD && sGaTrace[m - 1].off + sGaTrace[m - 1].len == sGaTrace[k].off) {
+            sGaTrace[m - 1].len += sGaTrace[k].len;
+        } else {
+            sGaTrace[m++] = sGaTrace[k];
+        }
+    }
+    for (i = 1; i <= nseg; i++) {
+        const uint32_t kind = plan[i] & 7, c = plan[i] >> 3;
+        for (; j < m && sGaTrace[j].off < off; j++) { /* (a run inside a span, or across pieces) */
+            bad++;
+            if (lines < 20) {
+                lines++;
+                Vita_Log("gifahead: check: a run of kind %u at %u (%u quadwords) not among the pieces, record of %u\n", sGaTrace[j].kind, sGaTrace[j].off, sGaTrace[j].len, qwc);
+            }
+        }
+        if (kind != GA_RAW) {
+            if (j < m && sGaTrace[j].off == off) {
+                if (sGaTrace[j].kind == kind && sGaTrace[j].len == c) {
+                    gVitaGifAheadN[12]++;
+                } else {
+                    bad++;
+                    if (lines < 20) {
+                        lines++;
+                        Vita_Log("gifahead: check: piece %u of %u kind %u at %u (%u quadwords), the old way's run kind %u (%u), record of %u\n", i, nseg, kind, off, c,
+                                 sGaTrace[j].kind, sGaTrace[j].len, qwc);
+                    }
+                }
+                j++;
+            } else {
+                gVitaGifAheadN[13]++;
+            }
+        }
+        off += c;
+    }
+    bad += m - j; /* (runs after the last piece) */
+    bad += off != qwc;
+    gVitaGifAheadN[11] += bad;
+}
+static void gif_ahead(const uint8_t *p, uint32_t qwc, const uint32_t *plan) {
+    if (gVitaGifAhead == 3) {
+        gif_ahead_check(p, qwc, plan);
+    } else {
+        gif_ahead_run(p, qwc, plan);
+    }
+}
+#endif
 
 /* ------------------------------------------------------------------------------------------------ front / back */
 #ifdef PORT_VITA
@@ -3734,6 +4037,7 @@ int gGsSplit;                           /* the back end runs on a thread of its 
 #define GR_SIZE (8u << 20)
 typedef struct GRec { uint16_t type, flags; uint32_t size; uint32_t a, b, c, e; uint64_t d; } GRec; /* 32 bytes */
 enum { GR_WRAP, GR_GIFP, GR_GIFC, GR_REG, GR_VU, GR_SKIP, GR_FBP, GR_FRAMEEND, GR_LISTBEGIN, GR_LISTEND, GR_INIT, GR_GIFCH, GR_CHIPRESET, GR_PART, GR_VU2, GR_T116 };
+#define GR_F_PIECES 0x100 /* GR_GIFC: gifahead's pieces behind the bytes (their count, then a word each) */
 typedef struct Vu2 { uint64_t texv[2]; uint32_t texa[2], prim[2], ctx[2]; uint32_t pad[2]; } Vu2; /* GR_VU2: program 0's two layers (48 bytes) */
 static uint8_t sGr[GR_SIZE] __attribute__((aligned(64)));
 static volatile unsigned sGrHead, sGrTail; /* bytes taken by the back end / put by the front end (count on and on) */
@@ -3874,23 +4178,34 @@ static void reg_def_flush(void) {
 
 /* as GsFE_Gif, and the image transfers in the copy given their numbers before the drawing thread sees it */
 static void GsFE_GifHashed(const uint8_t *p, uint32_t qwc) {
-    GRec *r = gr_alloc(qwc * 16);
+    const uint32_t pw = ga_make() ? ga_build(p, qwc) : 0; /* (gifahead: the pieces, behind the bytes) */
+    GRec *r = gr_alloc(qwc * 16 + pw * 4);
     r->type = GR_GIFC;
     r->b = qwc;
     memcpy(r + 1, p, qwc * 16);
+    if (pw != 0) {
+        memcpy((uint8_t *)(r + 1) + qwc * 16, sGaPlan, pw * 4);
+        r->flags = GR_F_PIECES;
+    }
     fe_hash_gif((const uint8_t *)(r + 1), qwc, 1);
     gr_put(r);
 }
 void GsFE_Gif(const uint8_t *p, uint32_t qwc) { /* (VU memory or a packet put together: copied) */
     GRec *r;
+    uint32_t pw;
     if (!gGsSplit) {
         Gs_Gif(p, qwc);
         return;
     }
-    r = gr_alloc(qwc * 16);
+    pw = ga_make() ? ga_build(p, qwc) : 0; /* (gifahead) */
+    r = gr_alloc(qwc * 16 + pw * 4);
     r->type = GR_GIFC;
     r->b = qwc;
     memcpy(r + 1, p, qwc * 16);
+    if (pw != 0) {
+        memcpy((uint8_t *)(r + 1) + qwc * 16, sGaPlan, pw * 4);
+        r->flags = GR_F_PIECES;
+    }
     gr_put(r);
 }
 
@@ -5254,7 +5569,14 @@ static void gr_exec(const GRec *r) {
     GR_PLACE(r->type == GR_GIFP || r->type == GR_GIFC || r->type == GR_REG ? 3 : r->type == GR_VU || r->type == GR_VU2 ? 6 : r->type == GR_PART ? 11 : 1);
     switch (r->type) {
     case GR_GIFP: Gs_Gif((const uint8_t *)(uintptr_t)r->a, r->b); GZM(20); break;
-    case GR_GIFC: Gs_Gif((const uint8_t *)(r + 1), r->b); GZM(20); break;
+    case GR_GIFC:
+        if (r->flags & GR_F_PIECES) { /* (gifahead) */
+            gif_ahead((const uint8_t *)(r + 1), r->b, (const uint32_t *)(const void *)((const uint8_t *)(r + 1) + r->b * 16));
+        } else {
+            Gs_Gif((const uint8_t *)(r + 1), r->b);
+        }
+        GZM(20);
+        break;
     case GR_REG: reg_write(r->a, r->d); GZM(21); break;
     case GR_VU: {
         extern int gVglSamePos;

@@ -1037,7 +1037,7 @@ void Vita_VBlank(unsigned vblanks) {
                                             }
                                         }
                                         {   /* (zones 52..55: the later marks) */
-                                            static const char *const zl[4] = {"GS prim: kept parts handed", "kept part: to its constants", "", ""};
+                                            static const char *const zl[4] = {"GS prim: kept parts handed", "kept part: to its constants", "GS prim: triangle runs drawn", "port's markers: passes"};
                                             for (z = 52; z < 56; z++) {
                                                 if (gVitaZoneN[z]) {
                                                     logf_("vita:   zone %2u %-26s %7u k cycles per drawn list, %6u marks, %4u cycles each\n", z, zl[z - 52],
@@ -1167,6 +1167,19 @@ void Vita_VBlank(unsigned vblanks) {
                                 logf_("vita:   fxclamp: %u runs, %u triangles | dpgen: %u state fields changed by kept parts | skipfast: %u packets' corners not built\n", gVitaFxClampN[0], gVitaFxClampN[1], gVitaDpGenN[0],
                                       gVitaSkipFastN[0]);
                                 gVitaDpGenN[0] = gVitaSkipFastN[0] = 0;
+                            }
+                            {
+                                extern int gVitaGifAhead;
+                                extern unsigned gVitaGifAheadN[14];
+                                if (gVitaGifAhead) {
+                                    logf_("vita:   gifahead: %u records cut (%u KB of pieces), not cut: %u begun inside a packet, %u in a call recorded, %u too many pieces | "
+                                          "walked by their pieces %u, first tag not found %u; runs taken %u, walked the old way %u; spans without the tests %u | "
+                                          "check: %u records, %u runs the same, %u pieces' runs not taken the old way, %u differences\n",
+                                          gVitaGifAheadN[0], gVitaGifAheadN[4] / 256, gVitaGifAheadN[1], gVitaGifAheadN[2], gVitaGifAheadN[3], gVitaGifAheadN[5],
+                                          gVitaGifAheadN[6], gVitaGifAheadN[7], gVitaGifAheadN[8], gVitaGifAheadN[9], gVitaGifAheadN[10], gVitaGifAheadN[12],
+                                          gVitaGifAheadN[13], gVitaGifAheadN[11]);
+                                }
+                                memset(gVitaGifAheadN, 0, sizeof(gVitaGifAheadN));
                             }
                             {
                                 extern unsigned gVitaDpGTexN[3];
@@ -1762,6 +1775,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "fxclamp") == 0) { /* the animated effects' triangles (with their CLAMP writes) as runs: 0 off, 1 on, 2 soak B */
             extern int gVitaFxClamp;
             gVitaFxClamp = atoi(eq);
+        } else if (strcmp(line, "gifahead") == 0) { /* the GIF records cut into runs and spans by the list reader: 0 off, 1 on, 2 soak B, 3 checked */
+            extern int gVitaGifAhead;
+            gVitaGifAhead = atoi(eq);
         } else if (strcmp(line, "gifshapes") == 0) { /* 1: the GIF tags outside the runs counted by shape, in the report (a measure) */
             extern int gVitaGifShapes;
             gVitaGifShapes = atoi(eq);

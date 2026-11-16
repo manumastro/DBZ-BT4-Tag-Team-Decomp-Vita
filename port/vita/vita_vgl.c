@@ -5766,7 +5766,14 @@ int gVitaRunEst = 0; /* (tests: bt3.txt runest=1; off: no gain measured, a Kame 
 unsigned gVitaRunEstN; /* (the log) runs' first triangles whose state was worked out here */
 unsigned gVitaTriAg[2]; /* for the log (fxrun): the triangle runs' triangles put into the additive groups, runs that could */
 unsigned gVitaTriAgWhy[8]; /* (the log) additive runs not taken: no groups now, a target, the blend, depth written, DATE / FBA, pad, texture moved, the alpha written and read */
+static void tri_run_draw(int ctx, const GsVertex *v, uint32_t ntri);
+/* (zones: the GIF walk up to a run, 10; the run drawn, 54. Before, the runs' draws went into zones 10 and 20) */
 void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri) {
+    ZM(10);
+    tri_run_draw(ctx, v, ntri);
+    ZM(54);
+}
+static void tri_run_draw(int ctx, const GsVertex *v, uint32_t ntri) {
     extern int Gs_FxRunOn(void);
     int agRun = 0; /* (fxrun: the run's state only adds to the picture: its triangles into the additive groups) */
     uint32_t k, tcLast = 0;
@@ -11074,7 +11081,14 @@ __attribute__((hot)) void GsGpu_DrawVu6(int ctx, const float *vertices, uint32_t
 }
 /* Markers the HUD code puts into the list (PC port): which side of the screen the 2D pieces that follow belong to. */
 static int sAnchor; /* 0 none, 1 left, 2 right, 3 centre, 4 by position */
+static void native_marker(int effect);
+/* (zones: the GIF walk up to the port's marker, 10; its passes, 55. Before, they went into zones 10 and 20) */
 void GsGpu_Native(int effect) {
+    ZM(10);
+    native_marker(effect);
+    ZM(55);
+}
+static void native_marker(int effect) {
     ag_close(); /* the additive group before anything else */
     if (effect == 1) {
         ol_marker(); /* the outline */
