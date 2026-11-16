@@ -1185,6 +1185,16 @@ void Vita_VBlank(unsigned vblanks) {
                                           "check: %u blocks compared, %u differed\n",
                                           gVitaUpIdMemoN[0], gVitaUpIdMemoN[1], gVitaUpIdMemoN[2], gVitaUpIdMemoN[5], gVitaUpIdMemoN[3], gVitaUpIdMemoN[4]);
                                 }
+                                {
+                                    extern int gVitaUpSame;
+                                    extern unsigned gVitaUpSameN[6];
+                                    if (gVitaUpSame != 0) {
+                                        logf_("vita:   upsame: %u small uploads compared with GS memory, %u the same (not written; 3: would not have been), %u with a block taken note of; "
+                                              "not compared: %u on a drawn-into page, %u over 72 blocks; check: %u found the same but changed by the write\n",
+                                              gVitaUpSameN[0], gVitaUpSameN[1], gVitaUpSameN[2], gVitaUpSameN[3], gVitaUpSameN[4], gVitaUpSameN[5]);
+                                    }
+                                    memset(gVitaUpSameN, 0, sizeof(gVitaUpSameN));
+                                }
                                 memset(gVitaUpRepN, 0, sizeof(gVitaUpRepN));
                                 memset(gVitaUpIdMemoN, 0, sizeof(gVitaUpIdMemoN));
                             }
@@ -1728,6 +1738,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "upidmemo") == 0) { /* the written uploads' block ids remembered by their bytes: 0 off, 1 on, 2 soak B, 3 on + check */
             extern int gVitaUpIdMemo;
             gVitaUpIdMemo = atoi(eq);
+        } else if (strcmp(line, "upsame") == 0) { /* a small upload not written when GS memory holds its bytes there already: 0 off, 1 on, 2 soak B, 3 written + check */
+            extern int gVitaUpSame;
+            gVitaUpSame = atoi(eq);
         } else if (strcmp(line, "sprrun") == 0) { /* the GS's sprite packets read as runs: 0 off, 1 on, 2 soak B, 3 on and a check */
             extern int gVitaSprRun;
             gVitaSprRun = atoi(eq);

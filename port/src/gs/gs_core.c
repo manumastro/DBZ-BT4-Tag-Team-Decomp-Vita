@@ -2312,6 +2312,163 @@ static void up_pixels(uint32_t dbp, uint32_t dbw, uint32_t dpsm, uint32_t bits, 
     }
 }
 
+/* ---- bt3.txt upsame: a whole small upload (16 to 1,024 bytes) not written when GS memory holds its bytes there
+   already. The small uploads' memory (smemo in transfer_data) keeps only the last upload to a place, and gives up a
+   place whose data changes from one upload to the next (m->miss: copied one time in eight, and not valid the other
+   seven), so the same palette sent again to a fighter's one palette place, or an effect's texture sent again to where
+   it lies, was written again: in a 2 vs 2 beam special ~13,000 of ~17,000 small uploads every 2 s were "first sight"
+   (not remembered), and uprepeat found about two thirds of them going where the same bytes lay already. Each write
+   counted as a change of GS memory (gGsEpoch, gGsPageSig: the texture keys and the strips' states worked out anew),
+   left its blocks dirty and unbound the textures over them. Now the upload's bytes are compared with GS memory itself
+   (sVram, at the places up_piece and up_pixels would write them, the format's own bits only). The same: nothing is
+   written, the epoch and the pages' signatures stay as they are (nothing changed), the blocks keep their ids (they
+   name the same bytes); the destination is made as after a write (its blocks are its own, the one they were before
+   unbound, as by the write: bind_touch) and the pages count as uploaded into (gGsPageGen, as for the uploads found
+   unchanged: a buffer drawn into is the upload's again). Not compared: a block taken note of (its bytes are not in
+   sVram), and the pages of a picture drawn there (a work target, the work page, a buffer drawn into: the renderer
+   follows those by gGsPageSig and the epoch, and GS memory does not hold what was drawn: vita_vgl.c Vita_PagesDrawnInto). Exact: only a write that
+   would not change one bit of GS memory is left out. 3: written as before, the decision taken all the same and
+   checked: the destination's blocks before the write against after it. ---- */
+int gVitaUpSame;          /* 0 off (default), 1 on, 2 in the soak's B battles, 3 written and checked */
+unsigned gVitaUpSameN[6]; /* for the log: small uploads compared, of them the same (not written; 3: would not have been), with a block taken
+                             note of; not compared: on a drawn-into page, over UPSAME_BLK blocks; (3) found the same but changed by the write */
+#define UPSAME_BLK 72     /* (a 1 KB upload touches 65 blocks at the most: 2,048 4-bit pixels in a row) */
+static uint16_t sSameBlk[UPSAME_BLK];
+static uint32_t sSameSnap[UPSAME_BLK][64];
+static int upsame_mode(void) {
+    return gVitaUpSame == 2 ? (gVitaAbSide == 1) : gVitaUpSame;
+}
+/* the blocks of the upload's rectangle (gs.tx, gs.ty, gs.tw, gs.th): their number, the first `max` in out */
+static uint32_t up_rect_blocks(uint32_t dbp, uint32_t dbw, uint32_t dpsm, uint16_t *out, uint32_t max) {
+    uint32_t gw, gh, x, y, nb = 0;
+    psm_block(dpsm, &gw, &gh);
+    for (y = gs.ty & ~(gh - 1); y < gs.ty + gs.th; y += gh) {
+        for (x = gs.tx & ~(gw - 1); x < gs.tx + gs.tw; x += gw) {
+            if (nb < max) {
+                out[nb] = (uint16_t)(vram_rw(dbp, dbw, dpsm, x, y, 2, 0) & 0x3FFF);
+            }
+            nb++;
+        }
+    }
+    return nb;
+}
+/* whether block b holds what block_write(b, bits, src, stride) would leave in it */
+static int block_same(uint32_t b, uint32_t bits, const uint8_t *src, uint32_t stride) {
+    const uint32_t *d = &sVram[(b & 0x3FFF) * 64];
+    const uint16_t *d16 = (const uint16_t *)d;
+    const uint8_t *d8 = (const uint8_t *)d;
+    uint32_t x, y, v;
+    switch (bits) {
+    case 32:
+        for (y = 0; y < 8; y++, src += stride) {
+            for (x = 0; x < 8; x++) {
+                memcpy(&v, src + x * 4, 4);
+                if (d[kCol32[y][x]] != v) { return 0; }
+            }
+        }
+        return 1;
+    case 16:
+        for (y = 0; y < 8; y++, src += stride) {
+            for (x = 0; x < 16; x++) {
+                if (d16[kCol16[y][x]] != (uint16_t)(src[x * 2] | src[x * 2 + 1] << 8)) { return 0; }
+            }
+        }
+        return 1;
+    case 8:
+        for (y = 0; y < 16; y++, src += stride) {
+            for (x = 0; x < 16; x++) {
+                if (d8[sCol8[y][x]] != src[x]) { return 0; }
+            }
+        }
+        return 1;
+    default:
+        for (y = 0; y < 16; y++, src += stride) {
+            for (x = 0; x < 32; x++) {
+                uint32_t idx = sCol4[y][x];
+                if (((d8[idx >> 1] >> ((idx & 1) * 4)) & 15u) != ((src[x >> 1] >> ((x & 1) * 4)) & 15u)) { return 0; }
+            }
+        }
+        return 1;
+    }
+}
+/* 1: the n pixels at p of the upload being made (gs.tpos 0; from gs.tx, gs.ty in rows gs.tw wide) are what GS memory
+   holds where it would write them, the format's own bits; 0 at the first that differs, or at a block taken note of.
+   By the block as up_piece writes a rectangle of whole blocks; else a run of a row inside a block at a time, the
+   same places and bits as up_pixels' (which writes what up_piece does, pixel by pixel). */
+static int up_same(uint32_t dbp, uint32_t dbw, uint32_t dpsm, uint32_t bits, const uint8_t *p, uint32_t n) {
+    uint32_t base = (dpsm & 0x30) == 0x30 ? dpsm & 0x0F : dpsm, gw, gh, px = 0, py = 0, i, k;
+    psm_block(dpsm, &gw, &gh);
+    if ((dpsm == 0x00 || dpsm == 0x02 || dpsm == 0x0A || dpsm == 0x13 || dpsm == 0x14) && !((gs.tx | gs.tw) & (gw - 1)) && !((gs.ty | gs.th) & (gh - 1)) &&
+        n == gs.tw * gs.th) {
+        uint32_t stride = gs.tw * bits / 8, bx, by;
+        for (by = 0; by < gs.th; by += gh) {
+            for (bx = 0; bx < gs.tw; bx += gw) {
+                uint32_t b = vram_rw(dbp, dbw, dpsm, gs.tx + bx, gs.ty + by, 2, 0) & 0x3FFF;
+                if (sBlk[b].up != 0) {
+                    gVitaUpSameN[2]++;
+                    return 0;
+                }
+                if (!block_same(b, bits, p + by * stride + bx * bits / 8, stride)) {
+                    return 0;
+                }
+            }
+        }
+        return 1;
+    }
+    for (i = 0; i < n;) {
+        uint32_t gx = gs.tx + px, gy = gs.ty + py, run = gw - (gx & (gw - 1)), yy = gy & (gh - 1), b;
+        const uint32_t *d;
+        if (run > gs.tw - px) {
+            run = gs.tw - px;
+        }
+        if (run > n - i) {
+            run = n - i;
+        }
+        b = vram_rw(dbp, dbw, dpsm, gx, gy, 2, 0) & 0x3FFF;
+        if (sBlk[b].up != 0) {
+            gVitaUpSameN[2]++;
+            return 0;
+        }
+        d = &sVram[b * 64];
+        switch (base) {
+        case 0x02: case 0x0A:
+            for (k = 0; k < run; k++) { if (((const uint16_t *)d)[kCol16[yy][(gx + k) & 15]] != (uint16_t)up_src(p, bits, i + k)) { return 0; } }
+            break;
+        case 0x13:
+            for (k = 0; k < run; k++) { if (((const uint8_t *)d)[sCol8[yy][(gx + k) & 15]] != (uint8_t)up_src(p, bits, i + k)) { return 0; } }
+            break;
+        case 0x14:
+            for (k = 0; k < run; k++) {
+                uint32_t m = sCol4[yy][(gx + k) & 31];
+                if (((((const uint8_t *)d)[m >> 1] >> ((m & 1) * 4)) & 15u) != (up_src(p, bits, i + k) & 15u)) { return 0; }
+            }
+            break;
+        case 0x01:
+            for (k = 0; k < run; k++) { if ((d[kCol32[yy][(gx + k) & 7]] & 0xFFFFFFu) != (up_src(p, bits, i + k) & 0xFFFFFFu)) { return 0; } }
+            break;
+        case 0x1B:
+            for (k = 0; k < run; k++) { if ((d[kCol32[yy][(gx + k) & 7]] >> 24) != (up_src(p, bits, i + k) & 0xFFu)) { return 0; } }
+            break;
+        case 0x24:
+            for (k = 0; k < run; k++) { if (((d[kCol32[yy][(gx + k) & 7]] >> 24) & 15u) != (up_src(p, bits, i + k) & 15u)) { return 0; } }
+            break;
+        case 0x2C:
+            for (k = 0; k < run; k++) { if ((d[kCol32[yy][(gx + k) & 7]] >> 28) != (up_src(p, bits, i + k) & 15u)) { return 0; } }
+            break;
+        default:
+            for (k = 0; k < run; k++) { if (d[kCol32[yy][(gx + k) & 7]] != up_src(p, bits, i + k)) { return 0; } }
+            break;
+        }
+        i += run;
+        px += run;
+        if (px == gs.tw) {
+            px = 0;
+            py++;
+        }
+    }
+    return 1;
+}
+
 extern volatile int gVitaZoneOn; /* (vita_vgl.c: the zones of a measured list) */
 extern void Vita_Z(int z);
 static void transfer_data_(const uint8_t *p, uint32_t bytes);
@@ -2354,6 +2511,8 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
     int smallUp = 0;  /* (the log's zones: a small upload) */
     int repSeen = 0, repOn = 0; /* (uprepeat: an upload seen lately; repOn: a small one, written; repRect: its destination's blocks' number before it) */
     uint32_t repRect = 0;
+    int sameSkip = 0, sameChk = 0; /* (upsame: the same bytes as GS memory holds there: not written; 3: written, and checked after) */
+    uint32_t sameN = 0;
 #endif
 
     if (!gs.transfer || gs.tw == 0) {
@@ -2505,6 +2664,40 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
                 memcpy(m->data, p, bytes);
                 sm = (void *)m;
             }
+            if (gVitaUpSame != 0 && upsame_mode() != 0) { /* (upsame, above: GS memory compared with the bytes) */
+                extern int Vita_PagesDrawnInto(uint32_t pg0, uint32_t n);
+                uint32_t rowbytes = (dbw ? dbw : 1) * 64 * bits / 8, first = dbp / 32 + (gs.ty * rowbytes) / 8192;
+                uint32_t last = dbp / 32 + ((gs.ty + gs.th) * rowbytes + 8191) / 8192, k;
+                if (Vita_PagesDrawnInto(first, last - first + 1)) {
+                    gVitaUpSameN[3]++;
+                } else if ((sameN = up_rect_blocks(dbp, dbw, dpsm, sSameBlk, UPSAME_BLK)) > UPSAME_BLK) {
+                    gVitaUpSameN[4]++;
+                } else {
+                    gVitaUpSameN[0]++;
+                    if (up_same(dbp, dbw, dpsm, bits, p, total)) {
+                        gVitaUpSameN[1]++;
+                        if (upsame_mode() == 3) {
+                            for (k = 0; k < sameN; k++) {
+                                memcpy(sSameSnap[k], &sVram[sSameBlk[k] * 64], 256);
+                            }
+                            sameChk = 1;
+                        } else {
+                            /* not written: what the write does besides the bytes, its destination's (below, as after it) */
+                            if (sDestPend != NULL) {
+                                for (k = 0; k < sameN; k++) {
+                                    bind_touch(sSameBlk[k]); /* (the one they were before unbound, as by the write) */
+                                    sBlk[sSameBlk[k]].dest = (uint16_t)(sDestPend - sDest + 1);
+                                }
+                            }
+                            gs.tpos = total;
+                            done = n; /* (nothing for up_pixels below) */
+                            gVitaUp[2] += total;
+                            sUpCat = 0;
+                            sameSkip = 1;
+                        }
+                    }
+                }
+            }
         }
         if (gVitaZoneOn) { Vita_Z(44); } /* (the small ones' memory looked at) */
         /* An upload that cannot go by the block (a format inside a 32-bit pixel, 24 bits, a place off the block
@@ -2615,7 +2808,7 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
         }
         /* the whole block rows in this piece of the data by the block; what is in front of them and behind them
            (data that arrives in pieces, a height that is not a multiple of a block's) pixel by pixel */
-        if ((dpsm == 0x00 || dpsm == 0x02 || dpsm == 0x0A || dpsm == 0x13 || dpsm == 0x14) && !((gs.tx | gs.tw) & (gw - 1)) &&
+        if (!sameSkip && (dpsm == 0x00 || dpsm == 0x02 || dpsm == 0x0A || dpsm == 0x13 || dpsm == 0x14) && !((gs.tx | gs.tw) & (gw - 1)) &&
             !(gs.ty & (gh - 1)) && n >= gs.tw * gh && UP_BY_BLOCK) {
             uint32_t rowpix = gs.tw * gh, head = gs.tpos % rowpix, row, rows;
 
@@ -2636,8 +2829,10 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
         }
         up_pixels(dbp, dbw, dpsm, bits, p, done, n);
         if (gVitaZoneOn && smallUp) { Vita_Z(40); } /* (a small upload's pixels written) */
-        gGsEpoch++;
-        { extern unsigned gT121Ep[8]; gT121Ep[bytes < 2048 ? 2 : 3]++; if (bytes < 2048 && sm == NULL) { gT121Ep[gs.tpos != 0 || n != total ? 4 : bytes < 16 ? 5 : 6]++; } }
+        if (!sameSkip) { /* (upsame: GS memory unchanged) */
+            gGsEpoch++;
+            { extern unsigned gT121Ep[8]; gT121Ep[bytes < 2048 ? 2 : 3]++; if (bytes < 2048 && sm == NULL) { gT121Ep[gs.tpos != 0 || n != total ? 4 : bytes < 16 ? 5 : 6]++; } }
+        }
         if (mm != NULL) {
             struct { uint64_t bb, hash; uint32_t x, y, w, h, rect; int valid; } *m = (void *)mm;
             if (sDestPend != NULL && sDestPend->rect == 0xFFFFFFFEu && done == n && sUpLazyAll) {
@@ -2673,7 +2868,11 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
         uint32_t last = dbp / 32 + ((gs.ty + gs.th) * rowbytes + 8191) / 8192;
         for (i = first; i <= last; i++) {
             gGsPageGen[i & 511]++;
+#ifdef PORT_VITA
+            gGsPageSig[i & 511] += (uint32_t)!sameSkip; /* (upsame: not written, nothing changed; gGsPageGen as for the uploads found unchanged) */
+#else
             gGsPageSig[i & 511]++;
+#endif
         }
     }
 #ifdef PORT_VITA
@@ -2720,6 +2919,15 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
     }
     if (repOn && gs.tpos >= total && Gs_RectId(dbp, dbw, dpsm, gs.tx, gs.ty, gs.tw, gs.th) == repRect) {
         gVitaUpRepN[2]++; /* (uprepeat: GS memory there held these bytes already) */
+    }
+    if (sameChk && gs.tpos >= total) { /* (upsame=3: found the same, written all the same: the write must have changed nothing) */
+        uint32_t k;
+        for (k = 0; k < sameN; k++) {
+            if (memcmp(sSameSnap[k], &sVram[sSameBlk[k] * 64], 256) != 0) {
+                gVitaUpSameN[5]++;
+                break;
+            }
+        }
     }
     if (gVitaZoneOn) { Vita_Z(smallUp ? 42 : 46); } /* (written; 216: a small one's rectangle's number, 42) */
 #endif
@@ -3223,7 +3431,7 @@ static void quad_run(const uint64_t *q, uint32_t n, int flat) {
    vertex() treats otherwise (a palette painted in GS memory: no texture, a 64-pixel-wide buffer), nor with a corner
    already in the queue. 0 off, 1 on, 2 the soak's B battles, 3 on and each state taken worked out all the same and
    compared (vita_vgl.c). ---- */
-int gVitaSprRun;
+int gVitaSprRun = 1;
 static int sprrun_on(void) {
     extern int gVitaAbSide;
     return gVitaSprRun == 2 ? gVitaAbSide == 1 : gVitaSprRun != 0;
