@@ -3012,3 +3012,11 @@ s32 McFlow_Update(void) {
     }
     return gMcFlow->state;
 }
+
+#ifdef PORT_VITA
+/* For the Vita port's Unlock All (port/vita/vita_main.c), which writes the save file itself: 1 while a card flow is
+   running (the save may be half read or half written), when it must not. */
+s32 McFlow_PortBusy(void) {
+    return gMcFlow != NULL && gMcFlow->state != 0;
+}
+#endif
