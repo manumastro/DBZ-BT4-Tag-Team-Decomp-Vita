@@ -1117,7 +1117,9 @@ void Vita_VBlank(unsigned vblanks) {
                     }
                     {
                         extern unsigned gVitaMemLow[3];
-                        logf_("vita:   memory free, the lowest since the last report: %u KB video, %u KB main (the longest reading %u us)\n", gVitaMemLow[0], gVitaMemLow[1], gVitaMemLow[2]);
+                        if (gVitaMemLow[0] != 0xFFFFFFFFu) { /* (read every 1024th picture in a fight: most stretches have none) */
+                            logf_("vita:   memory free, the lowest since the last report: %u KB video, %u KB main (the longest reading %u us)\n", gVitaMemLow[0], gVitaMemLow[1], gVitaMemLow[2]);
+                        }
                         gVitaMemLow[0] = gVitaMemLow[1] = 0xFFFFFFFFu;
                         gVitaMemLow[2] = 0;
                     }
