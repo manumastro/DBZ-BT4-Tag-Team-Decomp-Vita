@@ -66,6 +66,7 @@ int Port_TagMovePlayer(int from, int to) { return local_room && Tt_MovePlayer(&s
 int Port_TagDraftSeat(void) {
     int team, seat = Tt_Seat(&state, member);
     if (seat < 0) return -1;
+    if (state.phase != TT_SELECT) return -1; /* (as BT4decomp 0.1.39.6's) */
     if (Tt_Turn(&state, state.players[seat].team) == seat) return seat;
     if (member == state.host)
         for (team = 0; team < 2; ++team) {
