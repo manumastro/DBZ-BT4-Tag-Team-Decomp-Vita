@@ -302,6 +302,10 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   `dppf`. What is left in the beam (~45 ms a drawn list on the drawing thread): the effects' image uploads (~9 ms),
   the kept parts (~15 ms), the GS primitives' states and the sprites of the post passes (glow, outline, pan blur),
   which the Vita draws natively but are still read.
+- 2026-11-16, the 25-stage soak in 1 vs 1 (`runs/soak1v1`: stages 0-22 reached in 45 minutes, 46 duels, side A with
+  the day's switches off, side B on; dpslots 4096 on both): pictures a second 29.6 / 29.7 (at the cap), every stage
+  within -0.1..+0.6; the lowest 2 s stretch better on 18 of 23 stages; the drawing thread 2-26% less on every stage;
+  no crash, no watchdog stop; the heap at most 56.7 MB of the 80 MB the C library has.
 - The log's "memory free, the lowest since the last report" line: video and main memory sampled every 8 pictures
   (the lowest kept), not only every 60.
 - `vita_agent_run.py` after the console switched itself off in a run: every vita-agent call now has a time limit (3
