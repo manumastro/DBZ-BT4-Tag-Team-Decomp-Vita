@@ -1494,6 +1494,26 @@ static uint32_t wt_sig_(const WorkTarget *t) { /* (the pages' memory as the uplo
     }
     return h;
 }
+/* (gs_core.c, bt3.txt upsame) whether one of the pages pg0 .. pg0 + n - 1 may hold a picture drawn there: a work
+   target's (wt_sig_), the work page's (wp_sig), a buffer the game drew into (sWork). GS memory does not hold what was
+   drawn, so an upload there is written even with the bytes GS memory holds already: the change of the pages'
+   signatures and of the epoch is what tells the renderer, and the states it remembered by them, that the drawn
+   picture is gone. */
+int Vita_PagesDrawnInto(uint32_t pg0, uint32_t n) {
+    int i;
+    for (i = 0; i < sWtN; i++) {
+        uint32_t f = sWt[i].fbp, m = (uint32_t)(sWt[i].w * sWt[i].h * 4 + 8191) / 8192;
+        if (pg0 < f + m && f < pg0 + n) {
+            return 1;
+        }
+    }
+    for (i = 0; i < sWorkCount; i++) {
+        if (pg0 <= sWork[i].fbp && sWork[i].fbp < pg0 + n) {
+            return 1;
+        }
+    }
+    return pg0 < WP_FBP + 32 && WP_FBP < pg0 + n;
+}
 /* bt3.txt wtsig: a target's signature (up to 112 pages hashed) worked out again only when GS memory changed: every
    change of gGsPageSig (gs_core.c: the uploads, the palette paints) bumps gGsEpoch too. It was worked out for every
    primitive drawn into a target and every read of one (~2,500 and ~1,200 every 2 s in a 2 vs 2 special move).
