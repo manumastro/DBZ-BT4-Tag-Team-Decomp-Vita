@@ -2095,22 +2095,29 @@ static void read_settings(void) {
    Where it is done and how it is kept. v1.3 lost it two ways: from the start it was done as the boot's card flow ended
    (BootCard_OnFlowDone), and with no save on the card the title's New Game then wrote the defaults over it
    (McFlow_UpdateNewSave, Save_SetDefaults); from the menus it stayed in memory until the player saved. Now:
-   - from the start it is done as the title screen is left (src/menu/menu_a_c.c Title_Run), to the save the menus use;
+   - from the start, and from SELECT held before the title screen was first left (the logos, the title: no save in use
+     yet), it is done as the title screen is left (src/menu/menu_a_c.c Title_Run), to the save the menus use;
    - from the menus and from Vita Settings, at once;
    - then the save file is written again with it: saves/card1/BASLUS-21678DBZT3/BASLUS-21678DBZT3, the save's 0x4000
-     bytes with their checksum, as McFlow_UpdateSave writes them. The file as it was is copied first to the same name
-     with ".bak", and that copy is read back before the save file is touched. The file is not written when there is
-     none yet (a game never saved: the game's next save keeps the unlock; from Vita Settings, leaving Options saves),
-     when what is there is not a whole save with a right checksum (a damaged save the game did not load: left alone),
-     or while a card flow runs.
+     bytes with their checksum, as McFlow_UpdateSave writes them. Before that the file is copied beside it, read back:
+     to ".bak" the first time (never written over: the file from before Unlock All first wrote it), to ".last.bak"
+     each time after (the file just before this change). The file is not written when the save in use is not the
+     file's (src/sys/mcflow_a.c McFlow_PortSaveIsFile: a new game the player chose not to save, which would go over
+     the card's save), when there is no file yet (the game's next save keeps the unlock; from Vita Settings, leaving
+     Options saves), when what is there is not a whole save with a right checksum (a damaged save: left alone), or
+     while a card flow runs.
    The save as it was before the first unlock is also copied to UNLOCK_BACKUP (the first copy only), and Undo puts that
-   copy back, written to the save file the same way; the copy is removed only once the save file has it. Every step,
-   with what the save held before and after, goes to the log. */
-#define UNLOCK_BACKUP HOME "/saves/unlock_backup.bin"
+   copy back, written to the save file the same way; the copy is removed only once the save file has it. v1.2 to v1.3
+   kept theirs in unlock_backup.bin, which v1.3 could fill with a new game's defaults (an unlock at the start with no
+   save): that file is left as it is and Undo does not use it. Every step, with what the save held before and after,
+   goes to the log. */
+#define UNLOCK_BACKUP HOME "/saves/unlock_undo.bin"
+#define UNLOCK_BACKUP_OLD HOME "/saves/unlock_backup.bin" /* (v1.2 to v1.3's: not used, not touched) */
 #define UNLOCK_SAVE_SIZE 0x4000 /* SAVE_SIZE, include/sys/save.h */
 #define UNLOCK_SAVE_FILE "/card1/BASLUS-21678DBZT3/BASLUS-21678DBZT3" /* port/src/plat_mc.c, src/battle/stgm_a_b.c McCardFile_SetNames */
 #define UNLOCK_COUNTS 7 /* SAVE_PORT_COUNTS, include/sys/save.h */
 static int sUnlock; /* chosen at the start: 1 unlock, 2 undo; done as the title screen is left */
+static int sTitleLeft; /* the title screen was left once (Vita_UnlockAtTitle): there is a save in use */
 static int sSelectSeen; /* SELECT down at one of the start's steps (start_step): it need not be held to the screen */
 static volatile int sTextPause; /* the menus' unlock screen is up: the game waits (the watchdog leaves it alone) */
 static volatile int sUnlockChanged; /* the screen asked from Vita Settings changed the save: leaving Options saves */
@@ -2169,16 +2176,24 @@ static int unlock_write_file(const char *path, const void *buf, int size) {
 /* The save in memory written to the save file (above). 1 written; 0 not written (the reason in the log); -1 the write
    failed (the file as it was put back, or in the .bak). */
 static int unlock_save_file(void *save) {
-    extern int McFlow_PortBusy(void);                       /* src/sys/mcflow_a.c */
-    extern int Port_McOpenFiles(void);                      /* port/src/plat_mc.c */
-    extern int McCard_Checksum(void *buf, int size, int write); /* src/battle/stgm_a_b.c */
+    extern int McFlow_PortBusy(void), McFlow_PortSaveIsFile(void); /* src/sys/mcflow_a.c */
+    extern int Port_McOpenFiles(void);                             /* port/src/plat_mc.c */
+    extern int McCard_Checksum(void *buf, int size, int write);    /* src/battle/stgm_a_b.c */
     const char *root = getenv("BT3_SAVES");
-    char path[300], bak[310];
+    char path[300], bak[320];
     void *old;
     int n;
 
     snprintf(path, sizeof(path), "%s" UNLOCK_SAVE_FILE, root != NULL ? root : HOME "/saves");
     snprintf(bak, sizeof(bak), "%s.bak", path);
+    if (file_there(bak)) {
+        snprintf(bak, sizeof(bak), "%s.last.bak", path); /* (the first copy is kept) */
+    }
+    if (!McFlow_PortSaveIsFile()) {
+        logf_("vita: unlock all: the save in use is not the save file's (a new game not saved, or none loaded): the file left"
+              " alone; the game's next save keeps the unlock\n");
+        return 0;
+    }
     if (McFlow_PortBusy() || Port_McOpenFiles() != 0) {
         logf_("vita: unlock all: the save file not written now (a card flow is running): the game's next save keeps it\n");
         return 0;
@@ -2228,6 +2243,9 @@ static int unlock_apply(int what, void *save) {
     extern void Save_PortUnlockAll(void *opt);
     int before[UNLOCK_COUNTS], after[UNLOCK_COUNTS], w;
 
+    if (file_there(UNLOCK_BACKUP_OLD)) {
+        logf_("vita: unlock all: %s (v1.2 to v1.3's copy) is left as it is, not used\n", UNLOCK_BACKUP_OLD);
+    }
     if (what == 1) {
         if (file_there(UNLOCK_BACKUP)) {
             logf_("vita: unlock all: the copy from before the first unlock stays in %s\n", UNLOCK_BACKUP);
@@ -2338,6 +2356,7 @@ void Vita_UnlockAtTitle(void) {
     extern void *gSaveData;
     int what = sUnlock, r;
 
+    sTitleLeft = 1;
     if (what == 0 || gSaveData == NULL) {
         return;
     }
@@ -2359,6 +2378,26 @@ static void unlock_in_menus(int options) {
     sTextPause = 1;
     logf_("vita: menus: the unlock screen (%s)\n", options ? "Vita Settings" : "SELECT held");
     Vita_TextScreen();
+    if (!sTitleLeft) {
+        /* (the logos or the title: the save in use is not settled yet, New Game would write the defaults over it) the
+           choice is kept, and done as the title screen is left, as the start's is */
+        what = unlock_ask(0);
+        if (what != 0) {
+            sUnlock = what;
+        }
+        logf_("vita: menus: unlock screen before the title was left: %s\n", what == 1 ? "unlock (done as the title screen is left)"
+                                                                         : what == 2 ? "undo (done as the title screen is left)" : "nothing");
+        if (what != 0) {
+            psvDebugScreenPrintf("\n\e[32m%s\e[39m\n", es ? "Se hara al dejar la pantalla de titulo." : "It is done as the title screen is left.");
+            sceKernelDelayThread(2000000);
+        }
+        while (buttons() & (SCE_CTRL_CROSS | SCE_CTRL_CIRCLE | SCE_CTRL_TRIANGLE | SCE_CTRL_SQUARE | SCE_CTRL_SELECT | SCE_CTRL_START)) {
+            sceKernelDelayThread(20000);
+        }
+        psvDebugScreenPrintf("\e[H\e[2J");
+        sTextPause = 0;
+        return;
+    }
     what = unlock_ask(1);
     if (what != 0) {
         r = unlock_apply(what, gSaveData);

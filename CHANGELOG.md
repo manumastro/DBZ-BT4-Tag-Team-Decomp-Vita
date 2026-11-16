@@ -6,9 +6,11 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 - **Unlock All is kept**. v1.3 could lose it two ways: chosen at the start with no save on the memory card yet, it was
   given to the save before the title screen, whose New Game then wrote a new save over it; chosen in the menus, it
-  stayed in memory until the player saved, and was gone after quitting. Now the start's choice is done as the title
-  screen is left (to the save just loaded or just made), and every way writes the save file at once
-  (`ux0:data/bt4/saves/card1/BASLUS-21678DBZT3/BASLUS-21678DBZT3`), after copying it to the same name with `.bak`.
+  stayed in memory until the player saved, and was gone after quitting. Now a choice made at the start, or before the
+  title screen is left, is done as the title screen is left (to the save just loaded or just made), and every way
+  writes the save file at once (`ux0:data/bt4/saves/card1/BASLUS-21678DBZT3/BASLUS-21678DBZT3`), after copying it
+  beside it (`.bak` the first time, never written over; `.last.bak` after). The file is not written when the save in
+  use is not the file's (a new game not saved), nor when it is not a whole save.
 - Unlock All no longer erases the saved characters of the Data Center (passwords) and no longer lowers the money of
   a save that had more than 4,850,000 Zenni (the game's routine does both); only items not owned before are marked
   new.
@@ -18,7 +20,8 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 - The screen says whether the save file was written, and the log says what was done: the characters, stages,
   songs, items, Dragon History slots and money before and after, the copies made, and the file written. Each
   character select screen also logs the characters it shows locked, with the save's character bits.
-- Undo removes `unlock_backup.bin` only once the save file has the save as it was.
+- Undo's copy is now `unlock_undo.bin`, removed only once the save file has the save as it was. v1.2 to v1.3's
+  `unlock_backup.bin` is left as it is and not used (v1.3 could fill it with a new game's defaults).
 
 ## v1.3 (2026-11-14)
 

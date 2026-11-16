@@ -245,6 +245,11 @@ extern s32 gMcCardCmd, gMcCardStep;                 /* src/battle/stgm_a_b.c: th
 #define MCCARD_CMD_INFO 10                          /* (include/battle/stgm_a_b.h) */
 extern void Port_UiSaving(int state);               /* gs/ui.cpp: the save icon (1 saving, 0 saved, -1 the window took over) */
 static s32 sMcQuick;
+#ifdef PORT_VITA
+/* 1 when the save in use (gSaveData) is the one on the card: loaded from it, or written to it by the last save; 0
+   from the defaults on (a new game, kept on the card only once it is written). McFlow_PortSaveIsFile, below. */
+static s32 sMcPortSaveIsFile;
+#endif
 static s32 sMcQuickState, sMcQuickPolled; /* the state of the frame before; its card check has answered */
 
 /* The step's minimum time: a step that asks the card for its state first (MCF_POLL) is over once the card has
@@ -660,6 +665,9 @@ void McFlow_UpdateSave(void) {
                 MCF_GO(0x11);
             }
         } else {
+#ifdef PORT_VITA
+            sMcPortSaveIsFile = 1; /* (the save in use is the file now: Vita Unlock All may write it) */
+#endif
             MCF_GO(0x10);
         }
         break;
@@ -975,6 +983,9 @@ void McFlow_UpdateLoad(void) {
                 break;
             }
             *gSaveData = gMcFlow->saveBuf;
+#ifdef PORT_VITA
+            sMcPortSaveIsFile = 1; /* (the save in use is the file now: Vita Unlock All may write it) */
+#endif
             SndOpt_Apply();
             Progress_ClearSession();
             MCF_GO(0x14);
@@ -1286,6 +1297,9 @@ void McFlow_UpdateBootLoad(void) {
                 break;
             }
             *gSaveData = gMcFlow->saveBuf;
+#ifdef PORT_VITA
+            sMcPortSaveIsFile = 1; /* (the save in use is the file now: Vita Unlock All may write it) */
+#endif
             SndOpt_Apply();
             MCF_GO(0x14);
         }
@@ -1410,6 +1424,9 @@ void McFlow_UpdateNewSave(void) {
             gMcFlow->choice = 0;
             gMcFlow->flags |= 8;
             Save_SetDefaults(gSaveData);
+#ifdef PORT_VITA
+            sMcPortSaveIsFile = 0; /* (a new game not on the card yet, or not to be) */
+#endif
             McCard_Checksum(gSaveData, 0x4000, 1);
             SndOpt_Apply();
             Progress_ClearSession();
@@ -1570,6 +1587,9 @@ void McFlow_UpdateNewSave(void) {
             gMcFlow->timer = 0x78;
             gMcFlow->choice = 0;
             Save_SetDefaults(gSaveData);
+#ifdef PORT_VITA
+            sMcPortSaveIsFile = 0; /* (a new game not on the card yet, or not to be) */
+#endif
             McCard_Checksum(gSaveData, 0x4000, 1);
             SndOpt_Apply();
             Progress_ClearSession();
@@ -1597,6 +1617,9 @@ void McFlow_UpdateNewSave(void) {
             }
         } else {
             Save_SetDefaults(gSaveData);
+#ifdef PORT_VITA
+            sMcPortSaveIsFile = 0; /* (a new game not on the card yet, or not to be) */
+#endif
             McCard_Checksum(gSaveData, 0x4000, 1);
             SndOpt_Apply();
             Progress_ClearSession();
@@ -1618,6 +1641,9 @@ void McFlow_UpdateNewSave(void) {
                 MCF_GO(0x11);
             }
         } else {
+#ifdef PORT_VITA
+            sMcPortSaveIsFile = 1; /* (the save in use is the file now: Vita Unlock All may write it) */
+#endif
             MCF_GO(0x10);
         }
         break;
@@ -1758,6 +1784,9 @@ void McFlow_UpdateNewSave(void) {
             }
         } else {
             Save_SetDefaults(gSaveData);
+#ifdef PORT_VITA
+            sMcPortSaveIsFile = 0; /* (a new game not on the card yet, or not to be) */
+#endif
             McCard_Checksum(gSaveData, 0x4000, 1);
             SndOpt_Apply();
             Progress_ClearSession();
@@ -3018,5 +3047,11 @@ s32 McFlow_Update(void) {
    running (the save may be half read or half written), when it must not. */
 s32 McFlow_PortBusy(void) {
     return gMcFlow != NULL && gMcFlow->state != 0;
+}
+
+/* 1 when the save file on the card holds the save in use, as it was when loaded or last written (not after the defaults
+   of a new game the player chose not to save, which would otherwise be written over the card's save) */
+s32 McFlow_PortSaveIsFile(void) {
+    return sMcPortSaveIsFile;
 }
 #endif
