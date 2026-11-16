@@ -36,10 +36,100 @@ u32 Ps_Rgba(s32 r, s32 g, s32 b, s32 a) {
     return (u32)r | ((u32)g << 8) | ((u32)b << 16) | ((u32)a << 24);
 }
 
+#ifdef PORT_VITA
+/* bt3.txt hudbatch: the plain shapes drawn together (the radar's face, each disc) as one GS packet of triangles
+   instead of a packet each (a DMA tag, four registers, a strip of four corners): the Tag Team radar was ~300 packets
+   a picture, read register by register by the Vita's drawing thread (~7 ms a list in a 2 vs 2 fight). The same
+   corners, colours, blending and order; a triangle with two corners at one place (half of each disc's quads) draws
+   nothing on the GS and is left out. 0 off, 1 on, 2 the soak's B battles. */
+int gVitaHudBatch = 1;
+unsigned gVitaHudBatchN[2]; /* (the log) packets of triangles sent, triangles in them */
+static u64 sPsTri[512 * 3 * 2]; /* the batch's corners: RGBAQ, XYZ2 */
+static s32 sPsTriN, sPsBatch;
+static s32 Ps_HudBatchOn(void) {
+    extern int gVitaAbSide;
+    return gVitaHudBatch == 2 ? gVitaAbSide == 1 : gVitaHudBatch != 0;
+}
+static void Ps_TriFlush(void) {
+    u64 *p;
+    s32 i;
+
+    if (sPsTriN == 0) {
+        return;
+    }
+    p = Dma_BeginDirect();
+    p[0] = 4 | (1ULL << 15) | (1ULL << 60); /* (as Ps_ScreenQuad's, the PRIM a list of triangles) */
+    p[1] = 0xE;
+    p += 2;
+    p[0] = 0x01BF000001FF0000ULL;
+    p[1] = 0x40;
+    p += 2;
+    p[0] = 0x44;
+    p[1] = 0x42;
+    p += 2;
+    p[0] = 0x30000;
+    p[1] = 0x47;
+    p += 2;
+    p[0] = 0x4B;
+    p[1] = 0x00;
+    p += 2;
+    p[0] = (u64)(sPsTriN * 3) | (1ULL << 15) | (1ULL << 58) | (2ULL << 60);
+    p[1] = 0x51;
+    p += 2;
+    for (i = 0; i < sPsTriN * 6; i++) {
+        p[i] = sPsTri[i];
+    }
+    p += sPsTriN * 6;
+    Dma_EndDirect(p);
+    gVitaHudBatchN[0]++;
+    gVitaHudBatchN[1] += (unsigned)sPsTriN;
+    sPsTriN = 0;
+}
+static void Ps_TriAdd(f32 x0, f32 y0, u32 c0, f32 x1, f32 y1, u32 c1, f32 x2, f32 y2, u32 c2) {
+    s32 X0 = (s32)(x0 * 16.0f), Y0 = (s32)(y0 * 16.0f), X1 = (s32)(x1 * 16.0f), Y1 = (s32)(y1 * 16.0f);
+    s32 X2 = (s32)(x2 * 16.0f), Y2 = (s32)(y2 * 16.0f);
+    u64 *v;
+
+    if ((X0 == X1 && Y0 == Y1) || (X1 == X2 && Y1 == Y2) || (X0 == X2 && Y0 == Y2)) {
+        return; /* (no area: nothing drawn) */
+    }
+    if (sPsTriN == 512) {
+        Ps_TriFlush();
+    }
+    v = &sPsTri[sPsTriN++ * 6];
+    v[0] = (u64)c0 | (0x3F800000ULL << 32);
+    v[1] = (u64)(X0 + 0x7000) | ((u64)(Y0 + 0x7200) << 16);
+    v[2] = (u64)c1 | (0x3F800000ULL << 32);
+    v[3] = (u64)(X1 + 0x7000) | ((u64)(Y1 + 0x7200) << 16);
+    v[4] = (u64)c2 | (0x3F800000ULL << 32);
+    v[5] = (u64)(X2 + 0x7000) | ((u64)(Y2 + 0x7200) << 16);
+}
+/* (Ps_ScreenQuad's shapes from here to Ps_BatchEnd go in one packet; nothing else may be drawn in between) */
+void Ps_BatchBegin(void) {
+    if (sPsBatch > 0 || Ps_HudBatchOn()) {
+        sPsBatch++;
+    }
+}
+void Ps_BatchEnd(void) {
+    if (sPsBatch > 0 && --sPsBatch == 0) {
+        Ps_TriFlush();
+    }
+}
+#endif
+
 /* Any four-cornered plain shape, in the screen's 512 x 448 (corners in the order of a strip: top left, top right,
    bottom left, bottom right); the radar is drawn of these. */
 void Ps_ScreenQuad(f32 x0, f32 y0, f32 x1, f32 y1, f32 x2, f32 y2, f32 x3, f32 y3, u32 c0, u32 c1, u32 c2, u32 c3) {
-    u64 *p = Dma_BeginDirect();
+    u64 *p;
+
+#ifdef PORT_VITA
+    if (sPsBatch > 0) { /* (hudbatch: the strip's two triangles) */
+        Ps_TriAdd(x0, y0, c0, x1, y1, c1, x2, y2, c2);
+        Ps_TriAdd(x1, y1, c1, x3, y3, c3, x2, y2, c2);
+        return;
+    }
+#endif
+    p = Dma_BeginDirect();
 
     p[0] = 4 | (1ULL << 15) | (1ULL << 60);
     p[1] = 0xE;
@@ -642,12 +732,18 @@ void Ps_Disc(f32 cx, f32 cy, f32 r, u32 mid, u32 edge) {
     s32 k;
     f32 rx = r * 0.857f; /* (a round thing is this much narrower in the screen's pixels) */
 
+#ifdef PORT_VITA
+    Ps_BatchBegin(); /* (hudbatch: the disc's 32 pieces one packet) */
+#endif
     for (k = 0; k < 32; k++) {
         f32 a0 = (f32)k * 6.2831853f / 32.0f;
         f32 a1 = (f32)(k + 1) * 6.2831853f / 32.0f;
 
         Ps_Quad(cx, cy, cx, cy, cx + cosf(a0) * rx, cy + sinf(a0) * r, cx + cosf(a1) * rx, cy + sinf(a1) * r, mid, mid, edge, edge);
     }
+#ifdef PORT_VITA
+    Ps_BatchEnd();
+#endif
 }
 
 

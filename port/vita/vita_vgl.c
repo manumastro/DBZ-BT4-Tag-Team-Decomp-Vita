@@ -1498,7 +1498,7 @@ static uint32_t wt_sig_(const WorkTarget *t) { /* (the pages' memory as the uplo
    change of gGsPageSig (gs_core.c: the uploads, the palette paints) bumps gGsEpoch too. It was worked out for every
    primitive drawn into a target and every read of one (~2,500 and ~1,200 every 2 s in a 2 vs 2 special move).
    0 off, 1 on, 2 the soak's B battles */
-int gVitaWtSig;
+int gVitaWtSig = 1;
 unsigned gVitaWtSigN[2]; /* (the log) signatures taken as they were, worked out */
 static uint32_t wt_sig(WorkTarget *t) {
     extern unsigned gGsEpoch;
@@ -1980,7 +1980,7 @@ unsigned gVitaPaints; /* for the log (gs_core.c): sprites the game drew into its
    the indices' memory (4-256 KB) are taken at a picture's end, while the render thread waits anyway, and kept in
    pools (each piece taken once, given back as before, vglLazyFree); the texture is set up by the render thread, in
    order, before any draw that reads it (RT_TEX). A pool empty: the old way. 0 off, 1 on, 2 the soak's B battles */
-int gVitaTexRt;
+int gVitaTexRt = 1;
 unsigned gVitaTexRtN[3]; /* (the log) pieces taken from the pools, made the old way, textures set up by the render thread */
 #define IDXC 7 /* the indices' sizes: 4 KB .. 256 KB */
 static const uint8_t sIdxPoolWant[IDXC] = {8, 4, 8, 4, 4, 2, 1};
@@ -10487,7 +10487,7 @@ static int rt_put_dp(void) {
     }
     return 1;
 }
-int gVitaRtKick;
+int gVitaRtKick = 1;
 unsigned gVitaRtKickN[1]; /* (the log) kept parts handed over without waking the render thread (rtkick) */
 static void rt_exec_dp(uint8_t *p) {
     const RtDp *d = (const RtDp *)(const void *)p;

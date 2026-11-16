@@ -117,6 +117,9 @@ static void TagHud_RadarPoint(f32 cx,f32 cy,s32 actor,s32 target,f32 *own) {
 static void TagHud_Radar(f32 cx,f32 cy,s32 target) {
     f32 *own=sTagHudPositions[TagBattle_ViewActor()],yaw,dx,dy;s32 i;
     if(!sTagHudGeometryValid)return;
+#ifdef PORT_VITA
+    Ps_BatchBegin(); /* (hudbatch: the face, the contacts and the arrows, plain shapes only, one packet) */
+#endif
     TrRadarFace(cx,cy);
     for(i=0;i<TagBattle_Count();++i)if(i!=target && i!=TagBattle_ViewActor() && BtlCharApi_GetHp(i)>0)TagHud_RadarPoint(cx,cy,i,target,own);
     if(target>=0 && target<TagBattle_Count() && BtlCharApi_GetHp(target)>0)TagHud_RadarPoint(cx,cy,target,target,own);
@@ -125,6 +128,9 @@ static void TagHud_Radar(f32 cx,f32 cy,s32 target) {
     dy=-(sinf(yaw)*sTagHudBasis[2]+cosf(yaw)*sTagHudBasis[3]);
     TrRadarArrow(cx,cy,dx,dy,4.4f,TagHud_Color(21,39,19));
     TrRadarArrow(cx,cy,dx,dy,3.4f,TagHud_Color(239,43,29));
+#ifdef PORT_VITA
+    Ps_BatchEnd();
+#endif
     Ps_Align(1);TagHud_Label(cx,cy+48,"L3 CHANGE TARGET",0.39f,116,TagHud_Color(225,242,245));Ps_Align(0);
 }
 static s32 TagHud_Blocked(f32 x,f32 y) {

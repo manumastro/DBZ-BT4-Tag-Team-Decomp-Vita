@@ -11,6 +11,9 @@ static void TrRadarArrow(f32 x,f32 y,f32 dx,f32 dy,f32 size,u32 color){
 static void TrRadarFace(f32 cx,f32 cy){
     s32 k;u32 silver=Ps_Rgba(224,230,226,0x80),red=Ps_Rgba(211,31,24,0x80);
     /* An opaque face is repainted before the contacts on every rendered frame. */
+#ifdef PORT_VITA
+    Ps_BatchBegin(); /* (hudbatch: the face's shapes, nothing else in between, one packet) */
+#endif
     Ps_Rect(cx-5*PS_UNIT_X,cy-47,cx+5*PS_UNIT_X,cy-36,Ps_Rgba(236,239,234,0x80),Ps_Rgba(105,118,116,0x80));
     Ps_Disc(cx,cy-47,6.5f,Ps_Rgba(255,255,249,0x80),Ps_Rgba(144,158,153,0x80));
     Ps_Disc(cx+.8f,cy+1.5f,41,Ps_Rgba(31,42,37,0x80),Ps_Rgba(31,42,37,0x80));
@@ -26,5 +29,8 @@ static void TrRadarFace(f32 cx,f32 cy){
     }
     TrRadarArrow(cx,cy-32.5f,0,1,2.2f,red);TrRadarArrow(cx,cy+32.5f,0,-1,2.2f,red);
     TrRadarArrow(cx-32.5f*PS_UNIT_X,cy,1,0,2.2f,red);TrRadarArrow(cx+32.5f*PS_UNIT_X,cy,-1,0,2.2f,red);
+#ifdef PORT_VITA
+    Ps_BatchEnd();
+#endif
 }
 #endif

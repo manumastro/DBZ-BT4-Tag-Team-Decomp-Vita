@@ -2794,7 +2794,7 @@ static void tri_run(const uint64_t *q, uint32_t n) {
    quad_run knew the shape, so each triangle went register by register and the full way (its CLAMP writes changing
    the state's generation twice a triangle). Each triangle is drawn with the first CLAMP, as on the GS; after the run
    the registers are as the last packet leaves them. 0 off, 1 on, 2 the soak's B battles. ---- */
-int gVitaFxClamp;
+int gVitaFxClamp = 1;
 unsigned gVitaFxClampN[2]; /* (the log) runs, triangles in them */
 static int fxclamp_on(void) {
     extern int gVitaAbSide;
@@ -2865,14 +2865,77 @@ static void clamp_tri_run(const uint64_t *q, uint32_t n) {
     gs.vcount = 0;
     gs.strip = 3;
 }
+/* bt3.txt hudrun: the HUD's plain triangles as a run (src/menu/port_screen.c, hudbatch: one GIF tag "REGLIST, 2
+   registers, RGBAQ and XYZ2", NLOOP three corners a triangle, PRIM a triangle without a texture set before it): each
+   triangle drawn the triangle runs' way instead of two register writes a corner and the full way a triangle (the Tag
+   Team radar: ~290 triangles a picture). 0 off, 1 on, 2 the soak's B battles. */
+int gVitaHudRun = 1;
+unsigned gVitaHudRunN[2]; /* (the log) runs, triangles in them */
+static int hudrun_on(void) {
+    extern int gVitaAbSide;
+    return gVitaHudRun == 2 ? gVitaAbSide == 1 : gVitaHudRun != 0;
+}
+static void flat_tri_run(const uint64_t *d, uint32_t ntri) {
+    extern int gVitaGsSkip;
+    extern void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri);
+    static GsVertex vb[3 * 64];
+    uint32_t i, j, k;
+    const int ctx = (int)((gs.prim >> 9) & 1);
+    const float ox = (float)(gs.xyoffset[ctx] & 0xFFFF), oy = (float)((gs.xyoffset[ctx] >> 32) & 0xFFFF);
+    const uint64_t *last = d + 6 * (ntri - 1);
+    gVitaHudRunN[0]++;
+    gVitaHudRunN[1] += ntri;
+    for (i = 0; i < ntri; i += 64) {
+        uint32_t m = ntri - i < 64 ? ntri - i : 64;
+        for (j = 0; j < m; j++) {
+            const uint64_t *pk = d + 6 * (i + j);
+            GsVertex *v = &vb[3 * j];
+            sStat[4] += 6;
+            sStat[5] += 3;
+            for (k = 0; k < 3; k++) {
+                uint64_t c = pk[2 * k], xyz = pk[2 * k + 1];
+                uint32_t qq = (uint32_t)(c >> 32);
+                v[k].x = ((float)(int)(uint32_t)(xyz & 0xFFFF) - ox) / 16.0f;
+                v[k].y = ((float)(int)(uint32_t)((xyz >> 16) & 0xFFFF) - oy) / 16.0f;
+                v[k].z = (uint32_t)(xyz >> 32);
+                v[k].r = (uint8_t)c; v[k].g = (uint8_t)(c >> 8); v[k].b = (uint8_t)(c >> 16); v[k].a = (uint8_t)(c >> 24);
+                memcpy(&v[k].q, &qq, 4);
+                memcpy(&v[k].s, &gs.st, 4);
+                { uint32_t tt = (uint32_t)(gs.st >> 32); memcpy(&v[k].t, &tt, 4); }
+                v[k].u = (int)(gs.uv & 0x3FFF);
+                v[k].v = (int)((gs.uv >> 16) & 0x3FFF);
+            }
+        }
+        if (!gVitaGsSkip) {
+            GsGpu_DrawTriRun(ctx, vb, m);
+        }
+    }
+    gs.rgbaq = last[4]; /* (the registers as the last corner leaves them) */
+    { uint32_t qq = (uint32_t)(last[4] >> 32); memcpy(&gs.q, &qq, 4); }
+    gs.vtx[0] = vb[3 * ((ntri - 1) % 64)];
+    gs.vtx[1] = vb[3 * ((ntri - 1) % 64) + 1];
+    gs.vtx[2] = vb[3 * ((ntri - 1) % 64) + 2];
+    gs.vcount = 0;
+    gs.strip = 3;
+}
+/* bt3.txt adfast: a GIF tag "PACKED, one register, A+D" (the registers the game sets between its primitives: the ordering
+   table's heads, the effects' CLAMP pairs, the HUD's set-ups; ~2,700 tags and ~6,300 writes a drawn list in a 2 vs 2
+   fight) written in one loop, the same reg_write calls in the same order, instead of the register-by-register walk
+   (~160 cycles a register around a ~90-cycle write). 0 off, 1 on, 2 the soak's B battles. */
+int gVitaAdFast = 1;
+static int adfast_on(void) {
+    extern int gVitaAbSide;
+    return gVitaAdFast == 2 ? gVitaAbSide == 1 : gVitaAdFast != 0;
+}
 /* bt3.txt gifshapes=1 (a measure only): the GIF tags read outside the runs, by their shape (the tag without NLOOP and
    EOP, the register list), in drawn lists; the most frequent printed in each report */
 int gVitaGifShapes;
 static struct { uint64_t lo, hi; unsigned n, regs; } sGifShape[128];
+static volatile int sGrCurType; /* (declared again below: the record being done) */
 static void gif_shape(uint64_t lo, uint64_t hi) {
-    uint64_t klo = lo & ~0xFFFFull;
+    uint64_t klo = (lo & ~0xFFFFull) | (gs.prim & 0x7FF) | (uint64_t)(sGrCurType & 15) << 11; /* (and the PRIM it draws with, the record's kind) */
     uint32_t h = (uint32_t)(((klo ^ hi) * 0x9E3779B97F4A7C15ull) >> 57), k;
-    unsigned regs = (unsigned)(lo & 0x7FFF) * (unsigned)(((lo >> 60) & 0xF) ? ((lo >> 60) & 0xF) : 16);
+    unsigned regs = ((lo >> 58) & 2) ? 0u : (unsigned)(lo & 0x7FFF) * (unsigned)(((lo >> 60) & 0xF) ? ((lo >> 60) & 0xF) : 16); /* (an image: its tags only) */
     for (k = 0; k < 8; k++, h = (h + 1) & 127) {
         if (sGifShape[h].n == 0) {
             sGifShape[h].lo = klo;
@@ -2901,8 +2964,9 @@ void Gs_GifShapesLog(void) {
         if (best < 0) {
             break;
         }
-        Vita_Log("vita:   GIF shape %d: tag %08x%08x list %08x%08x: %u tags, %u registers\n", r, (unsigned)(sGifShape[best].lo >> 32), (unsigned)sGifShape[best].lo,
-                 (unsigned)(sGifShape[best].hi >> 32), (unsigned)sGifShape[best].hi, sGifShape[best].n, sGifShape[best].regs);
+        Vita_Log("vita:   GIF shape %d: tag %08x%08x list %08x%08x (PRIM %03x, record %u): %u tags, %u registers\n", r, (unsigned)(sGifShape[best].lo >> 32), (unsigned)(sGifShape[best].lo & ~0xFFFFull),
+                 (unsigned)(sGifShape[best].hi >> 32), (unsigned)sGifShape[best].hi,
+                 (unsigned)(sGifShape[best].lo & 0x7FF), (unsigned)((sGifShape[best].lo >> 11) & 15), sGifShape[best].n, sGifShape[best].regs);
         sGifShape[best].regs = 0;
         sGifShape[best].n = 0xFFFFFFFFu; /* (printed: left out of the next turns) */
     }
@@ -3054,6 +3118,29 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
             clamp_tri_run(q, n);
             q += 16 * n;
             qwc -= 8 * n;
+            continue;
+        }
+        if (loops == 0 && (q[0] & 0xFFFFC00000000000ull) == 0x1000000000000000ull && q[1] == 0xE && (q[0] & 0x7FFF) != 0 &&
+            qwc >= 1 + (uint32_t)(q[0] & 0x7FFF) && adfast_on()) {
+            uint32_t nl = (uint32_t)(q[0] & 0x7FFF), i; /* (adfast: PACKED, NREG 1, A+D, no PRE) */
+            const uint64_t *d = q + 2;
+            sStat[3]++;
+            gVitaGifN[0]++;
+            gVitaGifN[3] += nl;
+            for (i = 0; i < nl; i++, d += 2) {
+                reg_write((uint32_t)(d[1] & 0xFF), d[0]);
+            }
+            q += 2 + 2 * nl;
+            qwc -= 1 + nl;
+            continue;
+        }
+        if (loops == 0 && sGpu && !sDpCap && sVtxDbg == 0 && (q[0] & ~0xFFFFull) == 0x2400000000000000ull && q[1] == 0x51 && (gs.prim & 7) == 3 &&
+            !((gs.prim >> 4) & 1) && (q[0] & 0x7FFF) >= 3 && (q[0] & 0x7FFF) % 3 == 0 && qwc >= 1 + (uint32_t)(q[0] & 0x7FFF) && hudrun_on()) {
+            uint32_t nl = (uint32_t)(q[0] & 0x7FFF); /* (hudrun: REGLIST RGBAQ, XYZ2, a corner a quadword) */
+            sStat[3]++;
+            flat_tri_run(q + 2, nl / 3);
+            q += 2 + 2 * nl;
+            qwc -= 1 + nl;
             continue;
         }
 #endif
@@ -3864,13 +3951,13 @@ unsigned gVitaDpBusyL[2]; /* (the log, the line printed always) the same; parts 
 int gVitaDpWays = 1;
 int gVitaSilGate = 1;          /* bt3.txt silgate (gs_vu1.c): 0 off, 1 on, 2 the soak's B battles */
 unsigned gVitaSilGateN[2];     /* (the log) shadow-page strips held back by silgate, gone through */
-unsigned gVitaSilProbe = 16;   /* bt3.txt silprobe: with silgate, one frame in this many (a power of two) sends the strips all */
+unsigned gVitaSilProbe = 64;   /* bt3.txt silprobe: with silgate, one frame in this many (a power of two) sends the strips all */
 /* bt3.txt dptexa: a kept part whose groups cannot read TEXA (no texture, a 32-bit one, or 8 / 4-bit with a 32-bit
    palette: TEXA expands only 24 and 16-bit colours, and a kept group draws the texture made when it was kept) does not
    compare TEXA. Every strip reads it (DP_STRIP_READS), and the effects of a 2 vs 2 fight set it between the parts:
    ~1,250 of the ~1,300 parts found in another state every 2 s in a beam special, TEXA the first field that differed,
    each walked record by record. 0 off, 1 on, 2 the soak's B battles */
-int gVitaDpTexa;
+int gVitaDpTexa = 1;
 unsigned gVitaDpTexaN[2]; /* (the log) forms kept without TEXA; parts walked whose kept form differed in TEXA alone */
 static inline int dptexa_on(void) {
     extern int gVitaAbSide;

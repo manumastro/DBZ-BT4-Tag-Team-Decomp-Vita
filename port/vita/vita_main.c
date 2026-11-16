@@ -1152,6 +1152,13 @@ void Vita_VBlank(unsigned vblanks) {
                             extern unsigned gVitaDpTexaN[2], gVitaTexRtN[3], gVitaFxClampN[2];
                             extern void Gs_GifShapesLog(void);
                             logf_("vita:   fxclamp: %u runs, %u triangles\n", gVitaFxClampN[0], gVitaFxClampN[1]);
+                            {
+                                extern unsigned gVitaHudBatchN[2], gVitaHudRunN[2];
+                                logf_("vita:   hudbatch: %u packets of plain shapes, %u triangles in them | hudrun: %u runs, %u triangles\n", gVitaHudBatchN[0], gVitaHudBatchN[1],
+                                      gVitaHudRunN[0], gVitaHudRunN[1]);
+                                memset(gVitaHudBatchN, 0, sizeof(gVitaHudBatchN));
+                                memset(gVitaHudRunN, 0, sizeof(gVitaHudRunN));
+                            }
                             memset(gVitaFxClampN, 0, sizeof(gVitaFxClampN));
                             Gs_GifShapesLog();
                             logf_("vita:   kept forms without TEXA (dptexa): %u; parts walked whose kept form differed in TEXA alone: %u | texrt: %u pieces from the pools, %u made the old way, %u textures set up by the render thread\n",
@@ -1664,6 +1671,15 @@ static void read_settings(void) {
         } else if (strcmp(line, "wtsig") == 0) { /* the targets' signatures worked out only when GS memory changed: 0 off, 1 on, 2 soak B */
             extern int gVitaWtSig;
             gVitaWtSig = atoi(eq);
+        } else if (strcmp(line, "adfast") == 0) { /* GIF tags of A+D writes written in one loop: 0 off, 1 on, 2 soak B */
+            extern int gVitaAdFast;
+            gVitaAdFast = atoi(eq);
+        } else if (strcmp(line, "hudrun") == 0) { /* the HUD's plain triangles (hudbatch's packets) as a run: 0 off, 1 on, 2 soak B */
+            extern int gVitaHudRun;
+            gVitaHudRun = atoi(eq);
+        } else if (strcmp(line, "hudbatch") == 0) { /* the HUD's plain shapes (the Tag Team radar) in one packet: 0 off, 1 on, 2 soak B */
+            extern int gVitaHudBatch;
+            gVitaHudBatch = atoi(eq);
         } else if (strcmp(line, "fxclamp") == 0) { /* the animated effects' triangles (with their CLAMP writes) as runs: 0 off, 1 on, 2 soak B */
             extern int gVitaFxClamp;
             gVitaFxClamp = atoi(eq);

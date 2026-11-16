@@ -274,6 +274,32 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
   In 1 vs 1 (`ds1v1`, all three on) the shadow page is drawn and read (~100 reads every 2 s), `silgate` holds back
   ~50 strips every 2 s and the fight runs as before: 29.7 pictures a second against 29.6 (`s1v1`). The three are on by
   default since.
+- 2026-11-16, the batches after (same fight, 120 s, one run each, means over 40-118 s; each batch began with a run of
+  its base on its own build, which repeated the batch before's figure within 0.3 a second):
+
+  | Change | Run against base | Pictures a second | Beam (38-44 s) | What it did |
+  |---|---|---|---|---|
+  | `skipcc=1` | `n1` / `b2base` | 26.6 / 27.5 | 14.8 / 18.5 | the list reader 24 -> 17 ms a list not drawn, but the drawing thread 7.5 -> 21 ms on them: off |
+  | `dpslots=4096` | `c0` / `b2base` | 28.1 / 27.5 | 19.2 / 18.5 | parts walked as their place was another's ~800 -> ~3 every 2 s; heap 38 -> 48 MB |
+  | `wtsig`, `rtkick`, `silprobe=64` | `sk1` / `b2base` | 27.9 / 27.5 | 19.6 / 18.5 | |
+  | `dptexa=1` | `c1` / `c0` | 28.2 / 28.1 | 20.7 / 19.2 | parts walked 164 -> 77 |
+  | `texrt=1` | `c2` / `c0` | 27.8 / 28.1 | 20.1 / 19.2 | the waits for the render thread before a palette texture gone; the picture's end waits more |
+  | `dppf=1` | `c3` / `c0` | 27.5 / 28.1 | 20.1 / 19.2 | nothing: off |
+  | `fxclamp=1` | `d1` / `d0` | 28.0 / 27.9 | 20.5 / 20.3 | up to ~140 triangles a list the runs' way |
+  | `hudbatch=1` | `e2` / `e2b` | 28.5 / 28.2 | 21.5 / 20.4 | the radar one packet a picture (292 triangles) instead of ~280 |
+  | `hudrun=1` | `f1` / `f0` | 28.9 / 28.6 | 22.0 / 21.2 | the radar's triangles the runs' way |
+  | `adfast=1` | `g1` / `g0` | 28.7 / 28.6 | 22.3 / 21.9 | no stretch under 20 a second |
+
+  One at a time most are inside the noise between two runs (~0.3 a second); together, from `c0` to `g1`, 28.1 -> 28.7
+  and the beam 19.2 -> 22.3. Where the drawing thread's time went in the beam was found with `gifshapes=1` (the GIF tags
+  outside the runs, by shape, with the PRIM they draw with): the Tag Team radar (`Ps_ScreenQuad`, port code) was ~280
+  packets of one quad each, ~6,300 A+D register writes a list were walked register by register, the effects' animated
+  layers (`EftSprAnim_QueueTri`, CLAMP before and after each triangle) missed the runs. The films (`film=30`) of each
+  batch show the effects, the auras, the HUD and the radar right; the console's screenshots of the radar with and
+  without `hudbatch` are the same. 1 vs 1 with all of them: 29.8 (`g1v1`). All on by default since, but `skipcc` and
+  `dppf`. What is left in the beam (~45 ms a drawn list on the drawing thread): the effects' image uploads (~9 ms),
+  the kept parts (~15 ms), the GS primitives' states and the sprites of the post passes (glow, outline, pan blur),
+  which the Vita draws natively but are still read.
 - The log's "memory free, the lowest since the last report" line: video and main memory sampled every 8 pictures
   (the lowest kept), not only every 60.
 - `vita_agent_run.py` after the console switched itself off in a run: every vita-agent call now has a time limit (3

@@ -881,7 +881,7 @@ __attribute__((hot)) static int hle_program2(void) {
         extern volatile unsigned gVglWpUsed;
         extern unsigned gGsFrame;
         extern unsigned gVitaSilGateN[2];
-        extern unsigned gVitaSilProbe; /* (bt3.txt silprobe: the frames between two that send them all, a power of two; 16) */
+        extern unsigned gVitaSilProbe; /* (bt3.txt silprobe: the frames between two that send them all, a power of two; 64) */
         int gate = (gVitaSilGate == 2 ? gVitaAbSide == 1 : gVitaSilGate != 0) && gGsSplit && gGsFrame - gVglWpUsed > 60 && (gGsFrame & (gVitaSilProbe - 1)) != 0;
         int skip = gGsSplit && ((!gVglL2Drawn && (++n & 63) != 0) || gate);
         gVitaSilGateN[gate ? 0 : 1]++;
