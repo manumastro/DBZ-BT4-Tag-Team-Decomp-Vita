@@ -67,6 +67,7 @@ typedef struct IsoMount {
     int n;
     SceOff have, need; /* the image's size, and the disc's (its volume's) */
     int lost;          /* files cut off by an image cut short */
+    char label[33];    /* the volume's name (the PVD's, spaces at its end left out) */
 } IsoMount;
 
 typedef struct IsoOpen {
@@ -95,6 +96,21 @@ static int take_slot(SceUID *fd) {
 
 static uint32_t le32(const uint8_t *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+/* The volume's name of a primary volume descriptor, without the spaces that fill it. */
+static void pvd_label(const uint8_t *pvd, char *out, int size) {
+    int n = 0, k;
+    for (k = 0; k < 32 && n + 1 < size; k++) {
+        char c = (char)pvd[40 + k];
+        out[n++] = c >= 32 && c < 127 ? c : '?';
+    }
+    while (n > 0 && out[n - 1] == ' ') {
+        n--;
+    }
+    if (size > 0) {
+        out[n] = '\0';
+    }
 }
 
 /* --- reading an image's folders --- */
@@ -174,7 +190,7 @@ static void scan_dir(Scan *s, uint32_t lba, uint32_t size, int parent, int depth
 
 /* the image's folders, or 0 (not an ISO 9660 image); its size and the disc's in `have` and `need`, the files cut
    off in `lost` */
-static int scan_image(const char *path, IsoEntry **ent, SceOff *have, SceOff *need, int *lost) {
+static int scan_image(const char *path, IsoEntry **ent, SceOff *have, SceOff *need, int *lost, char *label, int labelSize) {
     uint8_t pvd[ISO_SECTOR];
     Scan s;
 
@@ -192,6 +208,7 @@ static int scan_image(const char *path, IsoEntry **ent, SceOff *have, SceOff *ne
     }
     *have = s.imageSize;
     *need = (SceOff)le32(pvd + 80) * ISO_SECTOR; /* (the volume's sectors) */
+    pvd_label(pvd, label, labelSize);
     s.ent = malloc(sizeof(IsoEntry) * ISO_ENTRIES);
     if (s.ent != NULL) {
         scan_dir(&s, le32(pvd + 156 + 2), le32(pvd + 156 + 10), -1, 0);
@@ -557,7 +574,7 @@ int Vita_IsoMount(const char *path_) {
     IsoMount *im;
     int n, m, lost = 0;
     SceOff have = 0, need = 0;
-
+    char label[sizeof(im->label)] = "";
     char path[sizeof(im->path)];
 
     if (!canon(path, path_, sizeof(path))) {
@@ -568,10 +585,11 @@ int Vita_IsoMount(const char *path_) {
             return 1;
         }
     }
-    if (sMountN >= ISO_MOUNTS || (n = scan_image(path, &ent, &have, &need, &lost)) == 0) {
+    if (sMountN >= ISO_MOUNTS || (n = scan_image(path, &ent, &have, &need, &lost, label, sizeof(label))) == 0) {
         return 0;
     }
     im = &sMount[sMountN];
+    snprintf(im->label, sizeof(im->label), "%s", label);
     snprintf(im->path, sizeof(im->path), "%s", path);
     im->len = (int)strlen(im->path);
     im->ent = ent;
@@ -580,7 +598,7 @@ int Vita_IsoMount(const char *path_) {
     im->need = need;
     im->lost = lost;
     __atomic_store_n(&sMountN, sMountN + 1, __ATOMIC_RELEASE);
-    Vita_Log("iso: %s mounted (%d files and folders)\n", im->path, n);
+    Vita_Log("iso: %s mounted (%d files and folders, volume \"%s\", %lld MB)\n", im->path, n, im->label, (long long)(have >> 20));
     if (have < need || lost > 0) {
         Vita_Log("iso: %s is cut short: %lld bytes of the disc's %lld, %d files cut off (a copy that stopped "
                  "early; a FAT32 card holds files up to 4 GB)\n", im->path, (long long)have, (long long)need, lost);
@@ -665,4 +683,100 @@ int Vita_IsoFind(const char *dir, const char *file, int keep, char *out, int siz
     }
     __real_sceIoDclose(d);
     return found;
+}
+
+/* --- what an image is, for the start's messages (vita_main.c, vita_mem.c) --- */
+
+/* An .iso file looked at without mounting it: 1 an ISO 9660 image, its size in `have`, the disc's (its volume's
+   sectors) in `need`, the volume's name in `label`, and its files cut off in `lost` when it is mounted (else -1);
+   0 a file that is not one (`have` its size); -1 it cannot be opened. */
+int Vita_IsoProbe(const char *path_, long long *have, long long *need, int *lost, char *label, int labelSize) {
+    uint8_t pvd[ISO_SECTOR];
+    char path[256];
+    SceUID fd;
+    int m, i, ok;
+
+    *have = 0;
+    *need = 0;
+    *lost = -1;
+    if (labelSize > 0) {
+        label[0] = '\0';
+    }
+    if (!canon(path, path_, sizeof(path)) || (fd = __real_sceIoOpen(path, SCE_O_RDONLY, 0)) < 0) {
+        return -1;
+    }
+    *have = __real_sceIoLseek(fd, 0, SCE_SEEK_END);
+    ok = *have >= 17 * ISO_SECTOR && __real_sceIoPread(fd, pvd, ISO_SECTOR, 16 * ISO_SECTOR) == ISO_SECTOR && pvd[0] == 1 &&
+         memcmp(pvd + 1, "CD001", 5) == 0;
+    __real_sceIoClose(fd);
+    if (!ok) {
+        return 0;
+    }
+    *need = (long long)le32(pvd + 80) * ISO_SECTOR;
+    pvd_label(pvd, label, labelSize);
+    if (lookup(path, &m, &i) && i == -1) {
+        *lost = sMount[m].lost;
+    }
+    return 1;
+}
+
+/* Which disc an .iso holds, in a few words: its volume's name and the program its SYSTEM.CNF starts (BOOT2, as the
+   PS2 does) with that program's size, e.g. `volume "X", program SLUS_219.78 (2115696 bytes)`. Mounted for the look
+   and let go again when it was not mounted before. 0: not an image that can be read; 2: it has the file `want`
+   (the program the port looks for); else 1. */
+int Vita_IsoDescribe(const char *path_, const char *want, char *out, int size) {
+    char path[256], inner[400], prog[64] = "";
+    char cnf[600];
+    long long progSize = -1;
+    int m, i, n = 0, was = sMountN, top = -1, has = 0;
+
+    if (!canon(path, path_, sizeof(path)) || !Vita_IsoMount(path)) {
+        return 0;
+    }
+    if (lookup(path, &m, &i) && i == -1) {
+        top = m;
+    }
+    snprintf(inner, sizeof(inner), "%s/SYSTEM.CNF", path);
+    if (top >= 0 && lookup(inner, &m, &i) && i >= 0 && !sMount[m].ent[i].dir) {
+        SceUID fd = __real_sceIoOpen(sMount[m].path, SCE_O_RDONLY, 0);
+        SceSize want = sMount[m].ent[i].size < sizeof(cnf) - 1 ? sMount[m].ent[i].size : sizeof(cnf) - 1;
+        if (fd >= 0) {
+            n = __real_sceIoPread(fd, cnf, want, (SceOff)sMount[m].ent[i].lba * ISO_SECTOR);
+            __real_sceIoClose(fd);
+        }
+    }
+    if (n > 0) { /* "BOOT2 = cdrom0:\SLUS_219.78;1" */
+        const char *p;
+        cnf[n] = '\0';
+        p = strstr(cnf, "BOOT2");
+        p = p != NULL ? strchr(p, ':') : NULL;
+        if (p != NULL) {
+            int k = 0;
+            for (p++; *p == '\\' || *p == '/'; p++) {
+            }
+            for (; *p != '\0' && *p != ';' && *p != '\r' && *p != '\n' && *p != ' ' && k + 1 < (int)sizeof(prog); p++) {
+                prog[k++] = *p == '\\' ? '/' : *p;
+            }
+            prog[k] = '\0';
+        }
+    }
+    if (prog[0] != '\0') {
+        snprintf(inner, sizeof(inner), "%s/%s", path, prog);
+        if (lookup(inner, &m, &i) && i >= 0 && !sMount[m].ent[i].dir) {
+            progSize = sMount[m].ent[i].size;
+        }
+    }
+    snprintf(inner, sizeof(inner), "%s/%s", path, want);
+    has = lookup(inner, &m, &i) && i >= 0 && !sMount[m].ent[i].dir;
+    if (prog[0] == '\0') {
+        snprintf(out, (size_t)size, "volume \"%s\", no SYSTEM.CNF (not a PS2 disc?)", top >= 0 ? sMount[top].label : "");
+    } else if (progSize < 0) {
+        snprintf(out, (size_t)size, "volume \"%s\", program %s (not on it)", top >= 0 ? sMount[top].label : "", prog);
+    } else {
+        snprintf(out, (size_t)size, "volume \"%s\", program %s (%lld bytes)", top >= 0 ? sMount[top].label : "", prog, progSize);
+    }
+    if (sMountN > was) {
+        unmount_last();
+    }
+    return has ? 2 : 1;
 }
