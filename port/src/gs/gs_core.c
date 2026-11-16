@@ -207,17 +207,22 @@ static void blk_real(uint32_t b) {
     }
 }
 
+/* the id of what block b holds (its 256 bytes, nothing else) */
+static uint32_t blk_content_id(uint32_t b) {
+    const uint32_t *w = &sVram[b * 64];
+    uint32_t h = 2166136261u, i;
+    for (i = 0; i < 64; i++) {
+        h = (h ^ w[i]) * 16777619u;
+        h ^= h >> 15;
+    }
+    return h;
+}
+
 static uint32_t blk_id(uint32_t b) {
     Blk *k = &sBlk[b];
 
     if (k->dirty) {
-        const uint32_t *w = &sVram[b * 64];
-        uint32_t h = 2166136261u, i;
-        for (i = 0; i < 64; i++) {
-            h = (h ^ w[i]) * 16777619u;
-            h ^= h >> 15;
-        }
-        k->id = h;
+        k->id = blk_content_id(b);
         k->dirty = 0;
     }
     return k->id;
@@ -2026,6 +2031,74 @@ static int plan_rect_same(int other, uint32_t dbp, uint32_t dbw, uint32_t dpsm, 
     }
     return same;
 }
+/* ---- The written uploads' block ids remembered by their bytes (bt3.txt upidmemo). An upload written block by block
+   (up_piece's second way, below: under 2 KB, such as a fighter's 1 KB palettes and the effects' small textures)
+   leaves its blocks dirty, and the first look at them after (up_rect_id at the end of the upload, for its
+   destination and the small uploads' memo; Gs_RectId for a texture key) hashes each block's 256 bytes (blk_id):
+   ~300 small uploads a drawn list in a 2 vs 2 beam special, 2,400 cycles each for their rectangles' numbers. A block
+   written whole by block_write (bits 32, 16, 8, 4) holds the upload's bytes for it and nothing else (every byte of
+   the block, in the format's order), so its id is a function of those bytes alone: not of the block's place, nor
+   of what it held before. The memo (64 pieces of up to 8 blocks) keeps the ids a piece's blocks got under a 64-bit
+   number of the piece's bytes and its shape (bits, width, height, the block's size); the same bytes in the same
+   shape again give their blocks those ids, not dirty, instead of hashing them. A piece seen first has its blocks'
+   ids worked out at once (the same values blk_id gives them later: nothing writes them in between). Exact as long
+   as every other write into GS memory sets the block dirty again or gives it an id of its own: vram_rw's writes
+   (VRAM_TOUCH), up_pixels, up_piece's two ways; blk_real writes a lazy upload's own bytes under the id it has.
+   A piece that is not whole blocks never comes here (up_pixels); one of more than 8 blocks is not kept.
+   3: the ids worked out the long way too and compared, the long way's kept. ---- */
+int gVitaUpIdMemo;          /* 0 off (default), 1 on, 2 in the soak's B battles, 3 on and checked */
+unsigned gVitaUpIdMemoN[6]; /* for the log: pieces given their ids from the memo, their blocks; pieces' ids worked out and kept;
+                               (3) blocks compared, of them different; pieces not kept (over 8 blocks) */
+#define IDMEMO_N 64
+#define IDMEMO_BLK 8
+typedef struct IdMemo { uint64_t hash; uint32_t shape, size, id[IDMEMO_BLK]; uint8_t n, valid; } IdMemo;
+static IdMemo sIdMemo[IDMEMO_N];
+static int idmemo_mode(void) {
+    return gVitaUpIdMemo == 2 ? (gVitaAbSide == 1) : gVitaUpIdMemo;
+}
+/* A 64-bit number of bytes as up_hash's, in two lanes (the 8-byte words in turn) so that the two multiplications do
+   not wait for each other: each lane's every step is one-to-one on its 64 bits and the two are joined by a
+   one-to-one turn of one of them, so bytes that differ in one word never get the same number. */
+static uint64_t up_hash2(const uint8_t *p, uint32_t len) {
+    uint64_t a = 0x9E3779B97F4A7C15ull ^ len, c = 0xC2B2AE3D27D4EB4Full ^ len, w0, w1;
+    uint32_t i;
+
+    for (i = 0; i + 16 <= len; i += 16) {
+        memcpy(&w0, p + i, 8);
+        memcpy(&w1, p + i + 8, 8);
+        a = (a ^ w0) * 0x9E3779B1u;
+        c = (c ^ w1) * 0x85EBCA6Bu;
+        a ^= a >> 32;
+        c ^= c >> 32;
+    }
+    for (; i < len; i++) {
+        a = (a ^ p[i]) * 0x9E3779B1u;
+        a ^= a >> 32;
+    }
+    return a ^ (c << 29 | c >> 35);
+}
+/* ---- bt3.txt uprepeat=1 (a measure; nothing else changes): of the whole uploads not found unchanged (written, or
+   taken note of by the block), how many carry the same bytes (a 64-bit number of them, with the format and size)
+   as one seen in this list or the 8 before, wherever it went (every whole upload is noted in the tables, those
+   found unchanged too); of the small ones seen, how many go where GS memory holds the same already (the number of
+   the destination's blocks the same before and after the write: at least that many, as a block with an upload's id
+   before and its content's after counts as changed). Small: 16 to 1,024 bytes, the "small uploads written" line's
+   (first sight, other place, other data, memory changed); large: 2 KB and more, by the number the large uploads are
+   known by (up_hash_quick: sampled or worked out ahead, as they are). ---- */
+int gVitaUpRepeat;
+unsigned gVitaUpRepN[5]; /* for the log: small uploads not found unchanged, of them seen lately, of those to where the same lay already;
+                            large ones not found unchanged, of them seen lately */
+typedef struct UpRep { uint64_t hash; uint32_t shape, frame; } UpRep;
+static UpRep sUpRepS[2048], sUpRepL[512];
+static int up_rep_seen(UpRep *t, uint32_t mask, uint64_t hash, uint32_t psm, uint32_t tw, uint32_t th) {
+    uint32_t shape = 1u | (psm & 0x3F) << 1 | (tw & 0xFFF) << 7 | (th & 0xFFF) << 19; /* (bit 0: an entry in use) */
+    UpRep *e = &t[((((uint32_t)hash ^ (uint32_t)(hash >> 32)) * 0x9E3779B1u) >> 16) & mask];
+    int seen = e->shape == shape && e->hash == hash && sFrame - e->frame <= 8;
+    e->hash = hash;
+    e->shape = shape;
+    e->frame = sFrame;
+    return seen;
+}
 static void up_piece(uint32_t bp, uint32_t bw, uint32_t psm, int bits, uint32_t gw, uint32_t gh, uint32_t x0, uint32_t y0,
                      uint32_t w, uint32_t h, const uint8_t *src) {
     uint32_t stride = w * (uint32_t)bits / 8, bx, by;
@@ -2076,6 +2149,26 @@ static void up_piece(uint32_t bp, uint32_t bw, uint32_t psm, int bits, uint32_t 
 #ifdef PORT_VITA
     sUpLazyAll = 0;
 #endif
+    IdMemo *im = NULL; /* (upidmemo: the piece's entry in the memo, above) */
+    int imode = gVitaUpIdMemo != 0 ? idmemo_mode() : 0, ihit = 0;
+    uint32_t ni = 0;
+    if (imode != 0 && (bits == 32 || bits == 16 || bits == 8 || bits == 4) && !((x0 | w) & (gw - 1)) && !((y0 | h) & (gh - 1))) {
+        uint32_t nb = (w / gw) * (h / gh), shape = (uint32_t)bits | gw << 8 | gh << 16, size = w | h << 16;
+        if (nb > 0 && nb <= IDMEMO_BLK) {
+            uint64_t ih = up_hash2(src, stride * h);
+            im = &sIdMemo[((((uint32_t)ih ^ (uint32_t)(ih >> 32)) * 0x9E3779B1u) >> 26) & (IDMEMO_N - 1)];
+            ihit = im->valid && im->hash == ih && im->shape == shape && im->size == size && im->n == nb;
+            if (!ihit) {
+                im->valid = 0; /* (until its blocks' ids are all in, below) */
+                im->hash = ih;
+                im->shape = shape;
+                im->size = size;
+                im->n = (uint8_t)nb;
+            }
+        } else if (nb > IDMEMO_BLK) {
+            gVitaUpIdMemoN[5]++;
+        }
+    }
     for (by = 0; by < h; by += gh) {
         for (bx = 0; bx < w; bx += gw) {
             uint32_t b = vram_rw(bp, bw, psm, x0 + bx, y0 + by, 2, 0);
@@ -2086,6 +2179,31 @@ static void up_piece(uint32_t bp, uint32_t bw, uint32_t psm, int bits, uint32_t 
             sBlk[b].dest = sDestPend != NULL ? (uint16_t)(sDestPend - sDest + 1) : 0;
 #endif
             block_write(b, bits, src + by * stride + bx * (uint32_t)bits / 8, stride);
+            if (im != NULL) { /* (the blocks in the same order every time: the piece's rows of blocks, each from the left) */
+                if (ihit && imode != 3) {
+                    sBlk[b].id = im->id[ni];
+                    sBlk[b].dirty = 0;
+                } else {
+                    uint32_t id = blk_id(b); /* (what the first look at the block would make of it) */
+                    if (ihit) {
+                        gVitaUpIdMemoN[3]++;
+                        if (id != im->id[ni]) {
+                            gVitaUpIdMemoN[4]++;
+                        }
+                    }
+                    im->id[ni] = id;
+                }
+                ni++;
+            }
+        }
+    }
+    if (im != NULL) {
+        if (ihit) {
+            gVitaUpIdMemoN[0]++;
+            gVitaUpIdMemoN[1] += ni;
+        } else {
+            im->valid = 1;
+            gVitaUpIdMemoN[2]++;
         }
     }
     gVitaUp[1] += w * h;
@@ -2234,6 +2352,8 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
 #ifdef PORT_VITA
     void *sm = NULL; /* (a small upload remembered: below) */
     int smallUp = 0;  /* (the log's zones: a small upload) */
+    int repSeen = 0, repOn = 0; /* (uprepeat: an upload seen lately; repOn: a small one, written; repRect: its destination's blocks' number before it) */
+    uint32_t repRect = 0;
 #endif
 
     if (!gs.transfer || gs.tw == 0) {
@@ -2339,6 +2459,10 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
         if (sLazy && gs.tpos == 0 && n == total && bytes <= 1024 && bytes >= 16) {
             uint32_t pos = gs.tx | gs.ty << 16, size = gs.tw | gs.th << 16;
             smallUp = 1;
+            if (gVitaUpRepeat) { /* (a measure: above; counted below if not found unchanged) */
+                uint32_t len = (total * bits + 7) / 8;
+                repSeen = up_rep_seen(sUpRepS, 2047, up_hash(p, len < bytes ? len : bytes), dpsm, gs.tw, gs.th);
+            }
             struct { uint64_t bb; uint32_t pos, size, bytes, rect; int valid; uint32_t miss; uint8_t data[1024]; } *m =
                 (void *)&smemo[((((uint32_t)(gs.bitbltbuf >> 32) * 0x9E3779B1u) ^ pos * 0x85EBCA6Bu) * 0x27D4EB2Fu) >> 24];
             if (m->valid && m->bb == gs.bitbltbuf && m->pos == pos && m->size == size && m->bytes == bytes && memcmp(m->data, p, bytes) == 0 &&
@@ -2354,6 +2478,14 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
                 return;
             }
             { extern unsigned gT121Sm[4]; gT121Sm[!m->valid ? 0 : (m->bb != gs.bitbltbuf || m->pos != pos || m->size != size || m->bytes != bytes) ? 1 : memcmp(m->data, p, bytes) != 0 ? 2 : 3]++; }
+            if (gVitaUpRepeat) {
+                gVitaUpRepN[0]++;
+                if (repSeen) {
+                    gVitaUpRepN[1]++;
+                    repOn = 1;
+                    repRect = Gs_RectId(dbp, dbw, dpsm, gs.tx, gs.ty, gs.tw, gs.th);
+                }
+            }
             /* a place whose data is another at every upload (a fighter's palettes, one place for all of its
                pieces: 150 a picture) is not remembered, but one time in eight: no copy, no comparing, and no number
                for its rectangle (2,500 cycles an upload, and none of them ever found unchanged) */
@@ -2398,6 +2530,9 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
             uint64_t hash;
             if (gVitaZoneOn) { Vita_Z(7); }
             hash = up_hash_quick(p, (total * bits + 7) / 8);
+            if (gVitaUpRepeat) { /* (a measure: above; counted below if not found unchanged) */
+                repSeen = up_rep_seen(sUpRepL, 511, hash, dpsm, gs.tw, gs.th);
+            }
             if (gVitaZoneOn) { Vita_Z(16); } /* (the upload's bytes looked at) */
 
             if (dest_on() && byBlock && psm_planes(dpsm) == 7) {
@@ -2452,6 +2587,10 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
             m->valid = 0; /* (until written: its rectangle's number is taken after) */
             mm = (void *)m;
             sUpCat = byBlock ? 3 : 4;
+            if (gVitaUpRepeat) {
+                gVitaUpRepN[3]++;
+                gVitaUpRepN[4] += (unsigned)repSeen;
+            }
         }
         if (gVitaZoneOn) { Vita_Z(45); } /* (the large ones' memory looked at) */
         sUpLazyAll = 1;
@@ -2578,6 +2717,9 @@ static void transfer_data(const uint8_t *p, uint32_t bytes) {
                 }
             }
         }
+    }
+    if (repOn && gs.tpos >= total && Gs_RectId(dbp, dbw, dpsm, gs.tx, gs.ty, gs.tw, gs.th) == repRect) {
+        gVitaUpRepN[2]++; /* (uprepeat: GS memory there held these bytes already) */
     }
     if (gVitaZoneOn) { Vita_Z(smallUp ? 42 : 46); } /* (written; 216: a small one's rectangle's number, 42) */
 #endif
