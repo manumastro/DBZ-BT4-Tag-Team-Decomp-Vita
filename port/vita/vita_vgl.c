@@ -1278,6 +1278,9 @@ static void rt_sync_(int line); /* (the render thread's work all done; see rt_st
 #define rt_sync() rt_sync_(__LINE__) /* (the log: the waits by the line that asked for them) */
 static void rt_start(void);
 static int sRtOn;
+static uint8_t *rt_reserve(uint32_t op, uint32_t bytes); /* (below, with the render thread) */
+static void rt_commit(void);
+#define RT_TEX 12 /* a texture with a palette set up (texrt; the render thread's other ops: RT_WRAP and on, below) */
 static void flush_vu(void) {
     GLC_RESET();
     static const GLenum kFactor[6] = {GL_ZERO, GL_ONE, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA};
@@ -1971,6 +1974,71 @@ static int sPalOn = -1;
 unsigned gVitaPal[3]; /* for the log: index textures made, palettes made, textures made of the two */
 unsigned gVitaPalDrop; /* index sets let go at once, as no palette could be made for them */
 unsigned gVitaPaints; /* for the log (gs_core.c): sprites the game drew into its palettes' pages */
+/* bt3.txt texrt: a texture with a palette made without waiting for the render thread. vitaGL is not for two threads:
+   its memory, its texture names and its texture set-up were this thread's only once the render thread had drawn all it
+   was handed (rt_sync), 30 waits and ~95 ms every 2 s in a 2 vs 2 beam special. Now the names, the palettes' 1 KB and
+   the indices' memory (4-256 KB) are taken at a picture's end, while the render thread waits anyway, and kept in
+   pools (each piece taken once, given back as before, vglLazyFree); the texture is set up by the render thread, in
+   order, before any draw that reads it (RT_TEX). A pool empty: the old way. 0 off, 1 on, 2 the soak's B battles */
+int gVitaTexRt;
+unsigned gVitaTexRtN[3]; /* (the log) pieces taken from the pools, made the old way, textures set up by the render thread */
+#define IDXC 7 /* the indices' sizes: 4 KB .. 256 KB */
+static const uint8_t sIdxPoolWant[IDXC] = {8, 4, 8, 4, 4, 2, 1};
+static void *sIdxPool[IDXC][8];
+static int sIdxPoolN[IDXC];
+static uint32_t *sPalPool[32];
+static int sPalPoolN;
+static GLuint sTexNames[16];
+static int sTexNamesN;
+typedef struct RtTex { GLuint id; void *idx, *pal; uint32_t w, h; } RtTex;
+static int texrt_on(void) {
+    extern int gVitaAbSide;
+    return gVitaTexRt == 2 ? gVitaAbSide == 1 : gVitaTexRt != 0;
+}
+static int idx_class(uint32_t bytes) {
+    int c = 0;
+    uint32_t s = 4096;
+    while (s < bytes && c < IDXC) {
+        s <<= 1;
+        c++;
+    }
+    return c < IDXC ? c : -1;
+}
+/* at a picture's end, the render thread idle: the pools filled up again */
+static void tex_pool_fill(void) {
+    int c;
+    if (sTexNamesN < 16) {
+        glGenTextures(16 - sTexNamesN, &sTexNames[sTexNamesN]);
+        sTexNamesN = 16;
+    }
+    while (sPalPoolN < 32) {
+        uint32_t *d = (uint32_t *)gpu_alloc_mapped_aligned_for_gpu(64, 256 * 4);
+        if (d == NULL) {
+            return;
+        }
+        sPalPool[sPalPoolN++] = d;
+    }
+    for (c = 0; c < IDXC; c++) {
+        while (sIdxPoolN[c] < sIdxPoolWant[c]) {
+            void *d = gpu_alloc_mapped_aligned_for_gpu(16, 4096u << c);
+            if (d == NULL) {
+                return;
+            }
+            sIdxPool[c][sIdxPoolN[c]++] = d;
+        }
+    }
+}
+/* the render thread (or this one, in order, rt_exec_one): a texture with a palette set up */
+static void tex_rt_exec(const RtTex *o) {
+    uint32_t *cw;
+    glBindTexture(GL_TEXTURE_2D, o->id);
+    sGlc.tex = 0;
+    vglSetupTexture(GL_TEXTURE_2D, o->idx, SCE_GXM_TEXTURE_FORMAT_P8_ABGR, SCE_GXM_TEXTURE_LINEAR, (GLsizei)o->w, (GLsizei)o->h, 1);
+    cw = (uint32_t *)(void *)vglGetGxmTexture(GL_TEXTURE_2D);
+    if (cw != NULL) {
+        cw[3] = (cw[3] & 0xFC000000u) | ((uint32_t)(uintptr_t)o->pal >> 6);
+    }
+}
 static int idx_get(uint64_t key, uint32_t gen, uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32_t th, uint32_t n, uint32_t *px) {
     int k, freeK = -1;
     uint32_t w8 = (tw + 7) & ~7u, x, y;
@@ -2011,9 +2079,18 @@ static int idx_get(uint64_t key, uint32_t gen, uint32_t tbp, uint32_t tbw, uint3
                 memset(tmp + y * w8 + tw, 0, w8 - tw);
             }
         }
-        rt_sync(); /* (the chip's memory is vitaGL's: the render thread done first; gVitaTexEarly) */
-        if ((d = (uint8_t *)gpu_alloc_mapped_aligned_for_gpu(16, w8 * th)) == NULL) {
-            return -1;
+        {
+            int c = texrt_on() ? idx_class(w8 * th) : -1;
+            if (c >= 0 && sIdxPoolN[c] > 0) { /* (texrt: taken while the render thread drew, at the last picture's end) */
+                d = (uint8_t *)sIdxPool[c][--sIdxPoolN[c]];
+                gVitaTexRtN[0]++;
+            } else {
+                rt_sync(); /* (the chip's memory is vitaGL's: the render thread done first; gVitaTexEarly) */
+                if ((d = (uint8_t *)gpu_alloc_mapped_aligned_for_gpu(16, w8 * th)) == NULL) {
+                    return -1;
+                }
+                gVitaTexRtN[1] += c >= 0 || texrt_on();
+            }
         }
         memcpy(d, tmp, (size_t)w8 * th);
     }
@@ -2076,9 +2153,15 @@ static int pal_get(uint64_t key, uint64_t texa, uint32_t gen, uint32_t cbp, uint
             }
             tmp[i] = c;
         }
-        rt_sync(); /* (as idx_get) */
-        if ((d = (uint32_t *)gpu_alloc_mapped_aligned_for_gpu(64, 256 * 4)) == NULL) {
-            return -1;
+        if (texrt_on() && sPalPoolN > 0) { /* (texrt: as idx_get) */
+            d = sPalPool[--sPalPoolN];
+            gVitaTexRtN[0]++;
+        } else {
+            rt_sync(); /* (as idx_get) */
+            if ((d = (uint32_t *)gpu_alloc_mapped_aligned_for_gpu(64, 256 * 4)) == NULL) {
+                return -1;
+            }
+            gVitaTexRtN[1] += texrt_on();
         }
         memcpy(d, tmp, sizeof(tmp));
     }
@@ -2448,6 +2531,7 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
             /* (no palette for it: the texture is made of colours below, and indices that no texture holds would stay
                for good, in the chip's memory: over a long session the table and the memory filled up, and the
                textures made of colours instead, larger and slower to make, then failed: effects missing) */
+            rt_sync(); /* (vitaGL's memory: texrt took the indices without a wait) */
             vglLazyFree(sIdxT[pi].data);
             sIdxT[pi].data = NULL;
             gVitaPalDrop++;
@@ -2466,6 +2550,18 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
             t->amax = 255;
             sIdxT[pi].refs++;
             sPalT[pp].refs++;
+            if (texrt_on() && sRtOn && sTexNamesN > 0) { /* (texrt: set up by the render thread, in order) */
+                RtTex *o = (RtTex *)(void *)rt_reserve(RT_TEX, (uint32_t)sizeof(RtTex));
+                t->id = sTexNames[--sTexNamesN];
+                o->id = t->id;
+                o->idx = sIdxT[pi].data;
+                o->pal = sPalT[pp].data;
+                o->w = tw;
+                o->h = th;
+                rt_commit();
+                gVitaTexRtN[2]++;
+                (void)cw;
+            } else {
             rt_sync(); /* (gVitaTexEarly: the indices and the palette were there already, and no wait was made for them) */
             glGenTextures(1, &t->id);
             sGlc.tex = 0;
@@ -2474,6 +2570,7 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
             cw = (uint32_t *)(void *)vglGetGxmTexture(GL_TEXTURE_2D);
             if (cw != NULL) {
                 cw[3] = (cw[3] & 0xFC000000u) | ((uint32_t)(uintptr_t)sPalT[pp].data >> 6);
+            }
             }
             {
                 uint32_t h = bucket_of(t0k, texa, gen); gVitaTexContN[1] += cont;
@@ -3154,6 +3251,8 @@ static int rt_exec_one(void) {
             fxl_end_exec();
         } else if (h->op == RT_SWAP) {
             rt_swap_exec((const RtSwap *)(const void *)(h + 1));
+        } else if (h->op == RT_TEX) {
+            tex_rt_exec((const RtTex *)(const void *)(h + 1));
         }
         sRtWhere = 0;
         gVitaRt[6] += sceKernelGetProcessTimeWide() - t0;
@@ -7320,6 +7419,9 @@ void GsGpu_FrameEnd(void) {
     }
     if (!sFeAsync) {
         rt_sync(); /* the render thread's draws done: what follows is this thread's (the parts kept are let go, the swap) */
+        if (texrt_on()) {
+            tex_pool_fill(); /* (texrt: vitaGL this thread's now) */
+        }
     }
     if (sDpRtBone != 0) { /* (dprt: the bones not finite the render thread found) */
         gVitaBoneBad += sDpRtBone;
@@ -8850,6 +8952,25 @@ int gVitaDpSplit = 1; /* bt3.txt dpsplit: a kept part's stage strips grouped by 
 typedef struct DpUb { float u17[3]; uint8_t mode, layer; float t8[8]; } DpUb; /* t8: the viewport's floats worked out from u17 once (dpfast) */
 #define DP_UB 8
 typedef struct DpBlob { int ngroups, nub; uint8_t unsafe, seeThru; uint32_t tris, stripsF, stripsS; DpUb ub[DP_UB]; DpGroup g[1]; } DpBlob;
+/* (gs_core.c dptexa) nothing a kept part draws reads TEXA: no texture, a 32-bit one, or 8 / 4-bit with a 32-bit palette
+   loaded with it (CLD 0 with CBP 0 is the GS's last palette, of a format not known here) */
+int GsGpu_DpTexaFree(const void *blob) {
+    const DpBlob *b = (const DpBlob *)blob;
+    int i;
+    for (i = 0; i < b->ngroups; i++) {
+        const DpGroup *g = &b->g[i];
+        uint32_t psm = (uint32_t)(g->t0 >> 20) & 0x3F, cpsm = (uint32_t)(g->t0 >> 51) & 0xF;
+        uint32_t cbp = (uint32_t)(g->t0 >> 37) & 0x3FFF, cld = (uint32_t)(g->t0 >> 61) & 7;
+        if (!g->st.tme || psm == 0x00) {
+            continue;
+        }
+        if ((psm == 0x13 || psm == 0x14 || psm == 0x1B || psm == 0x24 || psm == 0x2C) && cpsm == 0 && !(cld == 0 && cbp == 0)) {
+            continue;
+        }
+        return 0;
+    }
+    return 1;
+}
 /* (dpfast: unsafe, a stage group in it that does not commute; seeThru, a group with mask 8; the triangles and strips, for the counters) */
 int gVitaDpFast = 1;  /* bt3.txt dpfast: a kept part drawn with what does not change worked out when it was kept: 0 off, 1 on (default), 2 in the soak's B battles */
 unsigned gVitaDpFastN[3];    /* for the log: parts drawn the quick way */

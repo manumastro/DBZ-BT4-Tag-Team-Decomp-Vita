@@ -2788,6 +2788,126 @@ static void tri_run(const uint64_t *q, uint32_t n) {
     gs.vcount = 0;
     gs.strip = 3;
 }
+/* ---- bt3.txt fxclamp: a run of the animated effects' triangles (EftSprAnim_QueueTri, src/battle/eft_ae.c, through
+   EftAnimPart_Draw: a beam's and an explosion's layers), one GIF tag "REGLIST, 14 registers": PRIM, TEX0, CLAMP (5),
+   three times RGBAQ, ST, XYZF2, CLAMP (0), NOP, all with the same PRIM, TEX0 and first CLAMP. Neither tri_run nor
+   quad_run knew the shape, so each triangle went register by register and the full way (its CLAMP writes changing
+   the state's generation twice a triangle). Each triangle is drawn with the first CLAMP, as on the GS; after the run
+   the registers are as the last packet leaves them. 0 off, 1 on, 2 the soak's B battles. ---- */
+int gVitaFxClamp;
+unsigned gVitaFxClampN[2]; /* (the log) runs, triangles in them */
+static int fxclamp_on(void) {
+    extern int gVitaAbSide;
+    return gVitaFxClamp == 2 ? gVitaAbSide == 1 : gVitaFxClamp != 0;
+}
+static void clamp_tri_run(const uint64_t *q, uint32_t n) {
+    extern int gVitaGsSkip;
+    extern void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri);
+    static GsVertex vb[3 * 64];
+    uint32_t i, j, k, texreg = (uint32_t)((q[1] >> 4) & 0xF), clampreg = (uint32_t)((q[1] >> 8) & 0xF);
+    const uint64_t *last = q + 16 * (n - 1);
+    int ctx;
+    float ox, oy;
+    gVitaFxClampN[0]++;
+    gVitaFxClampN[1] += n;
+    sStat[3] += n;
+    reg_write(0, q[2]);
+    reg_write(texreg, q[3]);
+    reg_write(clampreg, q[4]);
+    ctx = (int)((gs.prim >> 9) & 1);
+    ox = (float)(gs.xyoffset[ctx] & 0xFFFF);
+    oy = (float)((gs.xyoffset[ctx] >> 32) & 0xFFFF);
+    for (i = 0; i < n; i += 64) {
+        uint32_t m = n - i < 64 ? n - i : 64;
+        for (j = 0; j < m; j++) {
+            const uint64_t *pk = q + 16 * (i + j);
+            GsVertex *v = &vb[3 * j];
+            if (i + j + 3 < n) {
+                const char *ahead = (const char *)(pk + 16 * 3);
+                __builtin_prefetch(ahead);
+                __builtin_prefetch(ahead + 32);
+                __builtin_prefetch(ahead + 64);
+                __builtin_prefetch(ahead + 96);
+            }
+            if (i + j > 0) { /* PRIM, TEX0 and CLAMP again, with the values they hold */
+                sStat[4] += 3;
+                if (pk[3] >> 61) {
+                    clut_note(pk[3]);
+                }
+            }
+            sStat[4] += 10;
+            sStat[5] += 3;
+            for (k = 0; k < 3; k++) {
+                uint64_t c = pk[5 + 3 * k], st = pk[6 + 3 * k], xyz = pk[7 + 3 * k];
+                uint32_t qq = (uint32_t)(c >> 32), tt = (uint32_t)(st >> 32), ss = (uint32_t)st;
+                v[k].x = ((float)(int)(uint32_t)(xyz & 0xFFFF) - ox) / 16.0f;
+                v[k].y = ((float)(int)(uint32_t)((xyz >> 16) & 0xFFFF) - oy) / 16.0f;
+                v[k].z = (uint32_t)((xyz >> 32) & 0xFFFFFF);
+                v[k].r = (uint8_t)c; v[k].g = (uint8_t)(c >> 8); v[k].b = (uint8_t)(c >> 16); v[k].a = (uint8_t)(c >> 24);
+                memcpy(&v[k].s, &ss, 4);
+                memcpy(&v[k].t, &tt, 4);
+                memcpy(&v[k].q, &qq, 4);
+                v[k].u = (int)(gs.uv & 0x3FFF);
+                v[k].v = (int)((gs.uv >> 16) & 0x3FFF);
+            }
+        }
+        if (!gVitaGsSkip) {
+            GsGpu_DrawTriRun(ctx, vb, m);
+        }
+    }
+    reg_write(clampreg, last[14]); /* (the registers as the last packet leaves them) */
+    gs.rgbaq = last[11];
+    { uint32_t qq = (uint32_t)(last[11] >> 32); memcpy(&gs.q, &qq, 4); }
+    gs.st = last[12];
+    gs.vtx[0] = vb[3 * ((n - 1) % 64)];
+    gs.vtx[1] = vb[3 * ((n - 1) % 64) + 1];
+    gs.vtx[2] = vb[3 * ((n - 1) % 64) + 2];
+    gs.vcount = 0;
+    gs.strip = 3;
+}
+/* bt3.txt gifshapes=1 (a measure only): the GIF tags read outside the runs, by their shape (the tag without NLOOP and
+   EOP, the register list), in drawn lists; the most frequent printed in each report */
+int gVitaGifShapes;
+static struct { uint64_t lo, hi; unsigned n, regs; } sGifShape[128];
+static void gif_shape(uint64_t lo, uint64_t hi) {
+    uint64_t klo = lo & ~0xFFFFull;
+    uint32_t h = (uint32_t)(((klo ^ hi) * 0x9E3779B97F4A7C15ull) >> 57), k;
+    unsigned regs = (unsigned)(lo & 0x7FFF) * (unsigned)(((lo >> 60) & 0xF) ? ((lo >> 60) & 0xF) : 16);
+    for (k = 0; k < 8; k++, h = (h + 1) & 127) {
+        if (sGifShape[h].n == 0) {
+            sGifShape[h].lo = klo;
+            sGifShape[h].hi = hi;
+        }
+        if (sGifShape[h].lo == klo && sGifShape[h].hi == hi) {
+            sGifShape[h].n++;
+            sGifShape[h].regs += regs;
+            return;
+        }
+    }
+}
+void Gs_GifShapesLog(void) {
+    extern void Vita_Log(const char *fmt, ...);
+    int k, r;
+    if (!gVitaGifShapes) {
+        return;
+    }
+    for (r = 0; r < 10; r++) {
+        int best = -1;
+        for (k = 0; k < 128; k++) {
+            if (sGifShape[k].n != 0 && (best < 0 || sGifShape[k].regs > sGifShape[best].regs)) {
+                best = k;
+            }
+        }
+        if (best < 0) {
+            break;
+        }
+        Vita_Log("vita:   GIF shape %d: tag %08x%08x list %08x%08x: %u tags, %u registers\n", r, (unsigned)(sGifShape[best].lo >> 32), (unsigned)sGifShape[best].lo,
+                 (unsigned)(sGifShape[best].hi >> 32), (unsigned)sGifShape[best].hi, sGifShape[best].n, sGifShape[best].regs);
+        sGifShape[best].regs = 0;
+        sGifShape[best].n = 0xFFFFFFFFu; /* (printed: left out of the next turns) */
+    }
+    memset(sGifShape, 0, sizeof(sGifShape));
+}
 /* ---- bt3.txt fxrun (the effects as runs): a run of the effects' quad packets, EftGfx_DrawSprite's (src/battle/eft_a.c:
    REGLIST 14: PRIM, TEX0, 4 x (RGBAQ, ST, XYZF2)) or EftPrim_DrawBillboard's / EftBubble_DrawOne's (eft_b.c: REGLIST 12:
    PRIM, TEX0, RGBAQ, 4 x (ST, XYZF2), NOP), PRIM a triangle strip, all with the same PRIM and TEX0: each drawn as its
@@ -2925,6 +3045,17 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
             qwc -= (stride / 2) * n;
             continue;
         }
+        if (loops == 0 && qwc >= 8 && sGpu && !sDpCap && sVtxDbg == 0 && (q[2] & 7) == 3 && !((q[2] >> 8) & 1) &&
+            (q[0] == 0xE400000000008001ull || q[0] == 0xE400000000000001ull) && (q[1] == 0xF8421421421860ull || q[1] == 0xF9421421421970ull) && fxclamp_on()) {
+            uint32_t n = 1, maxn = qwc / 8; /* (fxclamp) */
+            while (n < maxn && q[16 * n] == q[0] && q[16 * n + 1] == q[1] && q[16 * n + 2] == q[2] && q[16 * n + 3] == q[3] && q[16 * n + 4] == q[4]) {
+                n++;
+            }
+            clamp_tri_run(q, n);
+            q += 16 * n;
+            qwc -= 8 * n;
+            continue;
+        }
 #endif
         if (loops == 0) {
             sStat[3]++;
@@ -2936,6 +3067,12 @@ __attribute__((hot)) void Gs_Gif(const uint8_t *p, uint32_t qwc) {
             reg = 0;
 #ifdef PORT_VITA
             gVitaGifN[(tag_lo >> 58) & 3 ? (((tag_lo >> 58) & 3) == 1 ? 1 : 2) : 0]++;
+            if (__builtin_expect(gVitaGifShapes, 0) && sGpu) {
+                extern int gVitaGsSkip;
+                if (!gVitaGsSkip) {
+                    gif_shape(tag_lo, tag_hi);
+                }
+            }
 #endif
             if (loops != 0 && ((tag_lo >> 46) & 1) && ((tag_lo >> 58) & 3) == 0) {
                 reg_write(0, (tag_lo >> 47) & 0x7FF);
@@ -3728,6 +3865,22 @@ int gVitaDpWays = 1;
 int gVitaSilGate = 1;          /* bt3.txt silgate (gs_vu1.c): 0 off, 1 on, 2 the soak's B battles */
 unsigned gVitaSilGateN[2];     /* (the log) shadow-page strips held back by silgate, gone through */
 unsigned gVitaSilProbe = 16;   /* bt3.txt silprobe: with silgate, one frame in this many (a power of two) sends the strips all */
+/* bt3.txt dptexa: a kept part whose groups cannot read TEXA (no texture, a 32-bit one, or 8 / 4-bit with a 32-bit
+   palette: TEXA expands only 24 and 16-bit colours, and a kept group draws the texture made when it was kept) does not
+   compare TEXA. Every strip reads it (DP_STRIP_READS), and the effects of a 2 vs 2 fight set it between the parts:
+   ~1,250 of the ~1,300 parts found in another state every 2 s in a beam special, TEXA the first field that differed,
+   each walked record by record. 0 off, 1 on, 2 the soak's B battles */
+int gVitaDpTexa;
+unsigned gVitaDpTexaN[2]; /* (the log) forms kept without TEXA; parts walked whose kept form differed in TEXA alone */
+static inline int dptexa_on(void) {
+    extern int gVitaAbSide;
+    return gVitaDpTexa == 2 ? gVitaAbSide == 1 : gVitaDpTexa != 0;
+}
+/* bt3.txt dppf: the drawing thread fetches the next record's kept part (its place, the form that matched last) while
+   it does this record: a part's match and apply wait ~2,000 cycles a part on the memory (zones 32, 1). 0 off, 1 on,
+   2 the soak's B battles */
+int gVitaDpPf;
+static uint8_t sDpHint[8192]; /* the form that matched last, by first place */
 static inline int dpways_on(void) {
     extern int gVitaAbSide;
     return gVitaDpWays == 2 ? gVitaAbSide == 1 : gVitaDpWays != 0;
@@ -3746,7 +3899,8 @@ typedef struct DpSlot { uint32_t serial, refused, made, hits, seen, last; DpForm
    (stage 18: ~1,550), more than there were places: two parts on one place took turns being walked the long way
    (~1,000 a 2 s on stage 18). Taken from the heap when the first number is given out (the list reader, before any
    record carries one), half as many if that fails; bt3.txt dpslots=<power of two, 1024-8192>. */
-int gVitaDpSlots = 2048;
+int gVitaDpSlots = 4096; /* (BT4: 4096 since 2026-11-16: in 2 vs 2, 2048 places left ~800 parts a 2 s walked as their place was
+                            another's in use, 4096 ~3; ~10 MB more heap) */
 static DpSlot *volatile sDp;
 static uint32_t sDpMask;
 static uint32_t *sDpGiven; /* the list a place was last given out in (the list reader's) */
@@ -3933,6 +4087,7 @@ static int dp_part(uint32_t serial, const float *consts) {
                 s->hits++;
                 s->seen = sFrame;
                 s->last = (uint32_t)kk;
+                sDpHint[serial & sDpMask & 8191] = (uint8_t)kk;
                 return 1;
             }
         }
@@ -3940,6 +4095,25 @@ static int dp_part(uint32_t serial, const float *consts) {
     if (s->f[0].gpu != NULL) {
         static unsigned logged;
         gVitaDp[5]++; /* (kept, but the GS state differs) */
+        for (k = 0; k < DP_FORMS; k++) { /* (for the log: a kept form that differs in TEXA alone, dptexa) */
+            uint64_t m = s->f[k].gpu != NULL ? s->f[k].cmp : 0;
+            int texa = 0, other = 0;
+            if (!(m & DPF(5))) {
+                continue;
+            }
+            while (m != 0 && !other) {
+                int i = __builtin_ctzll(m);
+                if (dp_field(i) != s->f[k].entry[i]) {
+                    texa |= i == 5;
+                    other |= i != 5;
+                }
+                m &= m - 1;
+            }
+            if (texa && !other) {
+                gVitaDpTexaN[1]++;
+                break;
+            }
+        }
         for (k = 0; k < DP_FORMS; k++) { /* (for the log: the first field that differs, form by form) */
             uint64_t m = s->f[k].gpu != NULL ? s->f[k].cmp : 0;
             while (m != 0) {
@@ -4061,6 +4235,13 @@ static void dp_cap_end(uint32_t serial) {
     GsGpu_DpFree(f->gpu);
     memcpy(f->entry, sDpEntry, sizeof(sDpEntry));
     dp_snap(f->exit);
+    if ((sDpCmp & DPF(5)) && !(sDpWr & DPF(5)) && dptexa_on()) {
+        extern int GsGpu_DpTexaFree(const void *blob);
+        if (GsGpu_DpTexaFree(gpu)) {
+            sDpCmp &= ~DPF(5); /* (dptexa: nothing it draws reads TEXA) */
+            gVitaDpTexaN[0]++;
+        }
+    }
     f->cmp = sDpCmp;
     f->wr = sDpWr;
     {   /* (the fields compared, packed: dp_match) */
@@ -4795,6 +4976,22 @@ static void *gr_thread(void *arg) {
                 sGrCurType = r->type; /* (the watchdog) */
                 __builtin_prefetch(&sGr[(h + size) % GR_SIZE]);
                 __builtin_prefetch(&sGr[(h + size + 64) % GR_SIZE]);
+                extern int gVitaAbSide;
+                if (gVitaDpPf != 0 && sDp != NULL && h + size != t && (gVitaDpPf != 2 || gVitaAbSide == 1)) {
+                    const GRec *n1 = (const GRec *)(const void *)&sGr[(h + size) % GR_SIZE];
+                    if (n1->type == GR_PART && !(n1->flags & 1)) { /* (dppf: the next record's kept part) */
+                        uint32_t sl = n1->c & sDpMask;
+                        const DpSlot *ps = &sDp[sl];
+                        const uint8_t *pf = (const uint8_t *)&ps->f[sDpHint[sl & 8191] & (DP_FORMS - 1)];
+                        __builtin_prefetch(ps);
+                        __builtin_prefetch(pf);
+                        __builtin_prefetch(pf + 32);
+                        __builtin_prefetch(pf + 64);
+                        __builtin_prefetch(pf + 96);
+                        __builtin_prefetch(pf + 128);
+                        __builtin_prefetch(pf + 160);
+                    }
+                }
                 if (gVitaZoneOn & 1) {
                     extern int Vita_PmonGet(int thid, unsigned int counter, unsigned int *value);
                     unsigned c0 = 0, c1 = 0, ty = r->type & 15;

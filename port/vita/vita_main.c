@@ -1148,6 +1148,17 @@ void Vita_VBlank(unsigned vblanks) {
                               gVitaDpBusyL[0], gVitaDpBusyL[1], gVitaSilGateN[0], gVitaSilGateN[1]);
                         logf_("vita:   kept calls sent as their registers in lists not drawn (skipcc): %u | targets' signatures taken as they were (wtsig): %u, worked out %u | kept parts handed over without waking the render thread (rtkick): %u\n",
                               gVitaSkipCcN[0], gVitaWtSigN[0], gVitaWtSigN[1], gVitaRtKickN[0]);
+                        {
+                            extern unsigned gVitaDpTexaN[2], gVitaTexRtN[3], gVitaFxClampN[2];
+                            extern void Gs_GifShapesLog(void);
+                            logf_("vita:   fxclamp: %u runs, %u triangles\n", gVitaFxClampN[0], gVitaFxClampN[1]);
+                            memset(gVitaFxClampN, 0, sizeof(gVitaFxClampN));
+                            Gs_GifShapesLog();
+                            logf_("vita:   kept forms without TEXA (dptexa): %u; parts walked whose kept form differed in TEXA alone: %u | texrt: %u pieces from the pools, %u made the old way, %u textures set up by the render thread\n",
+                                  gVitaDpTexaN[0], gVitaDpTexaN[1], gVitaTexRtN[0], gVitaTexRtN[1], gVitaTexRtN[2]);
+                            memset(gVitaDpTexaN, 0, sizeof(gVitaDpTexaN));
+                            memset(gVitaTexRtN, 0, sizeof(gVitaTexRtN));
+                        }
                         memset(gVitaDpBusyL, 0, sizeof(gVitaDpBusyL));
                         memset(gVitaSilGateN, 0, sizeof(gVitaSilGateN));
                         gVitaSkipCcN[0] = gVitaRtKickN[0] = 0;
@@ -1653,6 +1664,21 @@ static void read_settings(void) {
         } else if (strcmp(line, "wtsig") == 0) { /* the targets' signatures worked out only when GS memory changed: 0 off, 1 on, 2 soak B */
             extern int gVitaWtSig;
             gVitaWtSig = atoi(eq);
+        } else if (strcmp(line, "fxclamp") == 0) { /* the animated effects' triangles (with their CLAMP writes) as runs: 0 off, 1 on, 2 soak B */
+            extern int gVitaFxClamp;
+            gVitaFxClamp = atoi(eq);
+        } else if (strcmp(line, "gifshapes") == 0) { /* 1: the GIF tags outside the runs counted by shape, in the report (a measure) */
+            extern int gVitaGifShapes;
+            gVitaGifShapes = atoi(eq);
+        } else if (strcmp(line, "dptexa") == 0) { /* a kept part that cannot read TEXA does not compare it: 0 off, 1 on, 2 soak B */
+            extern int gVitaDpTexa;
+            gVitaDpTexa = atoi(eq);
+        } else if (strcmp(line, "dppf") == 0) { /* the next record's kept part fetched ahead: 0 off, 1 on, 2 soak B */
+            extern int gVitaDpPf;
+            gVitaDpPf = atoi(eq);
+        } else if (strcmp(line, "texrt") == 0) { /* textures with a palette made without waiting for the render thread: 0 off, 1 on, 2 soak B */
+            extern int gVitaTexRt;
+            gVitaTexRt = atoi(eq);
         } else if (strcmp(line, "rtkick") == 0) { /* the render thread not woken for every kept part: 0 off, 1 on, 2 soak B */
             extern int gVitaRtKick;
             gVitaRtKick = atoi(eq);
