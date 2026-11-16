@@ -312,6 +312,20 @@ int __wrap_Progress_Main(int arg) {
             extern unsigned char GAME_PTR Battle_GetSetup(void);
             *(int GAME_PTR)(Battle_GetSetup()+8)=0;
         }
+        if(getenv("BT4_RENDER_TEST")&&getenv("BT4_HUD_TEAM_TEST")) {
+            extern void BattleSetup_SetRule(int,int,int,int,int,int,int);
+            extern void BattleSetup_SetSide(int,int,int,int,int,int,int,void GAME_PTR);
+            extern void BattleSetup_SetMember(int,int,int,int,int,int,float,void GAME_PTR);
+            extern void BattleSetup_Finish(void);
+            int side,member;
+            BattleSetup_SetRule(0,0,54,0,7,0,0);
+            for(side=0;side<2;++side) {
+                BattleSetup_SetSide(side,side?2:0,side? -1:0,5,0,0,0,NULL);
+                for(member=0;member<5;++member)
+                    BattleSetup_SetMember(side,member,(side*5+member)*2,0,0,1,100.0f,NULL);
+            }
+            BattleSetup_Finish();
+        }
         /* BT3_CHARA=<id> (and BT3_COSTUME=<n>, BT3_VARIANT=1 for the damaged model): side 0's fighter of the demo
            battle, for looking at one character's model without going through the menus */
         extern struct { int chara, costume, variant; } GAME_PTR BattleSide_GetMember(int side, int index);
@@ -484,6 +498,15 @@ int Port_BattleOutcome(int *winner) {
         *winner = Battle_GetResult()->winner;
     }
     return gBtlSeq->state;
+}
+
+int Port_BattleRoster(int side,int *ids,int capacity) {
+    extern int BattleSide_GetMemberCount(int side);
+    extern int BattleSide_GetMemberChara(int side,int index);
+    int i,n;if(!gBtlSeq||side<0||side>1||!ids)return 0;
+    n=BattleSide_GetMemberCount(side);if(n<1||n>capacity)return 0;
+    for(i=0;i<n;++i)ids[i]=BattleSide_GetMemberChara(side,i);
+    return n;
 }
 
 /* Main-menu item 4, Dragon Net Battle, was confirmed (src/menu/menu_a.c): the settings code opens the online
@@ -870,7 +893,8 @@ void Port_Trace(unsigned vblanks) {
         }
         if (started && *(int GAME_PTR)(chr+0x948) >= 0x106 && *(int GAME_PTR)(chr+0x948) <= 0x126) entered = 1;
         if(started&&getenv("BT4_TEST_ACTION")&&*(int GAME_PTR)(chr+0x948)>=0xB4&&*(int GAME_PTR)(chr+0x948)<=0xBF)entered=1;
-        if (entered && vblanks-began > 180 && *(int GAME_PTR)(chr+0x948) < 0xFD && *(int GAME_PTR)(other+0x948) < 0xFD && (!getenv("BT4_TEST_ACTION")||*(int GAME_PTR)(chr+0x948)<0xB4||*(int GAME_PTR)(chr+0x948)>0xBF)) {
+        extern int Bt4BodyChange_Active(int);
+        if (entered && !Bt4BodyChange_Active(actor) && !Bt4BodyChange_Active(victim) && vblanks-began > 180 && *(int GAME_PTR)(chr+0x948) < 0xFD && *(int GAME_PTR)(other+0x948) < 0xFD && (!getenv("BT4_TEST_ACTION")||*(int GAME_PTR)(chr+0x948)<0xB4||*(int GAME_PTR)(chr+0x948)>0xBF)) {
             if(!recovered){recovered=vblanks;fprintf(stderr,"bt4: tech recovered vb=%u\n",vblanks);}
             if(getenv("BT4_TAG_OWNERSHIP_TEST")&&vblanks-recovered<120)return;
             fprintf(stderr,"bt4: tech end action=%x tick=%d\n",*(int GAME_PTR)(chr+0x948),tick);

@@ -119,9 +119,15 @@ void PortPcm_Close(void *h) { (void)h; }
 /* (port/src/a11y_game.c) */
 void PortA11y_FontText(int kind, int arg, int flags) {}
 void PortA11y_StreamStart(const char *path) {}
+void Port_CacheFighterNames(void *names, void *forms) {} /* (the fighters' names for the PC's TrueType labels) */
 
 /* (port/src/fight_panels.c) */
 void Port_HudFeed(int kind, int side, int a, int b) {}
+/* (BT4decomp 0.1.39.6: the Tag Team HUD's allies over their fighters, and the fighters' names over the target) */
+void PortPanels_SetBattleActive(int active) {}
+void Port_TagAllyHudFeed(int pane,int viewer,int actor,int x,int y) {}
+void Port_TagAllyHudReset(void) {}
+int Port_TagActorName(int actor,char *out,int cap) { return 0; } /* (no name: the PC writes it in TrueType) */
 
 /* (port/src/gs/a11y.c) */
 float PortA11y_StreamGain(const void *player) { (void)player; return 1.0f; } /* the game's own volume (no accessibility options on the Vita) */
@@ -136,6 +142,12 @@ int Port_GameProfileLanguage(void) { return gVitaBt4English; /* 0 Spanish, 1 Eng
 int Port_GameProfileMenuActive(void) { return 0; }
 int Port_GameProfilePrompt(void) { return 0; }
 void Port_GameProfileMenuSet(int active,int choice,int alpha) {}
+int Port_GameProfilePortuguese(void) { return 0; } /* (the Brazilian Portuguese pack is the PC's) */
+/* The English profile's songs from an installed Spanish profile (the anime soundtrack, F1 setting anime_music): the
+   PC reads them from the Spanish install's extracted files (<root>/languages/es/pzs4us1/NNNNN.bin, NNNNN 02069 to
+   02302). The Vita looks for one disc only, so none here; the same files put in a mods pack
+   (ux0:data/bt4/mods/<Pack>/pzs4us1/NNNNN.bin, vita_file.c mod_path) replace the English disc's songs today. */
+int Port_GameProfileAnimeMusicPath(int partition,int file,char *path,int size) { (void)partition; (void)file; (void)path; (void)size; return 0; }
 
 /* (port/src/gs/gs_draw.c) */
 int Port_BoundaryDrawing(void) { return 0; }
@@ -158,6 +170,7 @@ void PortTbo_OpenCommunity(void) {}
 void PortTbo_Paste(void) {}
 void PortTbo_PasteText(void) {}
 void PortTbo_TextMode(int on) {}
+int PortInput_TagTargetMethod(int player, int method) { return 0; } /* (the PC's choice of L3, right stick or D-pad: the Vita's is L3) */
 void Port_ClashLog(int player, const char *what, int fromInput, int total, int frame) {}
 void Port_PadVibrate(int socket, int small, int large) {}
 
@@ -167,6 +180,7 @@ void MenuText_RegisterGlyphs(int tbp, int cbp, const void *glyphs, int count, in
 
 /* (port/src/gs/menu_translation.c) */
 void MenuTranslation_SaveChoice(const char *locale) {}
+int MenuTranslation_Ensure(void) { return 0; } /* (no translated menus' TrueType lines on the Vita) */
 
 /* (port/src/gs/namefont.c) */
 void Port_NameFontSheets(int stage, int song, int songLit) {}
@@ -192,6 +206,18 @@ void Port_LobbyQuickArea(const char *area) {}
 void Port_NetInput(int player,unsigned char *data) {}
 void Port_NetLeave(void) {}
 void Port_NetNameSave(const char *name) {}
+/* (BT4decomp 0.1.39.6: ranked, tournaments and the host's rules, answered as no session) */
+void Port_NetAutomaticOptions(void) {}
+int Port_NetItemsRestricted(void) { return 0; }
+int Port_NetLongBeamClash(void) { return 0; }
+int Port_NetRankedRequeueSupported(void) { return 0; }
+void Port_NetRequestRankedRequeue(void) {}
+void Port_NetRequestTournamentExit(void) {}
+int Port_NetTakeRankedRequeue(void) { return 0; }
+int Port_NetTakeTournamentExit(void) { return 0; }
+int Port_NetTournamentResult(void) { return 0; }
+/* (port/src/gs/match_supabase.cpp: the ranked stage's rock with a Dragon Ball, none offline) */
+unsigned Port_RankedRockSeed(void) { return 0; }
 
 /* (port/src/gs/net_lobby.c) */
 int Port_LobbyCreate(int byCode, int port, int battle, int time, int speed, int rollback, int delay) { return 0; }
@@ -211,6 +237,15 @@ int PortSpectator_Camera(const float *native_eye,const float *native_rot,const f
 void PortSpectator_EndBattle(void) {}
 void PortSpectator_ResolveEye(const float *eye) {}
 void PortSpectator_SetInputActive(int active) {}
+/* (its F1 page's settings, read and kept as on PC; the Vita has no spectator camera) */
+int PortSpectator_Target(void) { return 0; }
+int PortSpectator_Speed(void) { return 100; }
+int PortSpectator_Zoom(void) { return 100; }
+void PortSpectator_SetMode(int mode) {}
+void PortSpectator_SetTarget(int target) {}
+void PortSpectator_SetSpeed(int speed) {}
+void PortSpectator_SetZoom(int zoom) {}
+void PortSpectator_ResetCamera(void) {}
 
 /* (port/src/gs/stage_art.c) */
 unsigned Port_StageArt(int stage,int kind) { return 0; }
@@ -243,6 +278,14 @@ int Port_ModsCamCollide(int side) { return 0; }
 int Port_ModsCamZoom(int side) { return 0; }
 void Port_ModsCamera(int side, int objId, int pos, int rot, int paused) {}
 void Port_NaturalFightCamera(int objId,int pos,int rot) {}
+/* (BT4decomp 0.1.39.6: the Lua mods' split-screen presentation; no Lua mods on the Vita) */
+int Port_PresentationSplitDrawing(int change) { return 0; }
+int Port_PresentationSplitActor(int pane) { return pane != 0; }
+/* (port/src/gs/mods.c) */
+int Mods_SplitScreen(void) { return 0; }
+int Port_ModernHudActive(void) { return 0; }
+/* (port/src/gs/tag_menu_movie.c: the PC's Tag Team menu's film) */
+void Port_TagMenuMovieBegin(void) {}
 
 /* (port/src/plat_fastvec.c) */
 int Port_FastMtxApply(const uint32_t *r, const uint32_t *v, uint32_t *out) { return 0; }

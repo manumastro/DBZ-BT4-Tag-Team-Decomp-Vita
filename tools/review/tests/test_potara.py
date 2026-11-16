@@ -14,7 +14,7 @@ def function(source, signature):
     return source[start:end]
 
 class PotaraTests(unittest.TestCase):
-    def test_tag_draft_keeps_each_local_set_and_rejects_network_items(self):
+    def test_tag_draft_keeps_local_sets_and_uses_authoritative_network_items(self):
         cc=os.environ.get('CC') or shutil.which('gcc') or shutil.which('cc')
         if not cc:self.skipTest('A C compiler is required')
         source=(ROOT/'src/battle/battle_work.c').read_text()
@@ -24,26 +24,30 @@ class PotaraTests(unittest.TestCase):
 #include <assert.h>
 #include <stdio.h>
 extern void *memset(void *,s32,u32);
+extern void *memcpy(void *,const void *,u32);
 static BattleItemSet sTagDraftItems[10];static s32 sTagDraftItemChara[10];
+static u16 remoteItems[10][8];
 static int network;
 int Port_TagNetwork(void){return network;}
+const u16 *Port_TagPlayerItems(int actor){return actor>=0&&actor<10?remoteItems[actor]:NULL;}
 '''+ '\n'.join(function(source,s) for s in ('void TagBattle_ClearDraftItems(', 'void TagBattle_SetDraftItems(', 'BattleItemSet *TagBattle_GetDraftItems('))+r'''
 int main(void){
     u16 ids[8]={134,114,1,350,65535,351,133,0};
     TagBattle_ClearDraftItems();
     for(int i=0;i<10;++i)assert(!TagBattle_GetDraftItems(i,i));
     TagBattle_SetDraftItems(-1,0,ids);TagBattle_SetDraftItems(10,0,ids);
-    for(int i=0;i<10;++i){ids[1]=114+i;TagBattle_SetDraftItems(i,30+i,ids);}
+    for(int i=0;i<10;++i){ids[1]=114+i;TagBattle_SetDraftItems(i,30+i,ids);remoteItems[i][0]=114+i;}
     for(int pass=0;pass<2;++pass){network=pass;
         for(int i=0;i<10;++i){BattleItemSet *set=TagBattle_GetDraftItems(i,30+i);
+            if(pass){assert(set&&set->id[0]==114+i&&set->id[1]==0);continue;}
             assert(!TagBattle_GetDraftItems(i,99));
-            if(pass){assert(!set);continue;}
             assert(set&&set->id[0]==134&&set->id[1]==114+i&&set->id[2]==1&&set->id[3]==350);
             assert(!set->id[4]&&!set->id[5]&&set->id[6]==133&&!set->id[7]);
         }
     }
     network=0;TagBattle_ClearDraftItems();for(int i=0;i<10;++i)assert(!TagBattle_GetDraftItems(i,30+i));
-    puts("Tag Potara: ten independent local sets, changed fighters, reset and online isolation PASS");
+    network=1;assert(!TagBattle_GetDraftItems(-1,0)&&!TagBattle_GetDraftItems(10,0));
+    puts("Tag Potara: ten local sets, reset and authoritative online items PASS");
 }
 '''
         with tempfile.TemporaryDirectory() as temp:
@@ -98,7 +102,9 @@ PROBE=r'''
 extern void *memset(void *,s32,u32);
 extern int memcmp(const void *,const void *,size_t);
 CommonRes *gCommonRes;SaveData *gSaveData;
-static int nativeOnline,tagOnline;
+static int nativeOnline,tagOnline,presets;
+int Port_NetItemsRestricted(void){return nativeOnline;}
+int Port_TagOfflineCustom(void){return presets;}
 int Port_NetSession(void){return nativeOnline;}
 int Port_TagNetwork(void){return tagOnline;}
 int main(int argc,char **argv){
@@ -108,14 +114,15 @@ int main(int argc,char **argv){
     ChrTblFile *hdr=(void*)raw;ItemTblEntry *table=(void*)(raw+(hdr->itemOffset&~3));
     ChrTblEntry *chars=(void*)(raw+(hdr->charaOffset&~3));
     assert(sizeof(ItemTblEntry)==40&&sizeof(ChrTblEntry)==60);
-    for(int transport=0;transport<3;++transport){
-        nativeOnline=transport==1;tagOnline=transport==2;
+    for(int transport=0;transport<6;++transport){
+        nativeOnline=transport==1;tagOnline=transport==2||transport==4;presets=transport==4;
+        int restricted=transport==1||transport==2;
         for(int id=1;id<=350;++id){
             BattleMember m;BattleItemSet items={{0}};items.id[0]=id;
             BtlMember_Init(&m,86,2,1,13,75.0f,&items);
             assert(m.chara==86&&m.costume==2&&m.variant==1&&m.health==75.0f);
             int stats[4]={0},bits[4]={0},ai=chars[86].aiType;
-            if(!transport){
+            if(!restricted){
                 ItemTblEntry *it=&table[id-1];
                 if(it->type==ITEMTBL_TYPE_AI){if(id-ITEMTBL_AI_FIRST)ai=id-ITEMTBL_AI_FIRST;}
                 else for(int k=0;k<4;++k){stats[k]=it->stat[k];bits[k]=it->ability[k];}
@@ -131,7 +138,7 @@ int main(int argc,char **argv){
            mechanically neutral on both network paths, including red items. */
         BattleItemSet mixed={{1,2,3,114,115,124,350,0}};BattleMember m;
         BtlMember_Init(&m,107,1,0,13,100.0f,&mixed);
-        if(transport){for(int k=0;k<8;++k)assert(!m.bonus[k]);assert(!m.ability[0]&&!m.ability[1]);
+        if(restricted){for(int k=0;k<8;++k)assert(!m.bonus[k]);assert(!m.ability[0]&&!m.ability[1]);
             assert(!(m.ability[2]&~0x007FE000u)&&!(m.ability[3]&~0x0C100000u));}
         BattleItemSet invalid={{351,65535,0,0,0,0,0,0}};
         BtlMember_Init(&m,107,1,0,13,100.0f,&invalid);
@@ -144,7 +151,7 @@ int main(int argc,char **argv){
         clothes.id[0]=133;BtlMember_Init(&m,86,2,0,13,100.0f,&clothes);
         assert(m.variant==0&&m.ability[3]==(1<<26));
     }
-    free(raw);puts("Potara: all 350 original entries, stacked items, character AI and online 1v1/Tag visual-only balance PASS");
+    free(raw);puts("Potara: 350 items, stacking, character AI, private effects and competitive restrictions PASS");
 }
 '''
 if __name__=='__main__':unittest.main()

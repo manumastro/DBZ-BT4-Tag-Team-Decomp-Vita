@@ -2,6 +2,16 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## Unreleased
+
+- **BT4decomp 0.1.39.6 R1 1.2 merged in** (the PC port this one is built on; built, not yet tested on the console):
+  Tag Team's crash fixes (the effects of fights with more than two fighters, Ginyu's Body Change), its expanded
+  rules (joint attacks and fusions, on by default as on PC, also for the CPU fighters; cooperative revival, off by
+  default), the new Tag Team HUD (the game's own gauges for the fighter and the allies, a new radar, the target's
+  ring), and the partners' voices from BT4's own ranges. Not on the Vita: online play, split-screen, the PC's Tag
+  Team menus (the Vita keeps its own Tag Team setup screen), the fighters' names over the HUD, and the English game
+  with the Spanish install's anime songs.
+
 ## v1.3 (2026-11-14)
 
 - **Unlock All from the menus**: hold SELECT for two seconds in the menus and the same screen shows over the game,

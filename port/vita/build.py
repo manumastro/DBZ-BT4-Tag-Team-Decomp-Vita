@@ -68,7 +68,7 @@ ABI = ["-fsigned-char", "-fno-short-enums", "-fsigned-bitfields"]
 COMMON = ["-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-w", "-DPORT_VITA=1", "-DPORT_VITA_FIXED=1",
           '-DPORT_VITA_SFX="-vgl.txt"' if DEV else '-DPORT_VITA_SFX=".txt"', "-DPORT_VITA_GFX=1", "-DPORT_VITA_VGL=1",
           "-DMPEG2_PLAYER=1", "-DPORT_VITA_SOUND=1", "-DPORT_VITA_NATIVE=1",
-          "-DPORT_VITA_BT4=1", '-DPORT_VITA_HOME="ux0:data/bt4"', '-DPORT_VITA_ELF="SLUS_219.78"'] + ([] if DEV else ["-DPORT_VITA_RELEASE=1"])
+          "-DPORT_VITA_BT4=1", "-DBT4_TAG_TEAM_EXPANDED=1", '-DPORT_VITA_HOME="ux0:data/bt4"', '-DPORT_VITA_ELF="SLUS_219.78"'] + ([] if DEV else ["-DPORT_VITA_RELEASE=1"])
 # Profile-guided builds (BT3_PGO): gen counts with atomic updates (several threads run the same code); use takes the
 # counts where there are some (a profile from an older source of a file is used as far as it fits, with a warning)
 # counts only (VitaSDK's libgcov has no value profilers, no atomic updates and no file writing): arcs, with the

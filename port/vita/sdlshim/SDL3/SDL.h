@@ -45,6 +45,10 @@ static inline void SDL_LockSpinlock(SDL_SpinLock *l) {
     }
 }
 static inline void SDL_UnlockSpinlock(SDL_SpinLock *l) { __atomic_store_n(l, 0, __ATOMIC_RELEASE); }
+/* (BT4decomp's Tag Team radar cue, gs/snd_se.c: a request handed to the sound thread; SDL's Set returns the old value) */
+typedef struct SDL_AtomicInt { int value; } SDL_AtomicInt;
+static inline int SDL_SetAtomicInt(SDL_AtomicInt *a, int v) { return __atomic_exchange_n(&a->value, v, __ATOMIC_SEQ_CST); }
+static inline int SDL_GetAtomicInt(SDL_AtomicInt *a) { return __atomic_load_n(&a->value, __ATOMIC_SEQ_CST); }
 /* (BT4decomp's recording of its own mix for tests: not on the Vita) */
 typedef void (SDLCALL *SDL_AudioPostmixCallback)(void *userdata, const SDL_AudioSpec *spec, float *buffer, int buflen);
 static inline bool SDL_SetAudioPostmixCallback(SDL_AudioDeviceID dev, SDL_AudioPostmixCallback cb, void *userdata) {
