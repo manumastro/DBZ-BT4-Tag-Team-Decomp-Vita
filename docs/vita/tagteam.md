@@ -80,12 +80,25 @@ each line of letters as a GS sprite whose TEX0 has the reserved format `TBO_PSM`
   fight reads it (`TagBattle_ConfigureLocal`: `tag_combat<team><slot>`; `Port_TagOption`: joint attacks, fusions,
   revival; `TagBattle_SetLocalHealth`: per-fighter health). `port/vita/vita_tag.c` answers those calls as
   `tag_team_net.c`'s local room does.
-- **Not the PC's**: the free / spectator camera (above), the film behind the screens (`tbo/ui/tag_ui_*.pss`, 30 MB; the Vita shows its poster, the
-  picture the PC shows until the film's first frame), the translated screens, the online section, the Lua mods'
+- **Not the PC's**: the free / spectator camera (above), the film behind the screens (`tbo/ui/tag_ui_*.pss`, 30 MB: the Vita shows its poster unless
+  `tbomovie` is 1 or 2, see below), the translated screens, the online section, the Lua mods'
   split-screen presentation (`Mods_SplitScreen`; the two-player modes' own split is the game's and is there), the
   Lua Modern HUD (BT4decomp's bundled mod: it would need the Lua runtime and the mods' code, `port/src/gs/mods*.c`,
   `port/third_party/lua`, built for the Vita, and their drawing calls answered by the Vita's renderer), touch in
   these screens (pad only; the PC's mouse is only for the online hub's community button).
+- **The film behind the screens** (`tbomovie`, `port/vita/vita_tagmovie.c`): the PC's `port/src/gs/tag_menu_movie.c`
+  plays `tbo/ui/tag_ui_intro.pss`, then `tag_ui_loop.pss` (1280 x 720 MPEG-2, every picture intra) on a thread of its
+  own, with the decoder of `port/src/plat_mpeg2.c`, into one texture. The Vita's file is the same decoder, included
+  under its own names (as `tag_menu_movie.c` includes it: SDL is not on the Vita); the thread and the texture are
+  the Vita's own (vitaGL's `glTexSubImage2D` for each new picture, the picture made 960 x 540). `tbomovie=0` the
+  poster (as before, the default); `1` every picture decoded; `2` every other picture stepped over (the film keeps
+  its time). The package carries the two `.pss` files only when built with `BT4_VITA_TAGMOVIE=1` (30 MB more; the
+  download's size is the reason for the default). Built on `wip/tagmovie`, not run on a console yet. The estimate to
+  check: one core decodes about a third of the 512 x 448 pictures the opening movie has (`plat_movie.c`); 1280 x 720
+  is four times the pixels, so the film may play at a few pictures a second on one core. The log's `tagmovie:` line
+  (every 2 s) says which: pictures decoded and stepped over, decode ms a picture, the upload's ms, the core. The
+  multi-core player (`Mpeg2Player`, used by the opening movie) was not used: its eight finished-picture buffers of
+  1280 x 720 RGBA would take up to some 30 MB of the 80 MB heap.
 - **To measure on the console** (memory, speed): the textures held (the report's `tboui` line; the log's `tbo:`
   lines), the cost of a line of letters made on the drawing thread in a fight (the timer's every second; the
   gauges' figures when they change), 3 vs 3 to 5 vs 5 and Free for All 10 (the PC's limits: 5 a team, 10 in all; the

@@ -2066,6 +2066,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "tboui") == 0) { /* BT4decomp's own screens' pictures and TrueType lines drawn (vita_tbo.c): 0 off, 1 on, 2 soak B */
             extern int gVitaTboUi;
             gVitaTboUi = atoi(eq);
+        } else if (strcmp(line, "tbomovie") == 0) { /* the film behind the Tag Team screens (vita_tagmovie.c): 0 the poster, 1 the film, 2 the film, every other picture stepped over */
+            extern int gVitaTagMovie;
+            gVitaTagMovie = atoi(eq);
         } else if (strcmp(line, "fxclamp") == 0) { /* the animated effects' triangles (with their CLAMP writes) as runs: 0 off, 1 on, 2 soak B */
             extern int gVitaFxClamp;
             gVitaFxClamp = atoi(eq);

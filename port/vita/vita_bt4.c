@@ -403,8 +403,7 @@ int Port_PresentationSplitActor(int pane) { return pane != 0; }
 /* (port/src/gs/mods.c) */
 int Mods_SplitScreen(void) { return 0; }
 int Port_ModernHudActive(void) { return 0; }
-/* (port/src/gs/tag_menu_movie.c: the PC's Tag Team menu's film) */
-void Port_TagMenuMovieBegin(void) {}
+/* (the PC's Tag Team menu's film: Port_TagMenuMovieBegin is in port/vita/vita_tagmovie.c) */
 
 /* (port/src/plat_fastvec.c) */
 int Port_FastMtxApply(const uint32_t *r, const uint32_t *v, uint32_t *out) { return 0; }

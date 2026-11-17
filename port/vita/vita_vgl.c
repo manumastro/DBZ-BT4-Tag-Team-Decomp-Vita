@@ -2343,6 +2343,13 @@ unsigned Vita_VglTexRgba(const void *px, int w, int h) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)w, (GLsizei)h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     return t;
 }
+/* the film's texture (vita_tagmovie.c): the same texture, its pixels replaced (the render thread's work done first) */
+void Vita_VglTexUpdate(unsigned t, const void *px, int w, int h) {
+    rt_sync();
+    glBindTexture(GL_TEXTURE_2D, t);
+    sGlc.tex = 0; /* (the binding changes here) */
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+}
 void Vita_VglTexFree(unsigned t) {
     GLuint n = t;
     rt_sync();
