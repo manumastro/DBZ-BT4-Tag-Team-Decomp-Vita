@@ -39,6 +39,7 @@ switch is in [development.md](development.md)'s table):
 | `dpptr`, `dpcrec` | `dprt`'s two halves without the render thread's work: groups by their place, constants from the record | on | 2026-11-16, 2 vs 2: a kept part's match 1,630 -> 1,055 cycles, the beam 22.3 -> 23.3 |
 | `dpgen` | A kept part's register changes bump the state's generation (a correctness fix of the quick way) | on | 2026-11-16, 2 vs 2: no cost; ~7,000 such fields every 2 s |
 | `skipcc`, `dppf` | Kept calls in lists not drawn sent as registers only; the next kept part prefetched | off | 2026-11-16, 2 vs 2: skipcc worse (27.5 -> 26.6), dppf no gain |
+| `rtcap`, `skipasync`, `texrtfill`, `chipkeep`, `esrebind` | The heavy 2 vs 2 fight's single long lists (50-190 ms): the render thread let fall several pictures behind and then waited for at once; the texture pools never filled in a fight; the stage's copies let go with the fighters'; every model's kept calls made again at each bind of an object's model | off | not run yet (branch `wip/hitch`; causes from the runs `hx2`, `hx2off`) |
 
 Removed after a console run: `dpjoin` (never a pair). Also on by default, with all of the above: `runs/final` (10
 minutes, duels and three against three, six stages).
@@ -61,9 +62,9 @@ Not run yet:
   log;
 - **Vita3K**: stage 1 of [compare.md](compare.md) was skipped, the console runs went straight to stage 2;
 - the PS2 matching build and the PC port, for byte identity (the guards were checked by reading);
-- the heavy effects' test fight (`demoult`, [development.md](development.md)): the Super Spirit Bomb and the Dragon
-  Fist used again and again in a 1 vs 1 demo duel, for `fxlowmin` in a fight bound by the graphics chip; built, not
-  run.
+- the heavy effects' test fight in 2 vs 2 (`demoult` with `BT4_TAG_ACTOR_TEST=4`, `demochara3` / `demochara4`,
+  `demoultp=4`, [development.md](development.md)): the Super Spirit Bomb and the Dragon Fist on both teams, every
+  fighter in turn; built, not run (the 1 vs 1 one was run: the Results table).
 
 ## How to test on the console
 

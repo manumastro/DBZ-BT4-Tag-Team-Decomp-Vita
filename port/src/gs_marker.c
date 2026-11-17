@@ -565,7 +565,7 @@ extern int gVitaAbSide; /* (port/src/headless.c: the soak's A / B side) */
 int gVitaNative = 1;    /* bt3.txt native: 0 off, 1 on (default), 2 in the soak's B battles */
 static void *sEsMdl;
 static int sEsBusy = 1;
-static unsigned sEsGen, sEsGenM = 1;
+static unsigned sEsGen, sEsGenM = 1, sEsGenT = 1; /* (sEsGenT: the models' textures' generation; as sEsGenM unless esrebind) */
 /* ---- The textures named by the game (bt3.txt nativetex): an upload of a texture of the stage's texture file or of a
    fighter's carries, in its BITBLTBUF packet's VIF NOP, a MARK: the seam's flag (0x8000), 0x3000 (no named call has
    it: a model part's program is 0, 1 or 2) and the generation of the stage's textures, or with 0x4000 that of the
@@ -601,7 +601,7 @@ uint32_t Port_EsTexWord(void) {
 }
 /* (src/sys/gfxm_d_c.c) the same for a fighter's textures */
 uint32_t Port_EsTexModelWord(void) {
-    return tex_on() ? 0x07000000u | 0x8000u | 0x4000u | 0x3000u | sEsGenM : 0;
+    return tex_on() ? 0x07000000u | 0x8000u | 0x4000u | 0x3000u | sEsGenT : 0;
 }
 unsigned gVitaEsGens[2]; /* for the log: the stage's generations begun, the models' */
 
@@ -609,7 +609,26 @@ void Port_EsStageBusy(void) {
     sEsBusy = 1;
     sTexBusy = 1;
 }
-void Port_EsModelBound(void) {
+/* bt3.txt esrebind: an object's model file bound again (BtlObjMdl_BindFiles: bound before, its chains' texture places
+   rebased then and its alpha row claimed; a bind again only claims the row again) begins no new generation. Each bind
+   began one, and every model's calls kept by the seam (the four fighters' too) were read the long way and kept again
+   in the lists after: in 2 vs 2 at the end of a Super Spirit Bomb ~1,650 calls, the list reader 84-89 ms on one list
+   (53 s and 71 s). A file loaded anew has not been bound (its chains may lie where another's were): a new generation
+   as before. The textures' MARK (Port_EsTexModelWord) has a generation of its own that every bind begins anew, as before
+   (the texture files are relocated again at a bind; gs_core.c keys the textures by it apart from the calls). 0 off, 1
+   on, 2 the soak's B battles; the report's "esrebind" count. */
+int gVitaEsRebind = 0;
+unsigned gVitaEsBind[2]; /* (the log) binds that began a generation, binds again that did not */
+void Port_EsModelBound(int again) {
+    sEsGenT = (sEsGenT + 1) & 0xFFF;
+    if (sEsGenT == 0) {
+        sEsGenT = 1;
+    }
+    if (again && (gVitaEsRebind == 2 ? gVitaAbSide == 1 : gVitaEsRebind != 0)) {
+        gVitaEsBind[1]++;
+        return;
+    }
+    gVitaEsBind[0]++;
     sEsGenM = (sEsGenM + 1) & 0xFFF;
     if (sEsGenM == 0) {
         sEsGenM = 1;
