@@ -4487,18 +4487,74 @@ static int cc_same(const uint8_t *x, uint32_t xn, const uint8_t *y, uint32_t yn,
 /* (the log) the first record two copies differ in: its offset, type, size and fields, the copy kept first */
 static void cc_diff_log(const char *who, const CallCache *e, const uint8_t *buf, uint32_t n, uint32_t at) {
     extern void Vita_Log(const char *fmt, ...);
-    const GRec *p = e->data != NULL && at + 32 <= e->bytes ? (const GRec *)(const void *)(e->data + at) : NULL;
-    const GRec *q = at + 32 <= n ? (const GRec *)(const void *)(buf + at) : NULL;
+    const uint8_t *cp[2];
+    uint32_t cn[2];
+    int i;
+    cp[0] = e->data; cn[0] = e->bytes; cp[1] = buf; cn[1] = n;
     Vita_Log("gs: %s: the call at %08x: %u bytes kept, %u now; the first record differing at %u:\n", who, e->addr, e->bytes, n, at);
-    if (p != NULL) {
-        const uint32_t *u = (const uint32_t *)(const void *)(p + 1);
-        Vita_Log("gs:   kept: type %u flags %04x size %u a %08x b %08x c %08x e %08x d %016llx | %08x %08x %08x %08x %08x %08x %08x %08x\n",
-                 p->type, p->flags, p->size, p->a, p->b, p->c, p->e, (unsigned long long)p->d, u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]);
+    for (i = 0; i < 2; i++) {
+        const GRec *p = cp[i] != NULL && at + 32 <= cn[i] ? (const GRec *)(const void *)(cp[i] + at) : NULL;
+        if (p == NULL) {
+            continue;
+        }
+        if (p->size >= 64 && at + 64 <= cn[i]) {
+            const uint32_t *u = (const uint32_t *)(const void *)(p + 1);
+            Vita_Log("gs:   %s type %u flags %04x size %u a %08x b %08x c %08x e %08x d %016llx | %08x %08x %08x %08x %08x %08x %08x %08x\n", i ? "now: " : "kept:",
+                     p->type, p->flags, p->size, p->a, p->b, p->c, p->e, (unsigned long long)p->d, u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]);
+        } else {
+            Vita_Log("gs:   %s type %u flags %04x size %u a %08x b %08x c %08x e %08x d %016llx\n", i ? "now: " : "kept:",
+                     p->type, p->flags, p->size, p->a, p->b, p->c, p->e, (unsigned long long)p->d);
+        }
     }
-    if (q != NULL) {
-        const uint32_t *u = (const uint32_t *)(const void *)(q + 1);
-        Vita_Log("gs:   now:  type %u flags %04x size %u a %08x b %08x c %08x e %08x d %016llx | %08x %08x %08x %08x %08x %08x %08x %08x\n",
-                 q->type, q->flags, q->size, q->a, q->b, q->c, q->e, (unsigned long long)q->d, u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]);
+}
+/* (the log) two copies that draw the same (cc_same) but differ byte for byte: where, by kind, each kind counted once a
+   call: a header field the record does not set (GR_REG b, c, e; GR_GIFC a, c, e, d), the padding after a record's
+   payload, the plan's uh, the plan's 8th word or a stage strip's slot / ioff, anything else (cc_same would then be
+   leaving out something drawn: should stay 0). The first 10 such calls logged with the record and the field. */
+unsigned gVitaBrByte[5];
+static void cc_bytes_why(const CallCache *e, const uint8_t *buf, uint32_t n) {
+    extern void Vita_Log(const char *fmt, ...);
+    static const char *const kind[5] = {"a header field not set", "padding", "the plan's uh", "the plan's 8th word or a stage strip's slot / ioff", "something else"};
+    static unsigned lines;
+    const uint8_t *x = e->data;
+    uint32_t o = 0, seen = 0;
+    if (x == NULL || e->bytes != n) {
+        return;
+    }
+    while (o + 32 <= n) {
+        const GRec *p = (const GRec *)(const void *)(x + o);
+        uint32_t sz = p->size, w;
+        if (sz < 32 || o + sz > n) {
+            break;
+        }
+        for (w = 0; w < sz; w += 4) {
+            int k;
+            if (memcmp(x + o + w, buf + o + w, 4) == 0) {
+                continue;
+            }
+            if (w < 32) {
+                k = (p->type == GR_REG && w >= 12 && w < 24) || (p->type == GR_GIFC && (w == 8 || w >= 16)) ? 0 : 4;
+            } else if (p->type == GR_REG) {
+                k = 1;
+            } else if (p->type == GR_GIFC) {
+                k = w >= 32 + p->b * 16 ? 1 : 4;
+            } else if (p->type == GR_VU) {
+                const uint32_t *u = (const uint32_t *)(const void *)(p + 1);
+                uint32_t ib = u[2] < 3 ? 0 : u[0] == 1 ? (((u[2] - 2) * 3 * 2 + 3) & ~3u) : (u[2] - 2) * 3 * 4;
+                k = w == 32 + 12 ? 2 : w == 32 + 28 || (u[0] != 1 && (w == 32 + 20 || w == 32 + 24)) ? 3 : w >= 64 + ib ? 1 : 4;
+            } else {
+                k = 4;
+            }
+            if (!(seen & (1u << k))) {
+                seen |= 1u << k;
+                gVitaBrByte[k]++;
+                if (lines < 10) {
+                    lines++;
+                    Vita_Log("gs: bytes differ, draws the same: the call at %08x, record at %u (type %u, size %u), byte %u: %s\n", e->addr, o, p->type, sz, w, kind[k]);
+                }
+            }
+        }
+        o += sz;
     }
 }
 /* (bindrange=3) a call kept across a bind and read again was found different from its copy: counted, logged (buf, n:
@@ -4644,12 +4700,15 @@ static void cc_end(CallCache *e) {
         return;
     }
     {
-        uint32_t at;
-        /* (the same as kept: with bindrange on, by what the records draw, cc_same; at 0 byte for byte, as before, which
-           the ring's and malloc's leftovers in the records make fail nearly always) */
-        int same = e->data != NULL && (gVitaBindRange != 0 ? cc_same(e->data, e->bytes, buf, out, &at)
-                                                           : e->bytes == out && memcmp(e->data, buf, out) == 0);
-        int sem = gVitaBindRange != 0 ? same : cc_same(e->data, e->bytes, buf, out, &at); /* (the counters: what is drawn) */
+        uint32_t at = 0;
+        /* (the same as kept, byte for byte, as before: the ring's and malloc's leftovers in the records make that fail
+           nearly always, so a call read again takes a new copy and serial; kept by what is drawn would be a setting of
+           its own. The counters and the check (3) go by what the records draw, cc_same) */
+        int same = e->data != NULL && e->bytes == out && memcmp(e->data, buf, out) == 0;
+        int sem = cc_same(e->data, e->bytes, buf, out, &at);
+        if (sem && !same && e->es != 0 && was == 2) {
+            cc_bytes_why(e, buf, out);
+        }
         if (e->es != 0 && was == 2 && !chk) {
             gVitaBr[6]++; /* (for bindrange's line: a kept call of the seam read again now and then) */
             if (!sem) {
