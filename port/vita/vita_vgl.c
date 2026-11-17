@@ -237,7 +237,7 @@ static GLuint sFtProg, sFtVbo;
 static GLint sFtU[5]; /* uF, uMode, uTest, uTex, uS */
 static const float *sFtDraw; /* the batch being drawn is the fighters' (its 20 uniforms; else NULL) */
 static struct { const float *src; uint32_t count, sig, at, seen, slot, ioff; } sFtCache[32768]; /* (8192 of them, 32768 with ftdedupe) */
-/* bt3.txt ftdedupe=0/1/2 (default 0): the fighters' strips found on the chip by what they hold, and a table four times as large.
+/* bt3.txt ftdedupe=0/1/2 (default 1 since batch fd; 0 the old way): the fighters' strips found on the chip by what they hold, and a table four times as large.
    The strips of a model are known by where they lie in the game's memory; a technique's models are loaded at other places
    each time, so the same vertices were written to the chip again and again (a 2 vs 2 heavy fight: 16,000 strips, 160,000
    vertices written in 170 s into a buffer of 65,536, 4,900 of them because the table had no free place) until the buffer was 7/8
@@ -245,7 +245,7 @@ static struct { const float *src; uint32_t count, sig, at, seen, slot, ioff; } s
    146 s). A strip new to the table, or changed, is now looked up by a hash of all its vertices (sFtContent): found, it takes
    the vertices' and indices' place of the one before (its own table entry and slot) and writes nothing. 0 off, 1 on, 2 on in the
    soak's B battles. */
-int gVitaFtDedupe;
+int gVitaFtDedupe = 1;
 typedef struct FtContent { uint64_t hash; uint32_t count, at, ioff; } FtContent;
 static FtContent sFtContent[8192];
 #define FT_IDX (3 * FT_VERTS)   /* the fighters' strips as triangles, indices kept on the chip beside their vertices */
