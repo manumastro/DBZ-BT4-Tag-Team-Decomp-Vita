@@ -169,6 +169,9 @@ def main():
                     "without a vita-agent-use run (which refuses input), each step's taps sent with `input submit`, a "
                     "screenshot after it when \"shot\"")
     o = ap.parse_args()
+    for k in ("settings", "eboot_dir", "out", "inputs"):  # (vita-agent-use runs from its own folder: relative paths would miss)
+        if getattr(o, k, None) is not None:
+            setattr(o, k, getattr(o, k).resolve())
     out = o.out or ROOT / "port/build/runs" / ("agent-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
     (out / "shots").mkdir(parents=True, exist_ok=True)
     note = lambda *a: print("vita_agent_run:", *a, flush=True)
