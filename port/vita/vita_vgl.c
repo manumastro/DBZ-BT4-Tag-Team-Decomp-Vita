@@ -37,6 +37,7 @@
 #include <math.h>
 #include "../src/gs/gs_internal.h"
 extern int gVitaTagMovie; /* bt3.txt tbomovie (vita_tagmovie.c) */
+extern int gVitaTagMovieCsc; /* bt3.txt tbomoviecsc */
 extern int gVitaTagMovieMem; /* bt3.txt tbomoviemem: MB of physically contiguous memory left to the player */
 
 extern int gGsMainFbp;  /* gs_sony.c: the buffer this frame is drawn into */
@@ -1796,7 +1797,9 @@ int GsGpu_Init(void) {
                     gVitaMsaa == 4 ? SCE_GXM_MULTISAMPLE_4X : gVitaMsaa == 2 ? SCE_GXM_MULTISAMPLE_2X : SCE_GXM_MULTISAMPLE_NONE);
     }
     if (gVitaTagMovie == 1) {
-        Vita_Log("vgl: %d MB of physically contiguous memory left to the film's player (tbomovie=1)\n", gVitaTagMovieMem);
+        Vita_Log("vgl: %d MB of physically contiguous memory left to the film's player (tbomovie=1)%s; the pool: %u of %u KB free\n", gVitaTagMovieMem,
+                 gVitaTagMovieMem == 0 ? " (none: its block is lent by vitaGL's pool while the film plays)" : "",
+                 (unsigned)(vglMemFree(VGL_MEM_PHYCONT) / 1024), (unsigned)(vglMemTotal(VGL_MEM_PHYCONT) / 1024));
     }
     Vita_Log("vgl: multisampling %s; menus at %s, fights at %d x %d\n", gVitaMsaa == 4 ? "4x" : gVitaMsaa == 2 ? "2x" : "off",
              gVitaMenuHi ? "960 x 544" : "the fights' size", SCR_W_FIGHT, SCR_H_FIGHT);
@@ -2361,6 +2364,17 @@ unsigned Vita_VglTexRgba(const void *px, int w, int h) {
    chip when it samples (as vitaGL's samples/video_playback does). t 0 makes the texture (vitaGL's own 8 x 8 data given back
    at once and its pointer cleared, the frame is not vitaGL's to free); else the same texture is pointed at the new frame
    (the render thread's work done first). Returns the texture. */
+/* vitaGL's own physically contiguous pool lent to the film's player (vita_tagmovie.c, tbomoviemem=0): a block, and the pool's numbers */
+void *Vita_VglPhycontAlloc(unsigned size) {
+    return vglAlloc(size, VGL_MEM_PHYCONT);
+}
+void Vita_VglPhycontFree(void *p) {
+    vglFree(p);
+}
+void Vita_VglPhycontInfo(unsigned *total, unsigned *freeb) {
+    *total = (unsigned)vglMemTotal(VGL_MEM_PHYCONT);
+    *freeb = (unsigned)vglMemFree(VGL_MEM_PHYCONT);
+}
 unsigned Vita_VglTexYuv(unsigned t, const void *frame, int w, int h) {
     GLuint n = t;
     SceGxmTexture *g;
@@ -2376,7 +2390,7 @@ unsigned Vita_VglTexYuv(unsigned t, const void *frame, int w, int h) {
     }
     sGlc.tex = 0; /* (the binding changes here) */
     g = vglGetGxmTexture(GL_TEXTURE_2D);
-    sceGxmTextureInitLinear(g, frame, SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC0, (unsigned)w, (unsigned)h, 0);
+    sceGxmTextureInitLinear(g, frame, gVitaTagMovieCsc == 1 ? SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1 : SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC0, (unsigned)w, (unsigned)h, 0);
     sceGxmTextureSetMinFilter(g, SCE_GXM_TEXTURE_FILTER_LINEAR);
     sceGxmTextureSetMagFilter(g, SCE_GXM_TEXTURE_FILTER_LINEAR);
     sceGxmTextureSetUAddrMode(g, SCE_GXM_TEXTURE_ADDR_CLAMP);

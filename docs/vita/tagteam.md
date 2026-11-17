@@ -97,8 +97,8 @@ each line of letters as a GS sprite whose TEX0 has the reserved format `TBO_PSM`
   `tbo/ui/tag_ui_{intro,loop}.mp4` (1.3 MB). The player's frames are physically contiguous memory mapped for the GPU
   (its allocator hook, as vitaGL's `samples/video_playback`); the drawing thread points the film's texture at the newest
   frame (`Vita_VglTexYuv`: a linear YVU 4:2:0 texture on the frame itself) and the chip converts the colour when it
-  samples: no copy, no conversion on the CPU. With `tbomovie=1` vitaGL leaves 32 MB (`tbomoviemem`; 16 was too little in batch 30) of physically contiguous memory
-  unused at its start for the player (`vita_vgl.c`). `tbomovie=0` the poster (as before, the default); `1` the hardware
+  samples: no copy, no conversion on the CPU. With `tbomovie=1` the player's memory (24 MB: the decoder's 14 MB block, its frames, the copies) is lent by vitaGL's own physically contiguous pool
+  while the film plays and given back after (`tbomoviemem=0`; `tbomoviemem=N` leaves N MB aside at start instead, which costs fights memory). `tbomovie=0` the poster (as before, the default); `1` the hardware
   film (the intro once, then the loop, a second player source for each); `2` the software MPEG-2 film (needs a package
   built with `BT4_VITA_TAGMOVIE=1`: the two `.pss`, 30 MB more). Built on `wip/tagmovie`, not run on a console yet. To
   look at: the poster shows for an instant between the intro and the loop (the player's source is changed), the colour

@@ -49,18 +49,24 @@
 
 extern void Vita_Log(const char *fmt, ...);
 extern unsigned gGsFrame;
+extern void *Vita_VglPhycontAlloc(unsigned size);
+extern void Vita_VglPhycontFree(void *p);
+extern void Vita_VglPhycontInfo(unsigned *total, unsigned *freeb);
 extern unsigned Vita_VglTexYuv(unsigned t, const void *planes, int w, int h);
 extern void Vita_VglTexFree(unsigned t);
 extern SceUID Vita_ThreadOnCore3(const char *name, SceKernelThreadEntry entry, int prio, int stack, int fallbackMask);
 extern int gVitaCore3;
 
 int gVitaTagMovie = 0; /* bt3.txt tbomovie: 0 the poster (default), 1 the film; other values the poster */
-int gVitaTagMovieMem = 32; /* bt3.txt tbomoviemem: MB of physically contiguous memory left to the player (vita_vgl.c) */
+int gVitaTagMovieCopy = 1; /* bt3.txt tbomoviecopy: 1 each picture copied into the film's own 1 MB-aligned buffers (default), 0 the player's frame used in place */
+int gVitaTagMovieCsc = 0; /* bt3.txt tbomoviecsc: 0 CSC0, 1 CSC1 (vita_vgl.c) */
+int gVitaTagMovieMem = 0; /* bt3.txt tbomoviemem: MB of physically contiguous memory vitaGL leaves to the player at its start (vita_vgl.c); 0 (default):
+                             none left, the player's memory is carved from a block of vitaGL's own physically contiguous pool while the film plays */
 
 #define TM_OUT_FRAMES 5      /* the player's output frame buffers (vitaGL's samples/video_playback: 5; the GPU reads one for a few pictures after it was given) */
 #define TM_FREE_DELAY_US 150000u /* frames given back this long after the player lets them go */
 #define TM_PHYCONT_ALIGN (1024 * 1024) /* physically contiguous blocks: 1 MB sizes */
-#define TM_IDLE_US 500000u   /* the thread stops this long after the last picture asked for */
+#define TM_IDLE_US 3000000u  /* the thread stops this long after the last picture asked for (batch 31: 0.5 s made the player 26 times in 70 s, 0.65 s each time to open) */
 #define TM_KEEP_FRAMES 600   /* the texture given back this many pictures after it was last drawn (vita_tbo.c KEEP_FRAMES) */
 #define TM_RETRY_US 2000000u /* a film that could not be played is not tried again for this long */
 #define TM_NOFRAME_US 3000000u /* the intro gives no picture for this long: the film is given up (the poster) */
@@ -75,6 +81,9 @@ int gVitaTagMovieMem = 32; /* bt3.txt tbomoviemem: MB of physically contiguous m
 #define TM_STACK 0x10000
 #define TM_INTRO "app0:tbo/ui/tag_ui_intro.mp4"
 #define TM_LOOP "app0:tbo/ui/tag_ui_loop.mp4"
+#define TM_COPIES 3 /* the copies' ring: the GPU reads one for a few pictures after it was shown */
+#define TM_ARENA_MB 24 /* the block taken from vitaGL's pool: the decoder's 14 MB (1 MB aligned) + 3.8 MB of frames + TM_COPIES MB of copies (at its top) */
+#define TM_ARENA_FREE_US 1000000u /* the block given back to vitaGL this long after the player closed */
 #define TM_TRACK 64 /* blocks whose sizes are kept for the memory count (allocator hooks give no size on free) */
 
 static SceUID sLock = -1;
@@ -101,6 +110,20 @@ static struct {
     int allocFailed;       /* a frame's memory the player asked for could not be given (it will give no picture) */
     uint64_t freedAt;      /* us: the last wait before frames were given back */
 } sM;
+
+/* the copies (tbomoviecopy=1): 1 MB-aligned physically contiguous blocks mapped for the GPU, allocated by the playing thread when the
+   first picture comes, given back at its end */
+/* the arena (tbomoviemem=0): one block of vitaGL's physically contiguous pool taken by the drawing thread before the player starts,
+   given back by it (Vita_TagMovieIdle) TM_ARENA_FREE_US after the player closed; the player's frames carved from its start (a bump,
+   reset when the player has given all back), the copies from its top */
+static uint8_t *sArena, *sArenaRaw;
+static uint32_t sArenaBump, sArenaSize;
+static int sArenaLive;
+static uint64_t sArenaEndAt; /* us: the playing thread's end */
+static struct { SceUID blk; void *p; uint32_t size; } sCopy[TM_COPIES];
+static int sCopyAt;
+static uint64_t sCopyUs, sCopyMax;
+static unsigned sCopyN;
 
 static uint64_t tm_now(void) { return sceKernelGetProcessTimeWide(); }
 static void tm_lock(void) { sceKernelLockMutex(sLock, 1, NULL); }
@@ -159,6 +182,25 @@ static void *tm_alloc_frame(void *arg, uint32_t alignment, uint32_t size) {
     unsigned asked = size;
     int r;
     (void)arg;
+    if (sArena != NULL) {
+        uint32_t a = alignment != 0 ? alignment : 16, off;
+        tm_lock();
+        off = (sArenaBump + a - 1) / a * a;
+        if (off + size > sArenaSize - TM_COPIES * (uint32_t)TM_PHYCONT_ALIGN) {
+            sM.allocFailed = 1;
+            tm_unlock();
+            Vita_Log("tagmovie: allocateTexture(align %u, size %u KB): the arena (%u MB, %u KB used) is too small\n", alignment, asked / 1024,
+                     sArenaSize >> 20, sArenaBump / 1024);
+            return NULL;
+        }
+        p = sArena + off;
+        sArenaBump = off + size;
+        sArenaLive++;
+        tm_track(p, size, 1, 1);
+        tm_unlock();
+        Vita_Log("tagmovie: allocateTexture(align %u, size %u KB) = %p (the arena, offset %u KB)\n", alignment, asked / 1024, p, off / 1024);
+        return p;
+    }
     size = (size + TM_PHYCONT_ALIGN - 1) & ~(uint32_t)(TM_PHYCONT_ALIGN - 1);
     blk = sceKernelAllocMemBlock("bt3_tagframe", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, size, NULL);
     if (blk < 0) {
@@ -220,6 +262,16 @@ static void tm_free_frame(void *arg, void *p) {
     if (wait) {
         sceKernelDelayThread(TM_FREE_DELAY_US);
     }
+    if (sArena != NULL && (uint8_t *)p >= sArena && (uint8_t *)p < sArena + sArenaSize) {
+        tm_lock();
+        if (--sArenaLive <= 0) {
+            sArenaLive = 0;
+            sArenaBump = 0;
+        }
+        tm_unlock();
+        Vita_Log("tagmovie: deallocateTexture(%p, %u KB) (the arena)\n", p, (unsigned)(n / 1024));
+        return;
+    }
     blk = sceKernelFindMemBlockByAddr(p, 0);
     sceGxmUnmapMemory(p);
     if (blk >= 0) sceKernelFreeMemBlock(blk);
@@ -278,6 +330,63 @@ static int tm_play(SceAvPlayerHandle *h, const char *file, int looping) {
     return 0;
 }
 
+/* The picture copied into the next buffer of the ring (the planes of a 4:2:0 two-plane frame: w x h luma, then w x h / 2 of V,U pairs).
+   NULL when it cannot (the player's frame is used in place then). */
+static const uint8_t *tm_copy(const uint8_t *src, uint32_t w, uint32_t h) {
+    uint32_t size = (w * h * 3 / 2 + TM_PHYCONT_ALIGN - 1) & ~(uint32_t)(TM_PHYCONT_ALIGN - 1);
+    uint64_t t0 = tm_now(), dt;
+    int k = sCopyAt;
+    if (sArena != NULL) {
+        if (size > TM_PHYCONT_ALIGN) {
+            return NULL;
+        }
+        sCopy[k].p = sArena + sArenaSize - (uint32_t)(k + 1) * TM_PHYCONT_ALIGN;
+        sCopy[k].size = TM_PHYCONT_ALIGN;
+        sCopy[k].blk = -1;
+    } else if (sCopy[k].p == NULL || sCopy[k].size < size) {
+        void *p = NULL;
+        if (sCopy[k].p != NULL) {
+            return NULL;
+        }
+        sCopy[k].blk = sceKernelAllocMemBlock("bt3_tagcopy", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, size, NULL);
+        if (sCopy[k].blk < 0 || sceKernelGetMemBlockBase(sCopy[k].blk, &p) < 0 || p == NULL ||
+            sceGxmMapMemory(p, size, SCE_GXM_MEMORY_ATTRIB_RW) < 0) {
+            Vita_Log("tagmovie: no memory for a copy buffer of %u KB (0x%08X): the player's frames used in place\n", size / 1024,
+                     (unsigned)sCopy[k].blk);
+            if (sCopy[k].blk >= 0) {
+                sceKernelFreeMemBlock(sCopy[k].blk);
+            }
+            sCopy[k].blk = 0;
+            return NULL;
+        }
+        sCopy[k].p = p;
+        sCopy[k].size = size;
+        Vita_Log("tagmovie: copy buffer %d: %u KB at %p\n", k, size / 1024, p);
+    }
+    memcpy(sCopy[k].p, src, w * h * 3 / 2);
+    sCopyAt = (k + 1) % TM_COPIES;
+    dt = tm_now() - t0;
+    sCopyUs += dt;
+    sCopyN++;
+    if (dt > sCopyMax) {
+        sCopyMax = dt;
+    }
+    return (const uint8_t *)sCopy[k].p;
+}
+static void tm_copies_free(void) {
+    int k;
+    for (k = 0; k < TM_COPIES; k++) {
+        if (sCopy[k].p != NULL) {
+            if (sCopy[k].blk >= 0) {
+                sceGxmUnmapMemory(sCopy[k].p);
+                sceKernelFreeMemBlock(sCopy[k].blk);
+            }
+            sCopy[k].p = NULL;
+        }
+    }
+    sCopyAt = 0;
+}
+
 /* The thread's end: the frame given up first (the drawing thread stops reading it), the player closed, the state cleared. */
 static void tm_finish(SceAvPlayerHandle h, int failed) {
     tm_lock();
@@ -292,7 +401,12 @@ static void tm_finish(SceAvPlayerHandle h, int failed) {
         sceAvPlayerStop(h);
         sceAvPlayerClose(h);
     }
+    if (sCopy[0].p != NULL) {
+        sceKernelDelayThread(TM_FREE_DELAY_US); /* (the chip may still be reading the last picture shown) */
+        tm_copies_free();
+    }
     tm_lock();
+    sArenaEndAt = tm_now();
     sM.running = 0;
     sM.stopping = 0;
     sM.inLoop = 0;
@@ -302,7 +416,7 @@ static void tm_finish(SceAvPlayerHandle h, int failed) {
 
 static int tm_thread(SceSize args, void *argp) {
     SceAvPlayerHandle h = TM_NONE;
-    int seen = 0;
+    int seen = 0; /* pictures given since the source began */
     uint64_t origin = 0, startedAt = 0, logAt, diagAt = 0;
     unsigned polls = 0, active = 0, audio = 0, infoDone = 0;
     (void)args;
@@ -354,7 +468,8 @@ static int tm_thread(SceSize args, void *argp) {
         }
         if (now >= logAt) {
             unsigned decoded, late, shown, replaced, uploads;
-            uint64_t uploadUs, uploadMax, live, peak;
+            uint64_t uploadUs, uploadMax, live, peak, copyUs, copyMax;
+            unsigned copyN;
             size_t liveFrame, liveOther;
             int inLoop;
             tm_lock();
@@ -371,6 +486,11 @@ static int tm_thread(SceSize args, void *argp) {
             inLoop = sM.inLoop;
             sM.decoded = sM.late = sM.shown = sM.replaced = sM.uploads = 0;
             sM.uploadUs = sM.uploadMax = 0;
+            copyN = sCopyN;
+            copyUs = sCopyUs;
+            copyMax = sCopyMax;
+            sCopyN = 0;
+            sCopyUs = sCopyMax = 0;
             tm_unlock();
             live = liveFrame + liveOther;
             Vita_Log("tagmovie: %u frames from the player, %u shown, %u replaced before shown, %u late (over 85 ms); texture set %u us a "
@@ -378,6 +498,8 @@ static int tm_thread(SceSize args, void *argp) {
                      decoded, shown, replaced, late, uploads ? (unsigned)(uploadUs / uploads) : 0u, (unsigned)uploadMax,
                      (unsigned)(live / 1024), (unsigned)(liveFrame / 1024), (unsigned)(liveOther / 1024), (unsigned)(peak / 1024),
                      inLoop ? "loop" : "intro", gVitaCore3 == 1 ? "fourth" : "second");
+            Vita_Log("tagmovie: copies %s: %u made, %u us each (worst %u us)\n", gVitaTagMovieCopy ? "on" : "off", copyN,
+                     copyN ? (unsigned)(copyUs / copyN) : 0u, (unsigned)copyMax);
             logAt = now + TM_LOG_US;
         }
         /* the audio queue drained (the films have no audio track; an undrained queue could stall a player) */
@@ -422,8 +544,19 @@ static int tm_thread(SceSize args, void *argp) {
             }
             /* the picture's time from the source's start (the player's timeStamp, in ms) */
             int late = now - origin > (uint64_t)info.timeStamp * 1000u + TM_LATE_US;
+            const uint8_t *shown = info.pData;
+            if (seen < 12) {
+                Vita_Log("tagmovie: picture %d: %p (offset 0x%X in its 4 KB), time stamp %u ms\n", seen, (void *)info.pData,
+                         (unsigned)((uintptr_t)info.pData & 0xFFF), (unsigned)info.timeStamp);
+            }
+            if (gVitaTagMovieCopy) {
+                const uint8_t *c = tm_copy(info.pData, info.details.video.width, info.details.video.height);
+                if (c != NULL) {
+                    shown = c;
+                }
+            }
             tm_lock();
-            sM.frame = info.pData;
+            sM.frame = shown;
             sM.w = info.details.video.width;
             sM.h = info.details.video.height;
             sM.serial++;
@@ -432,7 +565,7 @@ static int tm_thread(SceSize args, void *argp) {
                 sM.late++;
             }
             tm_unlock();
-            seen = 1;
+            seen++;
             continue;
         }
         if (!seen && (now - startedAt > TM_NOFRAME_US || sM.allocFailed)) {
@@ -484,7 +617,27 @@ unsigned Vita_TagMovieTexture(void) {
     tm_lock();
     t0 = tm_now();
     sM.touched = t0;
-    if (!sM.running && !sM.stopping && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US)) {
+    if (!sM.running && !sM.stopping && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US) && gVitaTagMovieMem == 0 && sArena == NULL) {
+        /* (vitaGL's pool, the drawing thread's call) the player's memory, given back after the film */
+        unsigned total = 0, freeb = 0;
+        uint8_t *raw;
+        Vita_VglPhycontInfo(&total, &freeb);
+        raw = (uint8_t *)Vita_VglPhycontAlloc((TM_ARENA_MB + 1) * 1024u * 1024u);
+        if (raw == NULL) {
+            Vita_Log("tagmovie: vitaGL's physically contiguous pool has no %d MB block (%u of %u KB free): the poster\n", TM_ARENA_MB + 1,
+                     freeb / 1024, total / 1024);
+            sM.failedAt = t0;
+        } else {
+            sArenaRaw = raw;
+            sArena = (uint8_t *)(((uintptr_t)raw + TM_PHYCONT_ALIGN - 1) & ~(uintptr_t)(TM_PHYCONT_ALIGN - 1));
+            sArenaSize = TM_ARENA_MB * 1024u * 1024u;
+            sArenaBump = 0;
+            sArenaLive = 0;
+            Vita_Log("tagmovie: %d MB taken from vitaGL's physically contiguous pool at %p (%u of %u KB were free)\n", TM_ARENA_MB, (void *)sArena,
+                     freeb / 1024, total / 1024);
+        }
+    }
+    if (!sM.running && !sM.stopping && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US) && (gVitaTagMovieMem != 0 || sArena != NULL)) {
         SceUID th = Vita_ThreadOnCore3("bt3_tagmovie", tm_thread, TM_PRIORITY, TM_STACK, 0x00020000 /* else the second core */);
         if (th >= 0 && sceKernelStartThread(th, 0, NULL) >= 0) {
             sM.running = 1;
@@ -533,6 +686,19 @@ void Vita_TagMovieIdle(void) {
     if (sM.tex != 0 && gGsFrame - sM.texFrame > TM_KEEP_FRAMES) {
         t = sM.tex;
         sM.tex = 0;
+    }
+    if (sArena != NULL && !sM.running && !sM.stopping && sArenaLive == 0 && tm_now() - sArenaEndAt > TM_ARENA_FREE_US) {
+        /* the player closed a while ago and the chip is done with its pictures: the block back to vitaGL's pool (drawing thread) */
+        void *raw = sArenaRaw;
+        sArena = sArenaRaw = NULL;
+        sArenaSize = 0;
+        tm_unlock();
+        Vita_VglPhycontFree(raw);
+        Vita_Log("tagmovie: the %d MB given back to vitaGL's pool\n", TM_ARENA_MB);
+        if (t != 0) {
+            Vita_VglTexFree(t);
+        }
+        return;
     }
     tm_unlock();
     if (t != 0) {
