@@ -629,7 +629,7 @@ unsigned gVitaEsBind[2]; /* (the log) binds that began a generation, binds again
    bind whose file is not where the slot says, and the end of a battle (Port_EsModelsGone), begin a generation without
    a range: every call is read again, as before. 0 off (every generation without a range), 1 on, 2 the soak's B
    battles, 3 on and each call so kept read the long way once more and compared with its copy (gs_core.c cc_end). */
-int gVitaBindRange = 0;
+int gVitaBindRange = 1;
 unsigned gVitaBrBind[2]; /* (the log) generations begun with a range, without one */
 extern void GsFE_EsBindNote(unsigned gen, int n, const uint32_t *lo, const uint32_t *hi);
 #define BR_MAX 4
