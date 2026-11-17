@@ -1281,6 +1281,7 @@ static int sRtOn;
 static uint8_t *rt_reserve(uint32_t op, uint32_t bytes); /* (below, with the render thread) */
 static void rt_commit(void);
 #define RT_TEX 12 /* a texture with a palette set up (texrt; the render thread's other ops: RT_WRAP and on, below) */
+#define RT_PFILL 13 /* the texture pools' pieces made by the render thread (texrtfill) */
 static void flush_vu(void) {
     GLC_RESET();
     static const GLenum kFactor[6] = {GL_ZERO, GL_ONE, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA};
@@ -2024,9 +2025,120 @@ static int idx_class(uint32_t bytes) {
     }
     return c < IDXC ? c : -1;
 }
+/* bt3.txt texrtfill: the pools filled by the render thread. tex_pool_fill runs only at a picture's end made the old way
+   (the render thread idle); with rtswap a fight's pictures end without it, so the pools emptied in a burst of new
+   textures stayed empty until a list not drawn, and each texture after that waited for the render thread (rt_sync in
+   idx_get / pal_get, the names below): in 2 vs 2 three waits of 161 ms in all in one list (45 s), the render thread
+   several pictures behind then. Now at such a picture's end what the pools lack is asked of the render thread (RT_PFILL,
+   in the ring before the swap): it makes the pieces (vitaGL is its own then) into a second set of pools, and the
+   drawing thread takes them over at a later picture's end, or when a pool it takes from is empty. One request at a
+   time: the second set is the render thread's from the request until it is done (sPoolReq 2), the drawing thread's
+   after. 0 off, 1 on, 2 the soak's B battles. */
+int gVitaTexRtFill = 0;
+unsigned gVitaTexRtFillN[3]; /* (the log) requests handed over, pieces taken over, takes when a pool was empty */
+typedef struct RtPFill { uint8_t idx[IDXC], pal, names, pad_; } RtPFill;
+static void *sIdxPoolS[IDXC][8];
+static int sIdxPoolSN[IDXC];
+static uint32_t *sPalPoolS[32];
+static int sPalPoolSN;
+static GLuint sTexNamesS[16];
+static int sTexNamesSN;
+static volatile int sPoolReq; /* 0 none, 1 in the ring, 2 made (the second set the drawing thread's) */
+static int texrtfill_on(void) {
+    extern int gVitaAbSide;
+    return texrt_on() && (gVitaTexRtFill == 2 ? gVitaAbSide == 1 : gVitaTexRtFill != 0);
+}
+/* the render thread (or the drawing thread, in order, rt_exec_one): the pieces asked for */
+static void tex_pool_rt_exec(const RtPFill *o) {
+    int c, k;
+    if (o->names > 0 && o->names <= 16) {
+        glGenTextures(o->names, sTexNamesS);
+        sTexNamesSN = o->names;
+    }
+    for (k = 0; k < o->pal && k < 32; k++) {
+        uint32_t *d = (uint32_t *)gpu_alloc_mapped_aligned_for_gpu(64, 256 * 4);
+        if (d == NULL) {
+            break;
+        }
+        sPalPoolS[sPalPoolSN++] = d;
+    }
+    for (c = 0; c < IDXC; c++) {
+        for (k = 0; k < o->idx[c] && k < 8; k++) {
+            void *d = gpu_alloc_mapped_aligned_for_gpu(16, 4096u << c);
+            if (d == NULL) {
+                break;
+            }
+            sIdxPoolS[c][sIdxPoolSN[c]++] = d;
+        }
+    }
+    __sync_synchronize();
+    sPoolReq = 2;
+}
+/* the drawing thread: the pieces the render thread made put in the pools (what has no room stays for the next time) */
+static int tex_pool_take(void) {
+    int c, n = 0, left = 0;
+    if (sPoolReq != 2) {
+        return 0;
+    }
+    __sync_synchronize();
+    while (sTexNamesSN > 0 && sTexNamesN < 16) {
+        sTexNames[sTexNamesN++] = sTexNamesS[--sTexNamesSN];
+        n++;
+    }
+    while (sPalPoolSN > 0 && sPalPoolN < 32) {
+        sPalPool[sPalPoolN++] = sPalPoolS[--sPalPoolSN];
+        n++;
+    }
+    for (c = 0; c < IDXC; c++) {
+        while (sIdxPoolSN[c] > 0 && sIdxPoolN[c] < 8) {
+            sIdxPool[c][sIdxPoolN[c]++] = sIdxPoolS[c][--sIdxPoolSN[c]];
+            n++;
+        }
+        left += sIdxPoolSN[c];
+    }
+    left += sTexNamesSN + sPalPoolSN;
+    if (left == 0) {
+        sPoolReq = 0;
+    }
+    gVitaTexRtFillN[1] += (unsigned)n;
+    return n;
+}
+/* the drawing thread, at a picture's end handed to the render thread: what the pools lack asked for */
+static void tex_pool_req(void) {
+    RtPFill r;
+    int c, any;
+    tex_pool_take();
+    if (sPoolReq != 0 || !sRtOn) {
+        return;
+    }
+    memset(&r, 0, sizeof(r));
+    r.names = (uint8_t)(16 - sTexNamesN);
+    r.pal = (uint8_t)(32 - sPalPoolN);
+    any = r.names | r.pal;
+    for (c = 0; c < IDXC; c++) {
+        r.idx[c] = (uint8_t)(sIdxPoolN[c] < sIdxPoolWant[c] ? sIdxPoolWant[c] - sIdxPoolN[c] : 0);
+        any |= r.idx[c];
+    }
+    if (!any) {
+        return;
+    }
+    *(RtPFill *)(void *)rt_reserve(RT_PFILL, (uint32_t)sizeof(RtPFill)) = r;
+    sPoolReq = 1;
+    rt_commit();
+    gVitaTexRtFillN[0]++;
+}
+/* a pool found empty: what the render thread has made by now taken (texrtfill) */
+static int tex_pool_empty(void) {
+    if (sPoolReq == 2 && texrtfill_on()) {
+        gVitaTexRtFillN[2]++;
+        return tex_pool_take();
+    }
+    return 0;
+}
 /* at a picture's end, the render thread idle: the pools filled up again */
 static void tex_pool_fill(void) {
     int c;
+    tex_pool_take(); /* (texrtfill: the render thread's pieces first; nothing there without it) */
     if (sTexNamesN < 16) {
         glGenTextures(16 - sTexNamesN, &sTexNames[sTexNamesN]);
         sTexNamesN = 16;
@@ -2101,6 +2213,9 @@ static int idx_get(uint64_t key, uint32_t gen, uint32_t tbp, uint32_t tbw, uint3
         }
         {
             int c = texrt_on() ? idx_class(w8 * th) : -1;
+            if (c >= 0 && sIdxPoolN[c] == 0) {
+                tex_pool_empty();
+            }
             if (c >= 0 && sIdxPoolN[c] > 0) { /* (texrt: taken while the render thread drew, at the last picture's end) */
                 d = (uint8_t *)sIdxPool[c][--sIdxPoolN[c]];
                 gVitaTexRtN[0]++;
@@ -2172,6 +2287,9 @@ static int pal_get(uint64_t key, uint64_t texa, uint32_t gen, uint32_t cbp, uint
                 c = (c & 0x00FFFFFFu) | (a > 255 ? 255u : a) << 24;
             }
             tmp[i] = c;
+        }
+        if (texrt_on() && sPalPoolN == 0) {
+            tex_pool_empty();
         }
         if (texrt_on() && sPalPoolN > 0) { /* (texrt: as idx_get) */
             d = sPalPool[--sPalPoolN];
@@ -2620,6 +2738,9 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
             t->amax = 255;
             sIdxT[pi].refs++;
             sPalT[pp].refs++;
+            if (texrt_on() && sRtOn && sTexNamesN == 0) {
+                tex_pool_empty();
+            }
             if (texrt_on() && sRtOn && sTexNamesN > 0) { /* (texrt: set up by the render thread, in order) */
                 RtTex *o = (RtTex *)(void *)rt_reserve(RT_TEX, (uint32_t)sizeof(RtTex));
                 t->id = sTexNames[--sTexNamesN];
@@ -3324,6 +3445,8 @@ static int rt_exec_one(void) {
             rt_swap_exec((const RtSwap *)(const void *)(h + 1));
         } else if (h->op == RT_TEX) {
             tex_rt_exec((const RtTex *)(const void *)(h + 1));
+        } else if (h->op == RT_PFILL) {
+            tex_pool_rt_exec((const RtPFill *)(const void *)(h + 1));
         }
         sRtWhere = 0;
         gVitaRt[6] += sceKernelGetProcessTimeWide() - t0;
@@ -4755,6 +4878,18 @@ void Vita_AmLog(void) { /* vita_main.c: the model draws that read the picture's 
             }
             Vita_Log("vgl:   swaps (rtswap): %u made by the render thread, %u the old way\n", gVitaRtSwapN[0], gVitaRtSwapN[1]);
             Vita_Log("vgl:   kept parts freed a picture late (dpfreelate): %u parts in %u pictures, %u waits after all (still in the ring), %u pictures with none to free\n", gVitaDpFreeLateN[0], gVitaDpFreeLateN[1], gVitaDpFreeLateN[2], gVitaDpFreeLateN[3]);
+            {   /* (rtcap, skipasync, texrtfill, chipkeep, esrebind) */
+                extern unsigned gVitaEsBind[2], gVitaRtCapW[4], gVitaSkipAsyncN, gVitaChipKeepN[2];
+                Vita_Log("vgl:   pictures behind in the render thread's ring (rtcap): at most %u at a handover (of %u); %u waits, %u ms | lists not drawn ended without a wait (skipasync): %u\n",
+                         gVitaRtCapW[2], gVitaRtCapW[3], gVitaRtCapW[0], gVitaRtCapW[1] / 1000, gVitaSkipAsyncN);
+                Vita_Log("vgl:   texture pools filled by the render thread (texrtfill): %u requests, %u pieces taken over, %u takes at an empty pool | the chip's copies let go in a fight, the stage's kept / not (chipkeep): %u / %u | model binds (esrebind): %u began a generation, %u again without one\n",
+                         gVitaTexRtFillN[0], gVitaTexRtFillN[1], gVitaTexRtFillN[2], gVitaChipKeepN[0], gVitaChipKeepN[1], gVitaEsBind[0], gVitaEsBind[1]);
+                memset(gVitaRtCapW, 0, sizeof(gVitaRtCapW));
+                gVitaSkipAsyncN = 0;
+                memset(gVitaTexRtFillN, 0, sizeof(gVitaTexRtFillN));
+                memset(gVitaChipKeepN, 0, sizeof(gVitaChipKeepN));
+                memset(gVitaEsBind, 0, sizeof(gVitaEsBind));
+            }
             gVitaRtSwapN[0] = gVitaRtSwapN[1] = 0;
             memset(gVitaDpFreeLateN, 0, sizeof(gVitaDpFreeLateN));
         }
@@ -7604,6 +7739,72 @@ int gVitaGxmCache = 1;
 /* (rtswap) this picture's end handed to the render thread; fe_sync: the old way after all (something at the end needs
    vitaGL here) */
 static int sFeAsync;
+/* bt3.txt rtcap: at most rtcapn pictures (default 1) waiting in the render thread's ring behind the one just handed
+   over. With rtswap and dpfreelate nothing held the drawing thread to the render thread any more: when the chip took
+   longer than a picture's time (30-47 blended screens, 33-42 ms) the render thread waited in its swaps for a buffer to
+   draw into, and the drawing thread went on handing over pictures (the ring holds ten): in 2 vs 2 they were put up 14 to
+   26 blanks after their tick (wanted at 5), and the first wait for the render thread after that (a texture's memory,
+   a list not drawn) waited for all of them, 80-250 ms in one list. Now the drawing thread waits at the swap's handover
+   until the picture rtcapn before it is swapped (a little each picture, as without dpfreelate, which waited at each
+   picture's end). 0 off, 1 on, 2 the soak's B battles. The report's "rtcap" line also counts, on or off, the most
+   pictures found in the ring at a handover. */
+int gVitaRtCap = 0, gVitaRtCapN = 1;
+unsigned gVitaRtCapW[4]; /* (the log) waits, us waited, the most pictures in the ring at a handover, handovers */
+static uint32_t sRtSwapAt[8]; /* the ring's place (sRtW) after each of the last 8 swaps handed over */
+static unsigned sRtSwapK;
+static void rt_cap(void) {
+    extern int gVitaAbSide;
+    int on = gVitaRtCap == 2 ? gVitaAbSide == 1 : gVitaRtCap != 0, n = gVitaRtCapN < 1 ? 1 : gVitaRtCapN > 6 ? 6 : gVitaRtCapN, k, in = 0;
+    uint32_t at;
+    sRtSwapAt[sRtSwapK & 7] = sRtW;
+    sRtSwapK++;
+    for (k = 1; k <= 7 && (unsigned)k <= sRtSwapK; k++) { /* (the swaps not done yet: this one and those before it; a place
+                                                                 is still in the ring when it is less far behind sRtW than the tail) */
+        if (sRtW - sRtSwapAt[(sRtSwapK - (unsigned)k) & 7] < sRtW - sRtTail) {
+            in = k;
+        }
+    }
+    if ((unsigned)in > gVitaRtCapW[2]) {
+        gVitaRtCapW[2] = (unsigned)in;
+    }
+    gVitaRtCapW[3]++;
+    if (!on || sRtSwapK <= (unsigned)n) {
+        return;
+    }
+    at = sRtSwapAt[(sRtSwapK - 1u - (unsigned)n) & 7];
+    if (sRtW - at < sRtW - sRtTail) { /* (rt_sync's way, to that place only: when the render thread has not moved for 2 ms, this thread goes on with it) */
+        unsigned long long t0 = sceKernelGetProcessTimeWide(), moved = t0;
+        uint32_t lastTail = sRtTail, spins = 0;
+        gVitaDrawWhere = 1;
+        rt_kick();
+        while (sRtW - at < sRtW - sRtTail) { /* (an empty ring ends it, however old the place) */
+            if ((++spins & 63) == 0) {
+                unsigned long long now = sceKernelGetProcessTimeWide();
+                if (sRtTail != lastTail) {
+                    lastTail = sRtTail;
+                    moved = now;
+                } else if (now - moved > 2000 && rt_exec_one()) {
+                    gVitaRt[7]++;
+                    lastTail = sRtTail;
+                    continue;
+                }
+            }
+            __asm__ volatile("yield");
+        }
+        gVitaDrawWhere = 0;
+        gVitaRtCapW[0]++;
+        gVitaRtCapW[1] += (unsigned)(sceKernelGetProcessTimeWide() - t0);
+    }
+    __sync_synchronize();
+}
+/* bt3.txt skipasync: a list not drawn in a fight, after a picture whose end went to the render thread, ends without
+   waiting for the render thread. It draws nothing; its end waited for everything handed over, filled the texture pools
+   and bound the picture again (the render thread binds it after the swap anyway): the first one after a stretch where
+   the render thread was behind waited 80 ms (55 s) and 250 ms (106 s) in one list in 2 vs 2. With texrt and without
+   texrtfill those ends were the fight's only filling of the pools: then the old way still. 0 off, 1 on, 2 the soak's
+   B battles; the report's "skipasync" count. */
+int gVitaSkipAsync = 0;
+unsigned gVitaSkipAsyncN; /* (the log) lists not drawn whose end did not wait */
 static void fe_sync(void) {
     if (sFeAsync) {
         sFeAsync = 0;
@@ -7619,9 +7820,18 @@ void GsGpu_FrameEnd(void) {
         extern int gVitaAbSide, gVitaFilm, Vita_InBattle(void);
         extern volatile int gVitaShotReq;
         static int battleWas;
+        static int lastAsync; /* (skipasync: the last drawn picture's end was the render thread's) */
         int battle = Vita_InBattle(), want = gVitaRtSwap == 2 ? gVitaAbSide == 1 : gVitaRtSwap != 0;
-        sFeAsync = want && sRtOn && !gVitaGsSkip && battle && battleWas && !sMovieDirty && sProf < 0 && sT114Shot == 0 && sSqN == 0 &&
+        int skipOk = gVitaGsSkip && lastAsync && (gVitaSkipAsync == 2 ? gVitaAbSide == 1 : gVitaSkipAsync != 0) && (!texrt_on() || texrtfill_on());
+        sFeAsync = want && sRtOn && (!gVitaGsSkip || skipOk) && battle && battleWas && !sMovieDirty && sProf < 0 && sT114Shot == 0 && sSqN == 0 &&
                    gVitaFilm <= 0 && gVitaShotReq == 0 && !sDumping && sLogFrames <= 0 && sMidN == 0 && !(gVglSafe & 4194304) && !gVitaGpuProf;
+        if (!gVitaGsSkip) {
+            lastAsync = sFeAsync;
+        } else if (sFeAsync) {
+            gVitaSkipAsyncN++;
+        } else {
+            lastAsync = 0;
+        }
         battleWas = battle;
     }
     if (!sFeAsync) {
@@ -7629,6 +7839,8 @@ void GsGpu_FrameEnd(void) {
         if (texrt_on()) {
             tex_pool_fill(); /* (texrt: vitaGL this thread's now) */
         }
+    } else if (texrtfill_on()) {
+        tex_pool_req(); /* (texrtfill: what the pools lack, made by the render thread) */
     }
     if (sDpRtBone != 0) { /* (dprt: the bones not finite the render thread found) */
         gVitaBoneBad += sDpRtBone;
@@ -7937,6 +8149,7 @@ void GsGpu_FrameEnd(void) {
                 rt_commit();
                 rt_kick();
                 gVitaRtSwapN[0]++;
+                rt_cap(); /* (rtcap: not more than rtcapn pictures behind it in the ring) */
             } else {
                 swap_sized(); /* (the menus' size or the fights') */
                 gVitaRtSwapN[1]++;
@@ -7955,6 +8168,7 @@ void GsGpu_FrameEnd(void) {
         }
         sFeAsync = 0;
     }
+    sFeAsync = 0; /* (skipasync: a list not drawn) */
     t114_list_end(!gVitaGsSkip);
 }
 
@@ -8683,12 +8897,19 @@ unsigned gVglConstGen; /* counts the times the back end took new strip constants
    Everything is let go then and made again from the next picture (a moment's stutter); not more than once in ten
    seconds, so that two models too large for the buffers together do not make it every picture. */
 #define DP_IBO_BYTES (4u << 20)
+/* bt3.txt chipkeep: when the fighters' copies (or the kept parts' indices) fill up in a fight and the stage's do not,
+   the stage's vertices stay on the chip: only the fighters' are let go. Everything was let go, and the next lists wrote
+   the stage's vertices again too (2 vs 2: 3,840 stage strips written in the stretch after, the list after the reset
+   92 ms). The kept calls are all made again as before (gVitaChipGen): what they kept of the stage refers to the same
+   places. 0 off, 1 on, 2 the soak's B battles; the report's "chipkeep" count. */
+int gVitaChipKeep = 0;
+unsigned gVitaChipKeepN[2]; /* (the log) resets in a fight with the stage's copies kept, with them let go */
 int Vita_ChipResetDue(void) {
-    extern int Vita_InBattle(void);
+    extern int Vita_InBattle(void), gVitaAbSide;
     static int was;
     static unsigned lastFull;
-    int now = Vita_InBattle(), r = 0, full = 0;
-    if (now && (sFtUsed > FT_VERTS - FT_VERTS / 8 || sStageUsed > STAGE_VERTS - STAGE_VERTS / 8 || sFtIdxUsed > FT_IDX - FT_IDX / 8 || sDpIboUsed > DP_IBO_BYTES - DP_IBO_BYTES / 8) &&
+    int now = Vita_InBattle(), r = 0, full = 0, stageFull = sStageUsed > STAGE_VERTS - STAGE_VERTS / 8;
+    if (now && (sFtUsed > FT_VERTS - FT_VERTS / 8 || stageFull || sFtIdxUsed > FT_IDX - FT_IDX / 8 || sDpIboUsed > DP_IBO_BYTES - DP_IBO_BYTES / 8) &&
         (lastFull == 0 || gGsFrame - lastFull > 600)) {
         full = 1;
         lastFull = gGsFrame;
@@ -8696,8 +8917,14 @@ int Vita_ChipResetDue(void) {
                  gGsFrame, (unsigned)sStageUsed, (unsigned)STAGE_VERTS, (unsigned)sFtUsed, (unsigned)FT_VERTS, (unsigned)sFtIdxUsed, (unsigned)FT_IDX, (unsigned)(sDpIboUsed >> 10));
     }
     if (((was && !now) || full) && (sStageUsed != 0 || sFtUsed != 0)) {
-        memset(sStageCache, 0, sizeof(sStageCache));
-        sStageUsed = 0;
+        int keep = full && now && !stageFull && (gVitaChipKeep == 2 ? gVitaAbSide == 1 : gVitaChipKeep != 0);
+        if (full && now) {
+            gVitaChipKeepN[keep ? 0 : 1]++;
+        }
+        if (!keep) {
+            memset(sStageCache, 0, sizeof(sStageCache));
+            sStageUsed = 0;
+        }
         memset(sFtCache, 0, sizeof(sFtCache));
         sFtUsed = 0;
         sFtIdxUsed = 0;

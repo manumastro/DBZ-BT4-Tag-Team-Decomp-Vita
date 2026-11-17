@@ -2273,6 +2273,24 @@ static void read_settings(void) {
         } else if (strcmp(line, "dpfreelate") == 0) { /* the kept parts let go freed a picture late, without a wait for the render thread: 0 off, 1 on, 2 in the soak's B battles */
             extern int gVitaDpFreeLate;
             gVitaDpFreeLate = atoi(eq);
+        } else if (strcmp(line, "rtcap") == 0) { /* at most rtcapn pictures waiting in the render thread's ring behind the one handed over: 0 off, 1 on, 2 in the soak's B battles */
+            extern int gVitaRtCap;
+            gVitaRtCap = atoi(eq);
+        } else if (strcmp(line, "rtcapn") == 0) { /* (rtcap) the pictures: 1 (default) to 6 */
+            extern int gVitaRtCapN;
+            gVitaRtCapN = atoi(eq);
+        } else if (strcmp(line, "skipasync") == 0) { /* a list not drawn in a fight ends without waiting for the render thread: 0 off, 1 on, 2 in the soak's B battles */
+            extern int gVitaSkipAsync;
+            gVitaSkipAsync = atoi(eq);
+        } else if (strcmp(line, "texrtfill") == 0) { /* (texrt) the texture pools filled by the render thread: 0 off, 1 on, 2 in the soak's B battles */
+            extern int gVitaTexRtFill;
+            gVitaTexRtFill = atoi(eq);
+        } else if (strcmp(line, "chipkeep") == 0) { /* the stage's copies kept on the chip when the fighters' fill up: 0 off, 1 on, 2 in the soak's B battles */
+            extern int gVitaChipKeep;
+            gVitaChipKeep = atoi(eq);
+        } else if (strcmp(line, "esrebind") == 0) { /* an object's model file bound again begins no new generation of the seam: 0 off, 1 on, 2 in the soak's B battles (gs_marker.c) */
+            extern int gVitaEsRebind;
+            gVitaEsRebind = atoi(eq);
         } else if (strcmp(line, "gxmcache") == 0) { /* vitaGL's GXM state calls left out when they change nothing: 0 off, 1 on, 2 in the soak's B battles */
             extern int gVitaGxmCache;
             gVitaGxmCache = atoi(eq);

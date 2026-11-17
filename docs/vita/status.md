@@ -39,6 +39,7 @@ switch is in [development.md](development.md)'s table):
 | `dpptr`, `dpcrec` | `dprt`'s two halves without the render thread's work: groups by their place, constants from the record | on | 2026-11-16, 2 vs 2: a kept part's match 1,630 -> 1,055 cycles, the beam 22.3 -> 23.3 |
 | `dpgen` | A kept part's register changes bump the state's generation (a correctness fix of the quick way) | on | 2026-11-16, 2 vs 2: no cost; ~7,000 such fields every 2 s |
 | `skipcc`, `dppf` | Kept calls in lists not drawn sent as registers only; the next kept part prefetched | off | 2026-11-16, 2 vs 2: skipcc worse (27.5 -> 26.6), dppf no gain |
+| `rtcap`, `skipasync`, `texrtfill`, `chipkeep`, `esrebind` | The heavy 2 vs 2 fight's single long lists (50-190 ms): the render thread let fall several pictures behind and then waited for at once; the texture pools never filled in a fight; the stage's copies let go with the fighters'; every model's kept calls made again at each bind of an object's model | off | not run yet (branch `wip/hitch`; causes from the runs `hx2`, `hx2off`) |
 
 Removed after a console run: `dpjoin` (never a pair). Also on by default, with all of the above: `runs/final` (10
 minutes, duels and three against three, six stages).

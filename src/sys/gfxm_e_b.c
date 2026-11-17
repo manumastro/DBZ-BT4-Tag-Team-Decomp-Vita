@@ -172,9 +172,10 @@ void BtlObjMdl_BindFiles(ObjMdlObj *obj) {
     void *res = obj->res;
     s32 i;
 #ifdef PORT_VITA
-    {   /* the port's engine seam: the models' chains may be other data now (port/src/gs_marker.c) */
-        extern void Port_EsModelBound(void);
-        Port_EsModelBound();
+    {   /* the port's engine seam: the models' chains may be other data now (port/src/gs_marker.c); a file bound
+           before keeps its chains as they were (esrebind) */
+        extern void Port_EsModelBound(int again);
+        Port_EsModelBound(mdl->file->bound);
     }
 #endif
 
