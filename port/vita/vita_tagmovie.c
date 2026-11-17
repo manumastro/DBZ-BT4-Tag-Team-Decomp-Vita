@@ -62,6 +62,8 @@ extern int gVitaCore3;
 int gVitaTagMovie = 0; /* bt3.txt tbomovie: 0 the poster (default), 1 the film; other values the poster */
 int gVitaTagMovieCopy = 1; /* bt3.txt tbomoviecopy: 1 each picture copied into the film's own 1 MB-aligned buffers (default), 0 the player's frame used in place */
 int gVitaTagMovieCsc = 0; /* bt3.txt tbomoviecsc: 0 CSC0, 1 CSC1 (vita_vgl.c) */
+int gVitaTagMovieReserve = 6; /* bt3.txt tbomoviereserve: MB of physically contiguous memory the film always leaves free in the system (batch 33: the console went off with 22 of 26 MB taken by the film); an allocation that would leave less is refused (the poster, or no copy) */
+int gVitaTagMovieStage = 0; /* bt3.txt tbomoviestage: 1 only gives vitaGL's pool back and takes it again (no player), once, to test that on its own */
 int gVitaTagMovieMem = 0; /* bt3.txt tbomoviemem: MB of physically contiguous memory vitaGL leaves to the player at its start (vita_vgl.c); 0 (default):
                              none left, the player's memory is carved from a block of vitaGL's own physically contiguous pool while the film plays */
 
@@ -123,10 +125,41 @@ static struct { SceUID blk; void *p; uint32_t size; } sCopy[TM_COPIES];
 static int sCopyAt;
 static uint64_t sCopyUs, sCopyMax;
 static unsigned sCopyN;
+static int sCopyRing = TM_COPIES; /* the copies in use (a copy buffer refused for want of memory shortens it) */
+static int sCopyOff;              /* no copy buffer could be made: the frames are used in place */
+static int sNever;                /* the pool could not be given back (or the system did not show its memory): no film this session */
+static int sStageDone;
+static int sFails;
 
 static uint64_t tm_now(void) { return sceKernelGetProcessTimeWide(); }
 static void tm_lock(void) { sceKernelLockMutex(sLock, 1, NULL); }
 static void tm_unlock(void) { sceKernelUnlockMutex(sLock, 1); }
+
+/* The system's free physically contiguous memory in bytes (-1 if it cannot be asked), and the line of the log that says it. */
+static int tm_phy_free(void) {
+    SceKernelFreeMemorySizeInfo info;
+    memset(&info, 0, sizeof(info));
+    info.size = sizeof(info);
+    if (sceKernelGetFreeMemorySize(&info) < 0) {
+        return -1;
+    }
+    return info.size_phycont;
+}
+static void tm_phy_log(const char *what) {
+    int f = tm_phy_free();
+    Vita_Log("tagmovie: physically contiguous memory free in the system: %d KB (%s)\n", f < 0 ? -1 : f / 1024, what);
+}
+/* May the film take `size` bytes of it: the system keeps tbomoviereserve MB free after. */
+static int tm_phy_ok(uint32_t size, const char *what) {
+    int f = tm_phy_free();
+    unsigned keep = (unsigned)(gVitaTagMovieReserve < 0 ? 0 : gVitaTagMovieReserve) << 20;
+    if (f < 0 || (unsigned)f >= size + keep) {
+        return 1;
+    }
+    Vita_Log("tagmovie: %s of %u KB refused: %d KB of physically contiguous memory free, %u KB to be kept free (tbomoviereserve)\n", what,
+             size / 1024, f / 1024, keep / 1024);
+    return 0;
+}
 
 /* the allocator hooks (under sLock; the player calls them on its own threads): the block's size kept for the count */
 static void tm_track(void *p, size_t n, int frame, int add) {
@@ -182,6 +215,12 @@ static void *tm_alloc_frame(void *arg, uint32_t alignment, uint32_t size) {
     int r;
     (void)arg;
     size = (size + TM_PHYCONT_ALIGN - 1) & ~(uint32_t)(TM_PHYCONT_ALIGN - 1);
+    if (!tm_phy_ok(size, "allocateTexture")) {
+        tm_lock();
+        sM.allocFailed = 1;
+        tm_unlock();
+        return NULL;
+    }
     blk = sceKernelAllocMemBlock("bt3_tagframe", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, size, NULL);
     if (blk < 0) {
         Vita_Log("tagmovie: allocateTexture(align %u, size %u KB -> %u KB): no physically contiguous memory (0x%08X)\n",
@@ -213,6 +252,7 @@ static void *tm_alloc_frame(void *arg, uint32_t alignment, uint32_t size) {
     tm_track(p, size, 1, 1);
     tm_unlock();
     Vita_Log("tagmovie: allocateTexture(align %u, size %u KB -> %u KB) = %p\n", alignment, asked / 1024, size / 1024, p);
+    tm_phy_log("after it");
     return p;
 }
 static void tm_free_frame(void *arg, void *p) {
@@ -306,28 +346,45 @@ static const uint8_t *tm_copy(const uint8_t *src, uint32_t w, uint32_t h) {
     uint32_t size = (w * h * 3 / 2 + TM_PHYCONT_ALIGN - 1) & ~(uint32_t)(TM_PHYCONT_ALIGN - 1);
     uint64_t t0 = tm_now(), dt;
     int k = sCopyAt;
+    if (sCopyOff) {
+        return NULL;
+    }
     if (sCopy[k].p == NULL || sCopy[k].size < size) {
         void *p = NULL;
         if (sCopy[k].p != NULL) {
             return NULL;
         }
-        sCopy[k].blk = sceKernelAllocMemBlock("bt3_tagcopy", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, size, NULL);
-        if (sCopy[k].blk < 0 || sceKernelGetMemBlockBase(sCopy[k].blk, &p) < 0 || p == NULL ||
-            sceGxmMapMemory(p, size, SCE_GXM_MEMORY_ATTRIB_RW) < 0) {
-            Vita_Log("tagmovie: no memory for a copy buffer of %u KB (0x%08X): the player's frames used in place\n", size / 1024,
-                     (unsigned)sCopy[k].blk);
-            if (sCopy[k].blk >= 0) {
-                sceKernelFreeMemBlock(sCopy[k].blk);
+        if (!tm_phy_ok(size, "copy buffer")) {
+            if (k >= 2) { /* two buffers at least make a ring */
+                sCopyRing = k;
+                sCopyAt = k = 0;
+                Vita_Log("tagmovie: the copies' ring is %d buffers (the memory kept free)\n", sCopyRing);
+            } else {
+                sCopyOff = 1;
+                Vita_Log("tagmovie: no copies (the memory kept free): the player's frames used in place\n");
+                return NULL;
             }
-            sCopy[k].blk = 0;
-            return NULL;
+        } else {
+            sCopy[k].blk = sceKernelAllocMemBlock("bt3_tagcopy", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, size, NULL);
+            if (sCopy[k].blk < 0 || sceKernelGetMemBlockBase(sCopy[k].blk, &p) < 0 || p == NULL ||
+                sceGxmMapMemory(p, size, SCE_GXM_MEMORY_ATTRIB_RW) < 0) {
+                Vita_Log("tagmovie: no memory for a copy buffer of %u KB (0x%08X): the player's frames used in place\n", size / 1024,
+                         (unsigned)sCopy[k].blk);
+                if (sCopy[k].blk >= 0) {
+                    sceKernelFreeMemBlock(sCopy[k].blk);
+                }
+                sCopy[k].blk = 0;
+                sCopyOff = 1;
+                return NULL;
+            }
+            sCopy[k].p = p;
+            sCopy[k].size = size;
+            Vita_Log("tagmovie: copy buffer %d: %u KB at %p\n", k, size / 1024, p);
+            tm_phy_log("after it");
         }
-        sCopy[k].p = p;
-        sCopy[k].size = size;
-        Vita_Log("tagmovie: copy buffer %d: %u KB at %p\n", k, size / 1024, p);
     }
     memcpy(sCopy[k].p, src, w * h * 3 / 2);
-    sCopyAt = (k + 1) % TM_COPIES;
+    sCopyAt = (k + 1) % sCopyRing;
     dt = tm_now() - t0;
     sCopyUs += dt;
     sCopyN++;
@@ -348,6 +405,8 @@ static void tm_copies_free(void) {
         }
     }
     sCopyAt = 0;
+    sCopyRing = TM_COPIES;
+    sCopyOff = 0;
 }
 
 /* The thread's end: the frame given up first (the drawing thread stops reading it), the player closed, the state cleared. */
@@ -358,6 +417,10 @@ static void tm_finish(SceAvPlayerHandle h, int failed) {
     sM.allocFailed = 0;
     if (failed) {
         sM.failedAt = tm_now();
+        if (++sFails >= 2) { /* (the pool is not given back and taken again for ever for a film that cannot play) */
+            sNever = 1;
+            Vita_Log("tagmovie: the film failed %d times: no film this session\n", sFails);
+        }
     }
     tm_unlock();
     if (TM_OK(h)) {
@@ -389,6 +452,13 @@ static int tm_thread(SceSize args, void *argp) {
         int m = sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER); /* (a module already loaded answers an error code too) */
         Vita_Log("tagmovie: sceSysmoduleLoadModule(AVPLAYER) = 0x%08X\n", (unsigned)m);
     }
+    /* A restart asked before this thread ran is dropped: the player starts from the beginning anyway. (Batch 33: the first thing the
+       thread did was Stop + AddSource on the player it had just made, which then gave no picture for 3 s; its failure closed it, and
+       the console went off a few seconds into the next player's film.) */
+    tm_lock();
+    sM.restart = 0;
+    tm_unlock();
+    tm_phy_log("the playing thread starts");
     /* (a fresh player: Init, AddSource, SetLooping: no Stop first) */
     if (tm_play(&h, TM_INTRO, 0) < 0) {
         Vita_Log("tagmovie: the player cannot play %s (the package carries tbo/ui/tag_ui_*.mp4?): the poster\n", TM_INTRO);
@@ -417,6 +487,9 @@ static int tm_thread(SceSize args, void *argp) {
             restart = 1;
         }
         tm_unlock();
+        if (restart && (!seen || (!sM.inLoop && now - startedAt < 1500000u))) {
+            restart = 0; /* (the source began a moment ago, or gave no picture yet: it is at its start) */
+        }
         if (restart) {
             /* the intro from its start */
             if (tm_play(&h, TM_INTRO, 0) < 0) {
@@ -463,6 +536,7 @@ static int tm_thread(SceSize args, void *argp) {
                      inLoop ? "loop" : "intro", gVitaCore3 == 1 ? "fourth" : "second");
             Vita_Log("tagmovie: copies %s: %u made, %u us each (worst %u us)\n", gVitaTagMovieCopy ? "on" : "off", copyN,
                      copyN ? (unsigned)(copyUs / copyN) : 0u, (unsigned)copyMax);
+            tm_phy_log("every 2 s");
             logAt = now + TM_LOG_US;
         }
         /* the audio queue drained (the films have no audio track; an undrained queue could stall a player) */
@@ -580,25 +654,46 @@ unsigned Vita_TagMovieTexture(void) {
     tm_lock();
     t0 = tm_now();
     sM.touched = t0;
-    if (!sM.running && !sM.stopping && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US) && gVitaTagMovieMem == 0 && sPoolSize == 0) {
-        /* (the drawing thread's call) vitaGL's pool given back to the system for the film; taken again after it */
+    if (!sM.running && !sM.stopping && !sNever && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US) && gVitaTagMovieMem == 0 &&
+        sPoolSize == 0 && !(gVitaTagMovieStage == 1 && sStageDone)) {
+        /* (the drawing thread's call) vitaGL's pool given back to the system for the film; taken again after it. The film starts only when
+           the system shows that memory free: else the pool is taken again at once and there is no film this session (the poster) */
         unsigned total = 0, freeb = 0, got;
+        int before, after;
         Vita_VglPhycontInfo(&total, &freeb);
+        before = tm_phy_free();
+        Vita_Log("tagmovie: vitaGL's pool: %u bytes, %u free (%u in use); the system's free physically contiguous memory %d KB; giving the pool back\n",
+                 total, freeb, total - freeb, before < 0 ? -1 : before / 1024);
         got = Vita_VglPhycontRelease();
+        after = tm_phy_free();
         if (got == 0) {
-            Vita_Log("tagmovie: vitaGL's physically contiguous pool cannot be given back (%u of %u KB free: something is allocated in it): the poster\n",
-                     freeb / 1024, total / 1024);
+            Vita_Log("tagmovie: vitaGL's physically contiguous pool cannot be given back (something is allocated in it, or it is not there): the poster, no film this session\n");
+            sNever = 1;
+            sM.failedAt = t0;
+        } else if (after >= 0 && (unsigned)after < ((unsigned)(18 + (gVitaTagMovieReserve < 0 ? 0 : gVitaTagMovieReserve)) << 20)) {
+            unsigned back = Vita_VglPhycontReacquire(got);
+            Vita_Log("tagmovie: the pool (%u KB) was given back but the system shows only %d KB free (the film needs 18 MB and %d MB kept free): "
+                     "the pool taken again (%u KB): the poster, no film this session\n", got / 1024, after / 1024, gVitaTagMovieReserve, back / 1024);
+            sNever = 1;
             sM.failedAt = t0;
         } else {
             sPoolSize = got;
-            Vita_Log("tagmovie: vitaGL's physically contiguous pool (%u KB) given back to the system for the film\n", got / 1024);
+            sPoolEndAt = t0;
+            Vita_Log("tagmovie: vitaGL's physically contiguous pool (%u KB) given back to the system for the film; the system shows %d KB free\n",
+                     got / 1024, after < 0 ? -1 : after / 1024);
+            if (gVitaTagMovieStage == 1) {
+                sStageDone = 1;
+                Vita_Log("tagmovie: tbomoviestage=1: no player, the pool is taken again in %u ms\n", TM_POOL_BACK_US / 1000);
+            }
         }
     }
-    if (!sM.running && !sM.stopping && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US) && (gVitaTagMovieMem != 0 || sPoolSize != 0)) {
+    if (!sM.running && !sM.stopping && !sNever && gVitaTagMovieStage != 1 && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US) &&
+        (gVitaTagMovieMem != 0 || sPoolSize != 0)) {
         SceUID th = Vita_ThreadOnCore3("bt3_tagmovie", tm_thread, TM_PRIORITY, TM_STACK, 0x00020000 /* else the second core */);
         if (th >= 0 && sceKernelStartThread(th, 0, NULL) >= 0) {
             sM.running = 1;
         } else {
+            Vita_Log("tagmovie: the playing thread could not be started (0x%08X)\n", (unsigned)th);
             sM.failedAt = t0;
         }
     }

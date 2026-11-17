@@ -275,9 +275,9 @@ not available.
   (copy the whole `BIN` folder), or the image is not B14 Rev2's.
 - **The picture is smaller, with black borders, in fights only** (the menus fill the screen): the fights are drawn
   at 640 x 368 and the system stretches them to the screen; the Sharpscale plugin in its Integer or Real scaling
-  mode shows them at their own size instead. Set Sharpscale's scaling mode back to Original, or put `fightres=960`
-  in `ux0:data/bt4/bt3.txt` (the fights drawn at the screen's own size: sharper, but they may run slower). When
-  reporting it, attach `ux0:data/bt4/log.txt`: its lines starting with `display:` and `vgl: the picture is drawn
+  mode shows them at their own size instead. Set Sharpscale's scaling mode back to Original. Do not use
+  `fightres=960` for it: the fights drawn at the screen's own size ran at 18.9 pictures a second in a 2 vs 2 fight
+  (29.3 at the default size), too slow to play. When reporting it, attach `ux0:data/bt4/log.txt`: its lines starting with `display:` and `vgl: the picture is drawn
   at` say what size was drawn and what the system was given.
 - **"The .iso is cut short"**: the copy on the memory card is smaller than the disc (the screen gives both sizes). The
   copy stopped early, or the card is FAT32, which holds files up to 4 GB: copy the image again, to an exFAT card, or
@@ -340,7 +340,8 @@ nothing built yet and no date.
   used or needed.
 - Optional settings go in `ux0:data/bt4/bt3.txt`, one per line: `wide=0` shows the PS2's original 4:3 picture,
   `disc=<folder>` reads the game files from another folder, `fightres=720` or `960` draws the fights at 720 x 408
-  or 960 x 544 instead of 640 x 368 (sharper, slower).
+  or 960 x 544 instead of 640 x 368 (sharper but slower: 960 measured 18.9 pictures a second in a 2 vs 2 fight against
+  29.3, not playable; 720 not measured).
 
 ## Building
 

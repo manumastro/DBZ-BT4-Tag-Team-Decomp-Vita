@@ -2266,6 +2266,12 @@ static void read_settings(void) {
         } else if (strcmp(line, "tbomoviemem") == 0) { /* tbomovie=1: MB of physically contiguous memory vitaGL leaves to the player (default 0: vitaGL pool given back while the film plays; the decoder asks for a 14 MB block) */
             extern int gVitaTagMovieMem;
             gVitaTagMovieMem = atoi(eq);
+        } else if (strcmp(line, "tbomoviereserve") == 0) { /* tbomovie=1: MB of physically contiguous memory the film leaves free in the system (default 6) */
+            extern int gVitaTagMovieReserve;
+            gVitaTagMovieReserve = atoi(eq);
+        } else if (strcmp(line, "tbomoviestage") == 0) { /* tbomovie=1: 1 only gives vitaGL's pool back and takes it again, no player (a test) */
+            extern int gVitaTagMovieStage;
+            gVitaTagMovieStage = atoi(eq);
         } else if (strcmp(line, "fxclamp") == 0) { /* the animated effects' triangles (with their CLAMP writes) as runs: 0 off, 1 on, 2 soak B */
             extern int gVitaFxClamp;
             gVitaFxClamp = atoi(eq);

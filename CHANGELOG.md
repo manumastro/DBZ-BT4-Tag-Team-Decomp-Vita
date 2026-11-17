@@ -134,7 +134,7 @@ From the BT3 Vita port (its `optimized` branch, merged in as before), the same a
   - palette textures' indices no longer leak in graphics memory (slowdowns after many fights); a line a minute in
     the log with the picture rate, the memory and the texture tables;
   - profile-guided builds (`BT3_PGO=gen` / `use`, [docs/vita/building.md](docs/vita/building.md));
-  - `fightres=720` / `960` in `bt3.txt` draws the fights at that size always (640 x 368 by default).
+  - `fightres=720` / `960` in `bt3.txt` draws the fights at that size always (640 x 368 by default); 960 ran at 18.9 pictures a second in a 2 vs 2 fight (batch 33), too slow.
 - **The outfit's number and name** in the character selects' Outfit Select ("2/6" between the arrows, the name
   under them): BT4decomp writes them with the PC's TrueType line renderer, which the Vita has not; written here
   with the game's own letters.

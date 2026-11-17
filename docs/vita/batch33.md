@@ -41,3 +41,33 @@ Regression batch, 130 s a run (`SECONDS_RUN=130`), no eboot to send:
 Not run automatically (they would touch the developer's saves or need other files): the manual checks in the report of the
 batch's author: Unlock All (three ways, Undo, the `.bak` files), wip/disc's messages with a cut `.iso`, an archive or another build,
 Vita Settings (Clashes, Stick pages) and the clashes themselves.
+
+## Batch 33b: after the power-off of `tagmovie_on` (2026-11-17)
+
+What batch 33 showed (`runs/tagmovie_on/after-log-vgl.txt`): vitaGL's pool WAS given back (`given back to the system for the film`, 26624 KB; the
+line is before the `started, tbomovie=1` line, not after it). The console switched itself off 2 to 4 s into the film's first real
+pictures (last log line the `12 s` report), with no crash dump, with 22019 KB of the system's 26 MB of physically contiguous memory held by
+the film (frames 4 MB, decoder 14 MB, 3 copies of 1 MB, rounding), 5 MB free. Batch 31 had 18 MB held (no copies) and ran 70 s.
+
+Two things found and changed (build `vita_dev_b33b`):
+1. The first player never gave a picture, as in batch 32: the thread's first act was `Stop` + `AddSource` on the player it had just made
+   (a restart asked by `Port_TagMenuMovieBegin` before the thread ran), which left it with `IsActive=0`; its failure closed it, a second
+   player was made 2 s later and that one played, then the console went off. The restart is now dropped at the thread's start and while
+   the source is under 1.5 s old or has given no picture.
+2. The film could take all the console's physically contiguous memory. Now every block it asks for (frames, decoder, copies) must leave
+   `tbomoviereserve` MB (default 6) free in the system, else it is refused (the poster; a refused copy shortens the copies' ring or turns
+   the copies off). The pool is given back only when the system then shows 18 MB + the reserve free; if not, the pool is taken again at
+   once and there is no film this session. A film that fails twice is not tried again. Every step logs the system's free amount.
+   `tbomoviestage=1` is a test that only gives the pool back and takes it again, with no player.
+
+Runs, 70 s each (`SECONDS_RUN=70`, the first sends the eboot):
+`SECONDS_RUN=70 ~/psvita/agent-tools/run_batch.sh b33c vita_dev_b33b tagmovie_stage1 tagmovie_on tagmovie_grid tagmovie_back tagmovie_nocopy tagmovie_csc1`
+
+| run | passed when |
+|---|---|
+| `tagmovie_stage1` | `giving the pool back` line with the system's free KB before, `given back ... the system shows N KB free` (N about 26000), then `taken again: 26624 of 26624 KB` 1 s later; no player lines; rc=0 |
+| `tagmovie_on` | one player only (a single `sceAvPlayerInit`), no `Stop` line before the first picture, `first picture`, the 2 s lines with `physically contiguous memory free in the system` never under 6000 KB, no `refused` line (or one for the third copy only: `the copies' ring is 2 buffers`), the console stays on; then colours in the shots |
+| `tagmovie_grid`, `tagmovie_back` | as before: `taken again: 26624 of 26624 KB` after START / CIRCLE at 30 s |
+| `tagmovie_nocopy`, `tagmovie_csc1` | the colour variants, as before |
+
+If the console goes off again: the last `physically contiguous memory free` line says how much was free; try `tbomoviereserve=10`.
