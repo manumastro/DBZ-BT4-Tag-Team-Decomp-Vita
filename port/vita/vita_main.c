@@ -719,7 +719,8 @@ static void demo_heavy(unsigned state, unsigned vblanks, unsigned long long t) {
    the status. The game does not wait for anything in this build, so blanks per second IS the game's speed. */
 static unsigned long long sStallEndT; /* (the game's thread: when it last came out of a blank's wait, and the console's count then) */
 static unsigned sStallEndVc;
-static void unlock_in_menus(void); /* (Unlock All from the menus, below) */
+static void unlock_in_menus(int options); /* (Unlock All from the menus, below) */
+static volatile int sUnlockAsk; /* Vita Settings asked for the unlock screen: shown at the next half-second step, below */
 void Vita_VBlank(unsigned vblanks) {
     unsigned long long t;
 
@@ -1706,13 +1707,18 @@ void Vita_VBlank(unsigned vblanks) {
             t0 = t; vb0 = vblanks; drawn0 = gVitaGsDrawn;
         }
     }
-    {   /* Unlock All from the menus: SELECT alone held for a second and a half (three of these half-second steps) */
+    {   /* Unlock All from the menus: SELECT alone held for about a second (two of these half-second steps; three, a
+           second and a half, were missed by players), or asked from Vita Settings */
         extern int gVitaInMenus;
         static int selHeld;
-        if (gVitaInMenus && (buttons() & (SCE_CTRL_START | SCE_CTRL_SELECT | SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) == SCE_CTRL_SELECT) {
-            if (++selHeld >= 3) {
+        if (sUnlockAsk) {
+            sUnlockAsk = 0;
+            selHeld = 0;
+            unlock_in_menus(1);
+        } else if (gVitaInMenus && (buttons() & (SCE_CTRL_START | SCE_CTRL_SELECT | SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) == SCE_CTRL_SELECT) {
+            if (++selHeld >= 2) {
                 selHeld = 0;
-                unlock_in_menus();
+                unlock_in_menus(0);
             }
         } else {
             selHeld = 0;
@@ -2453,18 +2459,40 @@ static void read_settings(void) {
     }
 }
 
-/* Unlock All, a cheat on a text screen: SELECT held while the game starts (as in arielxflores's Vita port, whose
-   start menu has it), or held for a second and a half while the menus run. It is the game's own unlock,
-   Save_UnlockAll (a routine the game has but never calls): every character and form, stage, song and item, and
-   4,850,000 Zenni. At the start it is given to the save the game loads next (src/menu/menu_i_b.c
-   BootCard_OnFlowDone); from the menus to the save in use at once. The game keeps it when it saves next. The save as
-   it was is copied first to UNLOCK_BACKUP (the first copy only: the one from before anything was unlocked), and Undo
-   puts that copy back. */
-#define UNLOCK_BACKUP HOME "/saves/unlock_backup.bin"
+/* Unlock All, a cheat on a text screen. Three ways in: SELECT pressed while the game starts (as in arielxflores's Vita
+   port, whose start menu has it), SELECT held for about a second in the menus, and SQUARE on Options > Controller >
+   Vita Settings. It gives every character and form, stage, song and item, the seven dragon flags, every Dragon
+   History slot, and at least 4,850,000 Zenni: the game's own unlock (Save_UnlockAll, a routine the game has but never
+   calls) without what that routine erases (src/sys/save.c Save_PortUnlockAll).
+   Where it is done and how it is kept. v1.3 lost it two ways: from the start it was done as the boot's card flow ended
+   (BootCard_OnFlowDone), and with no save on the card the title's New Game then wrote the defaults over it
+   (McFlow_UpdateNewSave, Save_SetDefaults); from the menus it stayed in memory until the player saved. Now:
+   - from the start, and from SELECT held before the title screen was first left (the logos, the title: no save in use
+     yet), it is done as the title screen is left (src/menu/menu_a_c.c Title_Run), to the save the menus use;
+   - from the menus and from Vita Settings, at once;
+   - then the save file is written again with it: saves/card1/BASLUS-21678DBZT3/BASLUS-21678DBZT3, the save's 0x4000
+     bytes with their checksum, as McFlow_UpdateSave writes them. Before that the file is copied beside it, read back:
+     to ".bak" the first time (never written over: the file from before Unlock All first wrote it), to ".last.bak"
+     each time after (the file just before this change). The file is not written when the save in use is not the
+     file's (src/sys/mcflow_a.c McFlow_PortSaveIsFile: a new game the player chose not to save, which would go over
+     the card's save), when there is no file yet (the game's next save keeps the unlock; from Vita Settings, leaving
+     Options saves), when what is there is not a whole save with a right checksum (a damaged save: left alone), or
+     while a card flow runs.
+   The save as it was before the first unlock is also copied to UNLOCK_BACKUP (the first copy only), and Undo puts that
+   copy back, written to the save file the same way; the copy is removed only once the save file has it. v1.2 to v1.3
+   kept theirs in unlock_backup.bin, which v1.3 could fill with a new game's defaults (an unlock at the start with no
+   save): that file is left as it is and Undo does not use it. Every step, with what the save held before and after,
+   goes to the log. */
+#define UNLOCK_BACKUP HOME "/saves/unlock_undo.bin"
+#define UNLOCK_BACKUP_OLD HOME "/saves/unlock_backup.bin" /* (v1.2 to v1.3's: not used, not touched) */
 #define UNLOCK_SAVE_SIZE 0x4000 /* SAVE_SIZE, include/sys/save.h */
-static int sUnlock; /* 1 unlock, 2 undo: done to the save the game loads next */
+#define UNLOCK_SAVE_FILE "/card1/BASLUS-21678DBZT3/BASLUS-21678DBZT3" /* port/src/plat_mc.c, src/battle/stgm_a_b.c McCardFile_SetNames */
+#define UNLOCK_COUNTS 7 /* SAVE_PORT_COUNTS, include/sys/save.h */
+static int sUnlock; /* chosen at the start: 1 unlock, 2 undo; done as the title screen is left */
+static int sTitleLeft; /* the title screen was left once (Vita_UnlockAtTitle): there is a save in use */
 static int sSelectSeen; /* SELECT down at one of the start's steps (start_step): it need not be held to the screen */
 static volatile int sTextPause; /* the menus' unlock screen is up: the game waits (the watchdog leaves it alone) */
+static volatile int sUnlockChanged; /* the screen asked from Vita Settings changed the save: leaving Options saves */
 
 static int file_there(const char *path) {
     SceIoStat st;
@@ -2480,6 +2508,158 @@ static int unlock_es(void) {
 #endif
 }
 
+/* The file read into buf (at most `size` bytes): the bytes read, size + 1 when the file is longer, < 0 when it cannot
+   be opened */
+static int unlock_read(const char *path, void *buf, int size) {
+    SceUID fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+    char extra;
+    int n, more = 0;
+
+    if (fd < 0) {
+        return fd;
+    }
+    n = sceIoRead(fd, buf, size);
+    if (n == size) {
+        more = sceIoRead(fd, &extra, 1);
+    }
+    sceIoClose(fd);
+    return more > 0 ? size + 1 : n;
+}
+
+/* buf written to the file, then read back: 1 when the file holds exactly those bytes */
+static int unlock_write_file(const char *path, const void *buf, int size) {
+    SceUID fd = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+    void *back;
+    int n;
+
+    if (fd < 0) {
+        return 0;
+    }
+    n = sceIoWrite(fd, buf, size);
+    sceIoClose(fd);
+    if (n != size || (back = malloc(size)) == NULL) {
+        return 0;
+    }
+    n = unlock_read(path, back, size) == size && memcmp(back, buf, size) == 0;
+    free(back);
+    return n;
+}
+
+/* The save in memory written to the save file (above). 1 written; 0 not written (the reason in the log); -1 the write
+   failed (the file as it was put back, or in the .bak). */
+static int unlock_save_file(void *save) {
+    extern int McFlow_PortBusy(void), McFlow_PortSaveIsFile(void); /* src/sys/mcflow_a.c */
+    extern int Port_McOpenFiles(void);                             /* port/src/plat_mc.c */
+    extern int McCard_Checksum(void *buf, int size, int write);    /* src/battle/stgm_a_b.c */
+    const char *root = getenv("BT3_SAVES");
+    char path[300], bak[320];
+    void *old;
+    int n;
+
+    snprintf(path, sizeof(path), "%s" UNLOCK_SAVE_FILE, root != NULL ? root : HOME "/saves");
+    snprintf(bak, sizeof(bak), "%s.bak", path);
+    if (file_there(bak)) {
+        snprintf(bak, sizeof(bak), "%s.last.bak", path); /* (the first copy is kept) */
+    }
+    if (!McFlow_PortSaveIsFile()) {
+        logf_("vita: unlock all: the save in use is not the save file's (a new game not saved, or none loaded): the file left"
+              " alone; the game's next save keeps the unlock\n");
+        return 0;
+    }
+    if (McFlow_PortBusy() || Port_McOpenFiles() != 0) {
+        logf_("vita: unlock all: the save file not written now (a card flow is running): the game's next save keeps it\n");
+        return 0;
+    }
+    if ((old = malloc(UNLOCK_SAVE_SIZE)) == NULL) {
+        return -1;
+    }
+    n = unlock_read(path, old, UNLOCK_SAVE_SIZE);
+    if (n < 0) {
+        logf_("vita: unlock all: no save file yet (%s, %08x): the game's next save keeps it\n", path, (unsigned)n);
+        free(old);
+        return 0;
+    }
+    if (n != UNLOCK_SAVE_SIZE || McCard_Checksum(old, UNLOCK_SAVE_SIZE, 0) != 0) {
+        logf_("vita: unlock all: %s is not a whole save (%d bytes) or its checksum is wrong: left alone\n", path, n);
+        free(old);
+        return 0;
+    }
+    if (!unlock_write_file(bak, old, UNLOCK_SAVE_SIZE)) {
+        logf_("vita: unlock all: the save file's copy %s could not be written: the save file left alone\n", bak);
+        free(old);
+        return 0;
+    }
+    McCard_Checksum(save, UNLOCK_SAVE_SIZE, 1); /* (as the game does before each save: McFlow_Start) */
+    if (!unlock_write_file(path, save, UNLOCK_SAVE_SIZE)) {
+        n = unlock_write_file(path, old, UNLOCK_SAVE_SIZE);
+        logf_("vita: unlock all: writing %s failed; %s\n", path, n ? "the file as it was put back" : "the file as it was is in the .bak beside it");
+        free(old);
+        return -1;
+    }
+    logf_("vita: unlock all: written to the save file %s (the file as it was copied first to %s)\n", path, bak);
+    free(old);
+    return 1;
+}
+
+static void unlock_log_counts(const char *what, const int *a, const int *b) {
+    logf_("vita: unlock all: %s: characters %d -> %d (of 161 bits; BT4's own, ids 165..249, are always open), stages %d -> %d"
+          " (of 64), songs %d -> %d (of 32), dragon flags %d -> %d (of 7), items %d -> %d (of 350), Dragon History slots"
+          " %d -> %d (of 9), Zenni %d -> %d\n",
+          what, a[0], b[0], a[1], b[1], a[2], b[2], a[3], b[3], a[4], b[4], a[5], b[5], a[6], b[6]);
+}
+
+/* `what` (1 unlock, 2 undo) done to `save`, then written to the save file. 0 nothing done; 1 done and in the save
+   file; 2 done in the game only (the save file not written: unlock_save_file's reason in the log). */
+static int unlock_apply(int what, void *save) {
+    extern void Save_PortCount(const void *opt, int *count); /* src/sys/save.c */
+    extern void Save_PortUnlockAll(void *opt);
+    int before[UNLOCK_COUNTS], after[UNLOCK_COUNTS], w;
+
+    if (file_there(UNLOCK_BACKUP_OLD)) {
+        logf_("vita: unlock all: %s (v1.2 to v1.3's copy) is left as it is, not used\n", UNLOCK_BACKUP_OLD);
+    }
+    if (what == 1) {
+        if (file_there(UNLOCK_BACKUP)) {
+            logf_("vita: unlock all: the copy from before the first unlock stays in %s\n", UNLOCK_BACKUP);
+        } else if (unlock_write_file(UNLOCK_BACKUP, save, UNLOCK_SAVE_SIZE)) {
+            logf_("vita: unlock all: the save as it was copied to %s\n", UNLOCK_BACKUP);
+        } else {
+            sceIoRemove(UNLOCK_BACKUP); /* (ours, just made and not whole) */
+            logf_("vita: unlock all: not done, the save's copy %s could not be written\n", UNLOCK_BACKUP);
+            return 0;
+        }
+        Save_PortCount(save, before);
+        Save_PortUnlockAll(save);
+        Save_PortCount(save, after);
+        unlock_log_counts("given to the save", before, after);
+    } else if (what == 2) {
+        void *old = malloc(UNLOCK_SAVE_SIZE);
+        int n = old != NULL ? unlock_read(UNLOCK_BACKUP, old, UNLOCK_SAVE_SIZE) : -1;
+        if (n != UNLOCK_SAVE_SIZE) {
+            logf_("vita: unlock all: the undo failed, the copy %s could not be read (%d)\n", UNLOCK_BACKUP, n);
+            free(old);
+            return 0;
+        }
+        Save_PortCount(save, before);
+        memcpy(save, old, UNLOCK_SAVE_SIZE);
+        Save_PortCount(save, after);
+        free(old);
+        unlock_log_counts("undone, the save as it was before put back", before, after);
+    } else {
+        return 0;
+    }
+    w = unlock_save_file(save);
+    if (what == 2) {
+        if (w == 1) {
+            sceIoRemove(UNLOCK_BACKUP);
+            logf_("vita: unlock all: the copy %s removed (the save file has it now)\n", UNLOCK_BACKUP);
+        } else {
+            logf_("vita: unlock all: the copy %s kept (the save file does not have it yet)\n", UNLOCK_BACKUP);
+        }
+    }
+    return w == 1 ? 1 : 2;
+}
+
 /* The screen's text and its choice: 1 unlock, 2 undo (only with the copy there), 0 nothing. `now`: from the menus. */
 static int unlock_ask(int now) {
     int es = unlock_es(), there = file_there(UNLOCK_BACKUP);
@@ -2487,14 +2667,14 @@ static int unlock_ask(int now) {
 
     psvDebugScreenPrintf("\e[H\e[2J\n\e[33m%s\e[39m\n\n", es ? "Desbloquear todo (truco)" : "Unlock All (cheat)");
     psvDebugScreenPrintf("%s\n  %s\n\n",
-                         es ? (now ? "Todos los personajes y transformaciones, escenarios,\ncanciones y objetos, y 4.850.000 Zenis, en tu partida\n"
-                                     "ahora. Guarda en Opciones (o el juego guarda solo tras\nun combate) para conservarlo. Antes se copia tu partida en"
-                                   : "Todos los personajes y transformaciones, escenarios,\ncanciones y objetos, y 4.850.000 Zenis, en tu partida\n"
-                                     "cuando el juego la cargue. El juego los guarda la\nproxima vez que guarde. Antes se copia tu partida en")
-                            : (now ? "Every character and form, stage, song and item, and\n4,850,000 Zenni, given to your save now. Save in Options\n"
-                                     "(or the game saves by itself after a fight) to keep it.\nYour save as it is now is copied first to"
-                                   : "Every character and form, stage, song and item, and\n4,850,000 Zenni, given to your save as the game loads\n"
-                                     "it. The game keeps them when it saves next. Your save\nas it is now is copied first to"),
+                         es ? (now ? "Todos los personajes y transformaciones, escenarios,\ncanciones y objetos, y al menos 4.850.000 Zenis,\n"
+                                     "en tu partida ahora, y se escribe en su archivo de\nguardado. Antes se copia tu partida en"
+                                   : "Todos los personajes y transformaciones, escenarios,\ncanciones y objetos, y al menos 4.850.000 Zenis,\n"
+                                     "en tu partida al dejar la pantalla de titulo, y se\nescribe en su archivo. Antes se copia tu partida en")
+                            : (now ? "Every character and form, stage, song and item, and\nat least 4,850,000 Zenni, given to your save now and\n"
+                                     "written to its file. Your save as it is now is\ncopied first to"
+                                   : "Every character and form, stage, song and item, and\nat least 4,850,000 Zenni, given to your save as the\n"
+                                     "title screen is left, and written to its file. Your\nsave as it is then is copied first to"),
                          UNLOCK_BACKUP);
     psvDebugScreenPrintf("%s\n", es ? "CROSS: desbloquear todo" : "CROSS: unlock everything");
     if (there) {
@@ -2505,49 +2685,6 @@ static int unlock_ask(int now) {
                                      : (es ? "CIRCLE o START: jugar sin cambios" : "CIRCLE or START: play without changes"));
     b = wait_buttons(SCE_CTRL_CROSS | SCE_CTRL_CIRCLE | (now ? 0 : SCE_CTRL_START) | (there ? SCE_CTRL_TRIANGLE : 0));
     return (b & SCE_CTRL_CROSS) ? 1 : (b & SCE_CTRL_TRIANGLE) ? 2 : 0;
-}
-
-/* `what` (1 unlock, 2 undo) done to `save`: 1 when it is to be given everything now (its copy is kept: nothing is
-   unlocked when the copy cannot be written); an undo puts the copy back into it here. */
-static int unlock_do(int what, void *save) {
-    SceUID fd;
-    int n;
-
-    if (what == 1) {
-        if (file_there(UNLOCK_BACKUP)) {
-            logf_("vita: unlock all: given to the save (the copy from before the first unlock stays in %s)\n", UNLOCK_BACKUP);
-            return 1;
-        }
-        fd = sceIoOpen(UNLOCK_BACKUP ".new", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
-        n = fd >= 0 ? sceIoWrite(fd, save, UNLOCK_SAVE_SIZE) : -1;
-        if (fd >= 0) {
-            sceIoClose(fd);
-        }
-        if (n != UNLOCK_SAVE_SIZE || sceIoRename(UNLOCK_BACKUP ".new", UNLOCK_BACKUP) < 0) {
-            sceIoRemove(UNLOCK_BACKUP ".new");
-            logf_("vita: unlock all: not done, the save's copy could not be written (%08x)\n", (unsigned)fd);
-            return 0;
-        }
-        logf_("vita: unlock all: given to the save, its copy from before in %s\n", UNLOCK_BACKUP);
-        return 1;
-    }
-    if (what == 2) {
-        void *old = malloc(UNLOCK_SAVE_SIZE);
-        fd = sceIoOpen(UNLOCK_BACKUP, SCE_O_RDONLY, 0);
-        n = fd >= 0 && old != NULL ? sceIoRead(fd, old, UNLOCK_SAVE_SIZE) : -1;
-        if (fd >= 0) {
-            sceIoClose(fd);
-        }
-        if (n == UNLOCK_SAVE_SIZE) {
-            memcpy(save, old, UNLOCK_SAVE_SIZE);
-            sceIoRemove(UNLOCK_BACKUP);
-            logf_("vita: unlock all: undone, the save as it was before put back\n");
-        } else {
-            logf_("vita: unlock all: the undo failed, the copy could not be read (%08x)\n", (unsigned)fd);
-        }
-        free(old);
-    }
-    return 0;
 }
 
 /* SELECT looked at every 16 ms from the program's first steps to the unlock screen, on a thread of its own: a short
@@ -2572,7 +2709,7 @@ static void select_watch_start(void) {
     }
 }
 
-/* At the start (SELECT down at any moment of it, or now) */
+/* At the start (SELECT down at any moment of it, or now): the choice is done as the title screen is left */
 static void unlock_menu(void) {
     sSelectWatch = 0;
     if (!sSelectSeen && !(buttons() & SCE_CTRL_SELECT)) {
@@ -2580,46 +2717,96 @@ static void unlock_menu(void) {
     }
     logf_("vita: start: the unlock screen\n");
     sUnlock = unlock_ask(0);
-    logf_("vita: start: unlock screen: %s\n", sUnlock == 1 ? "unlock" : sUnlock == 2 ? "undo" : "nothing");
+    logf_("vita: start: unlock screen: %s\n", sUnlock == 1 ? "unlock (done as the title screen is left)"
+                                              : sUnlock == 2 ? "undo (done as the title screen is left)" : "nothing");
     psvDebugScreenPrintf("\e[H\e[2J");
 }
 
-/* The save just loaded or made (src/menu/menu_i_b.c BootCard_OnFlowDone): 1 when it is to be given everything now */
-int Vita_UnlockOnLoad(void *save, int size) {
-    int what = sUnlock;
-    (void)size;
+/* src/menu/menu_a_c.c Title_Run, as the title screen is left for the menus: the start's choice done to the save in use
+   (the one loaded at boot, or the one New Game has just made) */
+void Vita_UnlockAtTitle(void) {
+    extern void *gSaveData;
+    int what = sUnlock, r;
+
+    sTitleLeft = 1;
+    if (what == 0 || gSaveData == NULL) {
+        return;
+    }
     sUnlock = 0;
-    return unlock_do(what, save);
+    r = unlock_apply(what, gSaveData);
+    logf_("vita: start: the unlock screen's choice done as the title screen is left: %s\n",
+          r == 1 ? "in the save and its file" : r == 2 ? "in the save (its file not written: above)" : "not done");
 }
 
 /* From the menus (Vita_VBlank, on the game's thread between two of its pictures): the game waits while the text
-   screen is up, and its next picture takes the screen back. */
-static void unlock_in_menus(void) {
+   screen is up, and its next picture takes the screen back. `options`: asked from Vita Settings. */
+static void unlock_in_menus(int options) {
     extern void *gSaveData;
-    extern void Save_UnlockAll(void *opt);
-    int what;
+    int what, r = 0, es = unlock_es();
 
     if (gSaveData == NULL) {
         return;
     }
     sTextPause = 1;
-    logf_("vita: menus: the unlock screen (SELECT held)\n");
+    logf_("vita: menus: the unlock screen (%s)\n", options ? "Vita Settings" : "SELECT held");
     Vita_TextScreen();
+    if (!sTitleLeft) {
+        /* (the logos or the title: the save in use is not settled yet, New Game would write the defaults over it) the
+           choice is kept, and done as the title screen is left, as the start's is */
+        what = unlock_ask(0);
+        if (what != 0) {
+            sUnlock = what;
+        }
+        logf_("vita: menus: unlock screen before the title was left: %s\n", what == 1 ? "unlock (done as the title screen is left)"
+                                                                         : what == 2 ? "undo (done as the title screen is left)" : "nothing");
+        if (what != 0) {
+            psvDebugScreenPrintf("\n\e[32m%s\e[39m\n", es ? "Se hara al dejar la pantalla de titulo." : "It is done as the title screen is left.");
+            sceKernelDelayThread(2000000);
+        }
+        while (buttons() & (SCE_CTRL_CROSS | SCE_CTRL_CIRCLE | SCE_CTRL_TRIANGLE | SCE_CTRL_SQUARE | SCE_CTRL_SELECT | SCE_CTRL_START)) {
+            sceKernelDelayThread(20000);
+        }
+        psvDebugScreenPrintf("\e[H\e[2J");
+        sTextPause = 0;
+        return;
+    }
     what = unlock_ask(1);
-    if (unlock_do(what, gSaveData)) {
-        Save_UnlockAll(gSaveData);
-    }
-    logf_("vita: menus: unlock screen: %s\n", what == 1 ? "unlock" : what == 2 ? "undo" : "nothing");
     if (what != 0) {
-        psvDebugScreenPrintf("\n\e[32m%s\e[39m\n", unlock_es() ? (what == 1 ? "Hecho. Guarda en Opciones para conservarlo." : "Hecho.")
-                                                               : (what == 1 ? "Done. Save in Options to keep it." : "Done."));
-        sceKernelDelayThread(1500000);
+        r = unlock_apply(what, gSaveData);
     }
-    while (buttons() & (SCE_CTRL_CROSS | SCE_CTRL_CIRCLE | SCE_CTRL_TRIANGLE | SCE_CTRL_SELECT | SCE_CTRL_START)) {
+    if (r != 0 && options) {
+        sUnlockChanged = 1;
+    }
+    logf_("vita: menus: unlock screen: %s, %s\n", what == 1 ? "unlock" : what == 2 ? "undo" : "nothing",
+          r == 1 ? "in the save and its file" : r == 2 ? "in the save (its file not written: above)" : "nothing changed");
+    if (what != 0) {
+        if (r == 1) {
+            psvDebugScreenPrintf("\n\e[32m%s\e[39m\n", es ? "Hecho, y escrito en tu archivo de guardado." : "Done, and written to your save file.");
+        } else if (r == 2) {
+            psvDebugScreenPrintf("\n\e[32m%s\e[39m\n", es ? "Hecho en el juego. Guarda en Opciones para\nconservarlo (el archivo no se escribio ahora)."
+                                                          : "Done in the game. Save in Options to keep it\n(the save file was not written now).");
+        } else {
+            psvDebugScreenPrintf("\n\e[31m%s\e[39m\n", es ? "No se hizo: mira " HOME "/log" SFX : "Not done: see " HOME "/log" SFX);
+        }
+        sceKernelDelayThread(2000000);
+    }
+    while (buttons() & (SCE_CTRL_CROSS | SCE_CTRL_CIRCLE | SCE_CTRL_TRIANGLE | SCE_CTRL_SQUARE | SCE_CTRL_SELECT | SCE_CTRL_START)) {
         sceKernelDelayThread(20000); /* (all let go first: the press that chose is not the menu's too) */
     }
     psvDebugScreenPrintf("\e[H\e[2J");
     sTextPause = 0;
+}
+
+/* src/menu/menu_x_c.c, Vita Settings: SQUARE asks for the unlock screen; whether it changed the save (then leaving
+   Options runs the game's own save) */
+void Vita_UnlockFromOptions(void) {
+    sUnlockAsk = 1;
+}
+
+int Vita_UnlockTakeChanged(void) {
+    int c = sUnlockChanged;
+    sUnlockChanged = 0;
+    return c;
 }
 
 /* ---- Tag Team offline: the setup of a local room (one player and CPUs) ----

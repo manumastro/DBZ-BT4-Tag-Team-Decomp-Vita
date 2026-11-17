@@ -238,6 +238,77 @@ const s32 *Save_PortKeys(s32 pad, s32 *tmp) {
     Save_PortDefaultKeys(tmp);
     return tmp;
 }
+
+/* What a save holds, for the log of Unlock All (port/vita/vita_main.c): count[] = characters (of SAVE_CHARA_COUNT
+   bits), stages (of 64), songs (of 32), the seven dragon flags, items owned (of SAVE_ITEM_COUNT), Dragon History
+   slots listed (of SAVE_SLOT_COUNT), money. */
+void Save_PortCount(const SaveData *opt, s32 *count) {
+    s32 i;
+
+    for (i = 0; i < SAVE_PORT_COUNTS; i++) {
+        count[i] = 0;
+    }
+    for (i = 0; i < SAVE_CHARA_COUNT; i++) {
+        count[0] += (s32)((opt->charaBits[i / 64] >> (i % 64)) & 1);
+    }
+    for (i = 0; i < SAVE_STAGE_COUNT; i++) {
+        count[1] += (s32)((opt->stageBits >> i) & 1);
+    }
+    for (i = 0; i < SAVE_BGM_COUNT; i++) {
+        count[2] += (s32)((opt->bgmBits >> i) & 1);
+    }
+    for (i = 0; i < SAVE_FLAG8_COUNT; i++) {
+        count[3] += (opt->unlockFlags >> i) & 1;
+    }
+    for (i = 0; i < SAVE_ITEM_COUNT; i++) {
+        count[4] += opt->item[i] & SAVE_ITEM_OWNED;
+    }
+    for (i = 0; i < SAVE_SLOT_COUNT; i++) {
+        count[5] += (opt->slot[i].flags & 3) == 3;
+    }
+    count[6] = opt->money;
+}
+
+/* Unlock All on the Vita: what the game's Save_UnlockAll gives (every character and form of the 161 bits, every stage,
+   song and item, the seven dragon flags, every Dragon History slot and episode), added to `opt` without what that
+   debug routine takes away: it empties the saved characters (rec[], the Data Center's passwords), sets the money to
+   4,850,000 even when there was more, and marks items new at random. Here rec[] is kept, the money only raised, and
+   only an item not owned before is marked new (as Save_AddItem does). BT4's own fighters (ids 0xA5..249) have no bit:
+   the grid shows them unlocked (src/battle/view_a_e.c CHARA_UNLOCKED). */
+void Save_PortUnlockAll(SaveData *opt) {
+    s32 i;
+
+    for (i = 0; i < SAVE_CHARA_COUNT; i++) {
+        SAVE_CHARA_WORD(opt, i) |= SAVE_CHARA_MASK(i);
+    }
+    for (i = 0; i < SAVE_STAGE_COUNT; i++) {
+        opt->stageBits |= 1LL << i;
+    }
+    for (i = 0; i < SAVE_BGM_COUNT; i++) {
+        opt->bgmBits |= 1U << i;
+    }
+    for (i = 0; i < SAVE_FLAG8_COUNT; i++) {
+        opt->unlockFlags |= 1 << i;
+    }
+    for (i = 0; i < SAVE_ITEM_COUNT; i++) {
+        if (!(opt->item[i] & SAVE_ITEM_OWNED)) {
+            opt->item[i] |= SAVE_ITEM_OWNED | SAVE_ITEM_NEW;
+        }
+    }
+    if (opt->money < SAVE_MONEY_UNLOCK_ALL) {
+        opt->money = SAVE_MONEY_UNLOCK_ALL;
+    }
+    if (opt->unk20C < 20) {
+        opt->unk20C = 20;
+    }
+    opt->unk208 |= 1;
+    for (i = 0; i < SAVE_SLOT_COUNT; i++) {
+        opt->slot[i].flags |= 3;
+        opt->slot[i].val[0] |= 0xFFFF;
+        opt->slot[i].val[1] |= 0xFFFF;
+        opt->slot[i].val[2] |= 0xFFFF;
+    }
+}
 #endif
 
 /* Restores the six rule settings at 0xC34 to 3, 2, 2, 0, 0, 0. */

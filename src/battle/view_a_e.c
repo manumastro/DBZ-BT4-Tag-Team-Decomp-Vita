@@ -876,6 +876,37 @@ void ChrGrid_Build(s32 *outCount, ChrGridCell *out, s32 *inCount, ChrGridCell *i
         (*outCount)++;
     }
 
+#ifdef PORT_VITA
+    {   /* For Unlock All (port/vita/vita_main.c): the characters and forms this grid leaves out as locked, in the log,
+           once for each screen and number, with the save's character bits: a player's log names any it did not open */
+        extern void Vita_Log(const char *fmt, ...);
+        static s32 lastMode = -1, lastLocked = -1;
+        char ids[160];
+        s32 locked = 0, len = 0, id;
+
+        ids[0] = '\0';
+        for (i = 0; i < *inCount; i++) {
+            for (j = 0; j < (in[i].formCount != 0 ? in[i].formCount : 1); j++) {
+                id = in[i].formCount != 0 ? in[i].form[j] : in[i].id;
+                if (id < 0 || (id >= CHRGRID_ID_RANDOM && id < 0xA5) || CHARA_UNLOCKED(id)) {
+                    continue;
+                }
+                locked++;
+                if (len < (s32)sizeof(ids) - 12) {
+                    len += sprintf(ids + len, " %d", id);
+                }
+            }
+        }
+        if (mode != lastMode || locked != lastLocked) {
+            lastMode = mode;
+            lastLocked = locked;
+            Vita_Log("vita: character grid (menu mode %d): %d of its characters and forms locked%s%s (the save's character bits"
+                     " %08x%08x %08x%08x %08x%08x)\n", mode, locked, locked != 0 ? ", ids:" : "", ids,
+                     (u32)(gSaveData->charaBits[0] >> 32), (u32)gSaveData->charaBits[0], (u32)(gSaveData->charaBits[1] >> 32),
+                     (u32)gSaveData->charaBits[1], (u32)(gSaveData->charaBits[2] >> 32), (u32)gSaveData->charaBits[2]);
+        }
+    }
+#endif
     pad = (*outCount + (CHRGRID_COLS - 1)) / CHRGRID_COLS * CHRGRID_COLS;
     if (pad != 0) {
         pad -= *outCount;

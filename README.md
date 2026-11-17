@@ -197,17 +197,29 @@ On a PS TV, or with a DualShock paired, the controller's own L2, R2, L3 and R3 b
 
 ## Unlock All
 
-Two ways to open its screen:
+Three ways to open its screen:
 
-- **in the menus**: hold SELECT for two seconds (after your save is loaded, in the main menu for instance);
+- **in the menus**: hold SELECT for about a second (after your save is loaded, in the main menu for instance);
+- **in Vita Settings**: Options > Controller > Vita Settings, then SQUARE;
 - **at the start**: press SELECT as the game starts (a short press at any moment before its first picture is enough).
 
-CROSS gives your save everything: every character and form, stage, song and item, and 4,850,000 Zenni. It is the
-game's own unlock routine (the developers left it in, never called; arielxflores's Vita port offers it the same way).
-From the menus it is in your save at once; save in Options (or the game saves by itself after a fight) to keep it.
-Your save as it was is copied first to `ux0:data/bt4/saves/unlock_backup.bin`, and the same screen then offers to undo
-it (TRIANGLE), which puts that copy back (what was played since then is lost). The PS2's cheat codes (PCSX2 pnach,
-CodeBreaker) do nothing here: this is not an emulator.
+Chosen at the start, or before the title screen is left, it is done as the title screen is left: to the save the game
+loaded, or to the one New Game makes.
+
+CROSS gives your save everything: every character and form, stage, song and item, the dragon flags, every Dragon
+History saga, and at least 4,850,000 Zenni. It is the game's own unlock routine (the developers left it in, never
+called; arielxflores's Vita port offers it the same way), without what that routine erased (the Data Center's saved
+characters, and money above 4,850,000). The fighters BT4 numbers after BT3's have no unlock bit in the save and are
+not locked by it; if a fighter still shows locked after Unlock All, the log names it (send it with your report).
+
+It is written to your save file at once (`ux0:data/bt4/saves/card1/BASLUS-21678DBZT3/BASLUS-21678DBZT3`), which is
+copied beside it first: to `.bak` the first time (never written over), to `.last.bak` the times after. The screen says
+whether the file was written; when it was not (no save file yet, or a new game you chose not to save), the game keeps
+the unlock when it saves next. Your save as it was before the first unlock is also copied to
+`ux0:data/bt4/saves/unlock_undo.bin`, and the same screen then offers to undo it (TRIANGLE), which puts that copy back
+(what was played since then is lost). The copy v1.2 to v1.3 made, `unlock_backup.bin`, is left as it is. What was done
+is in `ux0:data/bt4/log.txt`. The PS2's cheat codes (PCSX2 pnach, CodeBreaker) do nothing here: this is not an
+emulator.
 
 ## Mods
 

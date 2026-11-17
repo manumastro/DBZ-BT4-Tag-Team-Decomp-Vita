@@ -84,6 +84,15 @@ static int host_path(int port, const char *name, char *out, size_t size) {
 
 int func_002A1A48(void) { return 0; } /* sceMcInit */
 
+/* The card's files the game has open (the Vita's Unlock All writes the save file only when there are none) */
+int Port_McOpenFiles(void) {
+    int fd, n = 0;
+    for (fd = 0; fd < MC_FILES; fd++) {
+        n += sMc[fd].open != 0;
+    }
+    return n;
+}
+
 /* sceMcGetInfo: the outputs are filled when the request completes. */
 int func_002A25B8(int port, int slot, int *type, int *freeClusters, int *format) {
     char path[600];

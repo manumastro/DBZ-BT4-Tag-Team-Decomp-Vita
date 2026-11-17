@@ -148,6 +148,10 @@ void Save_PortDefaultKeys(s32 *key);
 s32 Save_PortKeysConsoleDefault(const s32 *key);
 /* the set the battle uses for controller `pad`: Custom when that controller's custom bit is on, else Normal */
 const s32 *Save_PortKeys(s32 pad, s32 *tmp);
+/* Unlock All on the Vita (port/vita/vita_main.c): the game's unlock without what it erases, and the counts for its log */
+#define SAVE_PORT_COUNTS 7
+void Save_PortCount(const SaveData *opt, s32 *count);
+void Save_PortUnlockAll(SaveData *opt);
 #endif
 
 #endif

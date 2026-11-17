@@ -324,7 +324,8 @@ static void Option_VitaKeysLeave(void) {
 /* "Vita Settings", the controller page's second row (the console's Vibration). Its page holds four plates of the
    console's two-way pickers, captioned from the second caption strip, whose rows take turns between two sets
    (vita_optart.c Vita_OptionCaptions):
-     level 1: Touch, Clashes / 2nd Pad, Mods, the four settings;
+     level 1: Touch, Clashes / 2nd Pad, Mods, the four settings; SQUARE there opens Unlock All's text screen
+              (port/vita/vita_main.c), and when it changed the save, leaving Options saves;
      level 2: Touch: L2, R2 / L3, R3, laid out as the rear pad's quarters; level 3: where the chosen one is touched,
               Rear / Front, Off (port/vita/vita_touch.c, which keeps it in ux0:data/bt3/touch.txt);
      level 4: Clashes: Square / Stick, what wins a beam or rush clash (port/vita/vita_gfx.c, clash_square);
@@ -345,6 +346,8 @@ extern int Port_Setting(const char *name, int def);
 extern void Port_SettingSave(const char *name, int value);
 extern void Port_SettingsWrite(void);
 extern void Vita_ModsSummary(char *out, int size);
+extern void Vita_UnlockFromOptions(void); /* port/vita/vita_main.c: Unlock All's screen, from level 1 (SQUARE) */
+extern int Vita_UnlockTakeChanged(void);
 static s32 sVitaSetLevel; /* 0 closed, 1..6 above */
 static s32 sVitaSetItem;  /* the setting chosen on level 1 */
 static s32 sVitaTouchBtn; /* the button chosen on level 2 */
@@ -389,6 +392,15 @@ static void Option_VitaSetGuide(void) {
             }
         } else {
             sprintf(text, "Mods: files in ux0:data/bt3/mods\nreplace the disc's: OFF.");
+        }
+        {   /* (Vita_UnlockFromOptions, below; not when the line is long already) */
+            s32 k = 0;
+            while (text[k] != '\0') {
+                k++;
+            }
+            if (k < 90) {
+                sprintf(text + k, "\nSQUARE: Unlock All.");
+            }
         }
         break;
     case 2: /* the button under the cursor, and where it is now */
@@ -465,12 +477,20 @@ static void Option_VitaTouchInput(void) {
     s32 v = gOption->value;
     s32 back = (pressed & (PADG_TRIANGLE | PADG_CIRCLE)) != 0;
 
+    if (Vita_UnlockTakeChanged()) {
+        gOption->dirty = 1; /* (Unlock All changed the save: leaving Options saves it, the game's own way) */
+    }
     switch (sVitaSetLevel) {
     case 1: /* Touch Clashes / 2nd Pad Mods */
         if (pressed & (PADG_LEFT | PADG_RIGHT)) {
             Option_VitaSetMove(v ^ 1);
         } else if (pressed & (PADG_UP | PADG_DOWN)) {
             Option_VitaSetMove(v ^ 2);
+        } else if (pressed & PADG_SQUARE) {
+            /* Unlock All: its text screen, shown between two pictures (port/vita/vita_main.c); there the save is given
+               everything and written to its file, its copy kept first */
+            Snd_PlaySe(1, 1);
+            Vita_UnlockFromOptions();
         } else if (pressed & PADG_CROSS) {
             sVitaSetItem = v;
             Snd_PlaySe(1, 1);

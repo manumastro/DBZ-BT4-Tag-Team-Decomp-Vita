@@ -419,6 +419,14 @@ s32 Title_Run(s32 section) {
     }
     if (result == 0) {
         gProgress->flags |= MPROG_SAVE_LOADED;
+#ifdef PORT_VITA
+        {   /* Unlock All chosen on the start's text screen (port/vita/vita_main.c): done here, to the save the menus will
+               use, not when the card flow at boot ends (BootCard_OnFlowDone, as before): without a save on the card the
+               title's New Game then wrote the defaults over it (McFlow_UpdateNewSave, Save_SetDefaults) */
+            extern void Vita_UnlockAtTitle(void);
+            Vita_UnlockAtTitle();
+        }
+#endif
     }
     sceGsSyncPath(0, 0);
     Title_Term();
