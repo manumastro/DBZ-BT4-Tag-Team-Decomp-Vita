@@ -1798,7 +1798,7 @@ int GsGpu_Init(void) {
     }
     if (gVitaTagMovie == 1) {
         Vita_Log("vgl: %d MB of physically contiguous memory left to the film's player (tbomovie=1)%s; the pool: %u of %u KB free\n", gVitaTagMovieMem,
-                 gVitaTagMovieMem == 0 ? " (none: its block is lent by vitaGL's pool while the film plays)" : "",
+                 gVitaTagMovieMem == 0 ? " (none: vitaGL's pool is given back to the system while the film plays)" : "",
                  (unsigned)(vglMemFree(VGL_MEM_PHYCONT) / 1024), (unsigned)(vglMemTotal(VGL_MEM_PHYCONT) / 1024));
     }
     Vita_Log("vgl: multisampling %s; menus at %s, fights at %d x %d\n", gVitaMsaa == 4 ? "4x" : gVitaMsaa == 2 ? "2x" : "off",
@@ -2364,12 +2364,14 @@ unsigned Vita_VglTexRgba(const void *px, int w, int h) {
    chip when it samples (as vitaGL's samples/video_playback does). t 0 makes the texture (vitaGL's own 8 x 8 data given back
    at once and its pointer cleared, the frame is not vitaGL's to free); else the same texture is pointed at the new frame
    (the render thread's work done first). Returns the texture. */
-/* vitaGL's own physically contiguous pool lent to the film's player (vita_tagmovie.c, tbomoviemem=0): a block, and the pool's numbers */
-void *Vita_VglPhycontAlloc(unsigned size) {
-    return vglAlloc(size, VGL_MEM_PHYCONT);
+/* vitaGL's physically contiguous pool given back to the system for the film's player and taken again (vita_tagmovie.c, tbomoviemem=0),
+   and the pool's numbers (the port's vitaGL patch: vglPhycontMemRelease / Reacquire) */
+unsigned Vita_VglPhycontRelease(void) {
+    rt_sync(); /* (the render thread done with the pool's memory) */
+    return (unsigned)vglPhycontMemRelease();
 }
-void Vita_VglPhycontFree(void *p) {
-    vglFree(p);
+unsigned Vita_VglPhycontReacquire(unsigned size) {
+    return (unsigned)vglPhycontMemReacquire(size);
 }
 void Vita_VglPhycontInfo(unsigned *total, unsigned *freeb) {
     *total = (unsigned)vglMemTotal(VGL_MEM_PHYCONT);

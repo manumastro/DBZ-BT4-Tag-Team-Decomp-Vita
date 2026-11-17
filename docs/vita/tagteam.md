@@ -97,8 +97,8 @@ each line of letters as a GS sprite whose TEX0 has the reserved format `TBO_PSM`
   `tbo/ui/tag_ui_{intro,loop}.mp4` (1.3 MB). The player's frames are physically contiguous memory mapped for the GPU
   (its allocator hook, as vitaGL's `samples/video_playback`); the drawing thread points the film's texture at the newest
   frame (`Vita_VglTexYuv`: a linear YVU 4:2:0 texture on the frame itself) and the chip converts the colour when it
-  samples: no copy, no conversion on the CPU. With `tbomovie=1` the player's memory (24 MB: the decoder's 14 MB block, its frames, the copies) is lent by vitaGL's own physically contiguous pool
-  while the film plays and given back after (`tbomoviemem=0`; `tbomoviemem=N` leaves N MB aside at start instead, which costs fights memory). `tbomovie=0` the poster (as before, the default); `1` the hardware
+  samples: no copy, no conversion on the CPU. With `tbomovie=1` vitaGL's physically contiguous pool (26 MB, all the console has) is given back to the system while the film plays
+  and taken again after (`tbomoviemem=0`, by a function in the port's vitaGL patch; `tbomoviemem=N` leaves N MB aside at start instead, which costs fights memory). `tbomovie=0` the poster (as before, the default); `1` the hardware
   film (the intro once, then the loop, a second player source for each); `2` the software MPEG-2 film (needs a package
   built with `BT4_VITA_TAGMOVIE=1`: the two `.pss`, 30 MB more). Built on `wip/tagmovie`, not run on a console yet. To
   look at: the poster shows for an instant between the intro and the loop (the player's source is changed), the colour
@@ -442,3 +442,46 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
 | 4 | Fixes for more than two fighters: `btl_input.c:511` (`Save_PortKeys` with `chr->pad` when Tag is active, as the PC's line 522), the clash helper's fighter lookup (`port/vita/vita_gfx.c:175-185`, sockets 0 / 1) | trivial |
 | 5 | (done 2026-11-17, not run on the console) The HUD's and the selection's words on the Vita: the TrueType text drawn, as on PC (above) | medium |
 | 6 | On the console: 2 vs 2 whole matches, results, rematch, back to character select, back to the menu; then 3 vs 3 and up as far as the measurements allow (memory: a larger newlib heap, `MAX_TEX`) | unknown |
+
+## Handoff: the film behind the Tag Team screens (`tbomovie`, written 2026-11-17 on `wip/tagmovie`)
+
+Where it stands: `tbomovie=1` plays the two H.264 films (`port/vita/assets/tag_ui_{intro,loop}.mp4`, made by
+`port/vita/tools/make_tagmovie.sh`, `ffmpeg` from the PATH) on the hardware decoder through `SceAvPlayer`
+(`port/vita/vita_tagmovie.c`); the default stays 0 (the poster) until the points below are settled.
+
+What the console showed, in order (batches 30 to 32):
+1. 16 MB of physically contiguous memory left aside at vitaGL's start: no picture. The player's `allocateTexture` asks for one
+   3825 KB block (its 5 output frames, 765 KB each, 128 byte aligned) and one 14336 KB block (1 MB aligned, the decoder's); with 5 MB of
+   frames taken first, 11 MB was left: `0x80024302`.
+2. 32 MB left aside (`tbomoviemem=32`): the film plays (intro then loop, texture set 5 us, 22 MB held), but the console has only 26 MB of
+   physically contiguous memory in all, so vitaGL got no pool: a 2 vs 2 fight's newlib heap peaked at 64.5 MB instead of 48.2 (5v5 was
+   already at 74.4 of 80 MB). Not usable as the default.
+3. The colours of that run: some pictures right (the film is red and purple), some with saturated magenta and green blobs and a hard
+   vertical edge near x=710. Not understood. Seen: right pictures and wrong ones in the same screens, the luma always right; the player's
+   frames sit at 765 KB steps in one block (1 KB aligned only) and the decoder rewrites them while the chip may still read them.
+4. Memory carved out of a block of vitaGL's own pool (`vglAlloc(VGL_MEM_PHYCONT)`, batch 32, cd72f17): the player never gave a picture
+   (IsActive drops after ~500 ms, the 14 MB block never freed), with or without copies, with CSC0 or CSC1. The decoder wants memory of its own
+   memblocks (the same addresses worked when each block was its own `sceKernelAllocMemBlock`), but fights cost nothing that way (heap peak 48.0 MB).
+
+What is in the last commit (built, not run): the pool of vitaGL given back to the system while the film plays and taken again after, instead of
+carving it. The port's vitaGL patch gained `vglPhycontMemRelease()` (only when nothing is allocated in the pool: it is nearly empty at the Tag
+screens, `26623 of 26624 KB free`) and `vglPhycontMemReacquire(size)`; the player's blocks are plain `sceKernelAllocMemBlock`
+PHYCONT_NC ones again (`tbomoviemem=0`), the drawing thread gives the pool back before starting the playing thread and takes it again 1 s
+after the player closed (`tagmovie: vitaGL's physically contiguous pool ... given back` / `taken again: N of N KB`). Also in it:
+`tbomoviecopy=1` (each picture copied into three 1 MB aligned blocks, `copies on:` line), `tbomoviecsc=0/1`, the playing thread kept 3 s
+(not 0.5 s: batch 31 made the player 26 times in 70 s), and the log of every player call and the first 12 pictures' addresses.
+
+Not finished, to do next, in this order:
+1. Console: `tagmovie_on` with this build. Look for the release line (a pool with something in it gives the poster: the log says how
+   much was free), the first picture, `taken again: 26624 of 26624 KB`, and that a fight after the Tag screens has its heap peak
+   unchanged (`u0_movie`: 48.0 MB against 48.2).
+2. The colours (point 3) are open. With copy on and off and CSC0 and CSC1 the runs `tagmovie_on`, `tagmovie_nocopy`, `tagmovie_csc1`
+   did not reach a picture in batch 32, so nothing was learnt; repeat them after step 1. Compare which pictures are wrong with their
+   addresses (`picture N: ...` lines). Ideas: the player's frame buffers are not 4 KB aligned (copy fixes that if it is the cause);
+   the decoder writes the frame while the chip reads it (needs the copy, or more output frames); the chroma plane's place
+   (`YVU420P2` expects it right after the luma, here w x h bytes on); sampling with half precision in the port's pixel shaders.
+3. 55 of the first 211 pictures late in batch 31: mostly the player's 650 ms to open (lateness counts from the source's start); the
+   intro could be opened before the screens draw (a longer idle time, or starting at the menu before).
+4. The gap between the intro and the loop (a second source on the same player: the poster may show for an instant) and the sound
+   (the films have none).
+5. Before the default can be 1: the 5v5 and 2v2 heap peaks unchanged, no leak of the pool over many openings of the Tag screens.

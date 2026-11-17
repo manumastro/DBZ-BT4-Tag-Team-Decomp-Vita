@@ -15,8 +15,10 @@
  * its pictures there), mapped for the GPU (sceGxmMapMemory), as vitaGL's samples/video_playback does. The drawing thread
  * points the film's texture at the newest frame (Vita_VglTexYuv: a linear YVU 4:2:0 texture on the frame itself,
  * SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC0) and the GPU converts the colour when it samples: no copy, no conversion on the CPU.
- * vitaGL takes all the free physically contiguous memory at its start; with tbomovie=1 (read before it) vita_vgl.c leaves
- * 16 MB of it unused for the player. The frames' memory is given back TM_FREE_DELAY_US after the player
+ * vitaGL takes all the free physically contiguous memory at its start (26 MB, all the console has); with tbomovie=1 and tbomoviemem=0
+ * the drawing thread gives that pool back to the system when the film starts (the port's vitaGL patch, vglPhycontMemRelease: only
+ * when nothing is allocated in it) and takes it again 1 s after the player closed, so fights keep it; tbomoviemem=N leaves N MB of it
+ * unused from vitaGL's start instead (vita_vgl.c). The frames' memory is given back TM_FREE_DELAY_US after the player
  * lets it go (the chip may still be reading the last pictures), and the frame the drawing thread holds is dropped then.
  *
  * When it runs: Port_TagMenuMovieBegin (port_tbo.c, the Tag Team screens opened) restarts the film. The drawing thread
@@ -49,8 +51,8 @@
 
 extern void Vita_Log(const char *fmt, ...);
 extern unsigned gGsFrame;
-extern void *Vita_VglPhycontAlloc(unsigned size);
-extern void Vita_VglPhycontFree(void *p);
+extern unsigned Vita_VglPhycontRelease(void);
+extern unsigned Vita_VglPhycontReacquire(unsigned size);
 extern void Vita_VglPhycontInfo(unsigned *total, unsigned *freeb);
 extern unsigned Vita_VglTexYuv(unsigned t, const void *planes, int w, int h);
 extern void Vita_VglTexFree(unsigned t);
@@ -82,8 +84,7 @@ int gVitaTagMovieMem = 0; /* bt3.txt tbomoviemem: MB of physically contiguous me
 #define TM_INTRO "app0:tbo/ui/tag_ui_intro.mp4"
 #define TM_LOOP "app0:tbo/ui/tag_ui_loop.mp4"
 #define TM_COPIES 3 /* the copies' ring: the GPU reads one for a few pictures after it was shown */
-#define TM_ARENA_MB 24 /* the block taken from vitaGL's pool: the decoder's 14 MB (1 MB aligned) + 3.8 MB of frames + TM_COPIES MB of copies (at its top) */
-#define TM_ARENA_FREE_US 1000000u /* the block given back to vitaGL this long after the player closed */
+#define TM_POOL_BACK_US 1000000u /* vitaGL's pool taken again this long after the player closed (the chip is done with its memory) */
 #define TM_TRACK 64 /* blocks whose sizes are kept for the memory count (allocator hooks give no size on free) */
 
 static SceUID sLock = -1;
@@ -113,13 +114,11 @@ static struct {
 
 /* the copies (tbomoviecopy=1): 1 MB-aligned physically contiguous blocks mapped for the GPU, allocated by the playing thread when the
    first picture comes, given back at its end */
-/* the arena (tbomoviemem=0): one block of vitaGL's physically contiguous pool taken by the drawing thread before the player starts,
-   given back by it (Vita_TagMovieIdle) TM_ARENA_FREE_US after the player closed; the player's frames carved from its start (a bump,
-   reset when the player has given all back), the copies from its top */
-static uint8_t *sArena, *sArenaRaw;
-static uint32_t sArenaBump, sArenaSize;
-static int sArenaLive;
-static uint64_t sArenaEndAt; /* us: the playing thread's end */
+/* tbomoviemem=0: vitaGL's physically contiguous pool is given back to the system by the drawing thread (Vita_VglPhycontRelease, only when
+   nothing is allocated in it) before the player starts, and taken again by it (Vita_TagMovieIdle) TM_POOL_BACK_US after the player closed:
+   the player's blocks are the plain sceKernelAllocMemBlock ones. sPoolSize is the size to take again (0: the pool is not given back). */
+static unsigned sPoolSize;
+static uint64_t sPoolEndAt; /* us: the playing thread's end */
 static struct { SceUID blk; void *p; uint32_t size; } sCopy[TM_COPIES];
 static int sCopyAt;
 static uint64_t sCopyUs, sCopyMax;
@@ -182,29 +181,10 @@ static void *tm_alloc_frame(void *arg, uint32_t alignment, uint32_t size) {
     unsigned asked = size;
     int r;
     (void)arg;
-    if (sArena != NULL) {
-        uint32_t a = alignment != 0 ? alignment : 16, off;
-        tm_lock();
-        off = (sArenaBump + a - 1) / a * a;
-        if (off + size > sArenaSize - TM_COPIES * (uint32_t)TM_PHYCONT_ALIGN) {
-            sM.allocFailed = 1;
-            tm_unlock();
-            Vita_Log("tagmovie: allocateTexture(align %u, size %u KB): the arena (%u MB, %u KB used) is too small\n", alignment, asked / 1024,
-                     sArenaSize >> 20, sArenaBump / 1024);
-            return NULL;
-        }
-        p = sArena + off;
-        sArenaBump = off + size;
-        sArenaLive++;
-        tm_track(p, size, 1, 1);
-        tm_unlock();
-        Vita_Log("tagmovie: allocateTexture(align %u, size %u KB) = %p (the arena, offset %u KB)\n", alignment, asked / 1024, p, off / 1024);
-        return p;
-    }
     size = (size + TM_PHYCONT_ALIGN - 1) & ~(uint32_t)(TM_PHYCONT_ALIGN - 1);
     blk = sceKernelAllocMemBlock("bt3_tagframe", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, size, NULL);
     if (blk < 0) {
-        Vita_Log("tagmovie: allocateTexture(align %u, size %u KB -> %u KB): no physically contiguous memory (0x%08X); tbomoviemem too small?\n",
+        Vita_Log("tagmovie: allocateTexture(align %u, size %u KB -> %u KB): no physically contiguous memory (0x%08X)\n",
                  alignment, asked / 1024, size / 1024, (unsigned)blk);
         tm_lock();
         sM.allocFailed = 1;
@@ -261,16 +241,6 @@ static void tm_free_frame(void *arg, void *p) {
     tm_unlock();
     if (wait) {
         sceKernelDelayThread(TM_FREE_DELAY_US);
-    }
-    if (sArena != NULL && (uint8_t *)p >= sArena && (uint8_t *)p < sArena + sArenaSize) {
-        tm_lock();
-        if (--sArenaLive <= 0) {
-            sArenaLive = 0;
-            sArenaBump = 0;
-        }
-        tm_unlock();
-        Vita_Log("tagmovie: deallocateTexture(%p, %u KB) (the arena)\n", p, (unsigned)(n / 1024));
-        return;
     }
     blk = sceKernelFindMemBlockByAddr(p, 0);
     sceGxmUnmapMemory(p);
@@ -336,14 +306,7 @@ static const uint8_t *tm_copy(const uint8_t *src, uint32_t w, uint32_t h) {
     uint32_t size = (w * h * 3 / 2 + TM_PHYCONT_ALIGN - 1) & ~(uint32_t)(TM_PHYCONT_ALIGN - 1);
     uint64_t t0 = tm_now(), dt;
     int k = sCopyAt;
-    if (sArena != NULL) {
-        if (size > TM_PHYCONT_ALIGN) {
-            return NULL;
-        }
-        sCopy[k].p = sArena + sArenaSize - (uint32_t)(k + 1) * TM_PHYCONT_ALIGN;
-        sCopy[k].size = TM_PHYCONT_ALIGN;
-        sCopy[k].blk = -1;
-    } else if (sCopy[k].p == NULL || sCopy[k].size < size) {
+    if (sCopy[k].p == NULL || sCopy[k].size < size) {
         void *p = NULL;
         if (sCopy[k].p != NULL) {
             return NULL;
@@ -406,7 +369,7 @@ static void tm_finish(SceAvPlayerHandle h, int failed) {
         tm_copies_free();
     }
     tm_lock();
-    sArenaEndAt = tm_now();
+    sPoolEndAt = tm_now();
     sM.running = 0;
     sM.stopping = 0;
     sM.inLoop = 0;
@@ -617,27 +580,21 @@ unsigned Vita_TagMovieTexture(void) {
     tm_lock();
     t0 = tm_now();
     sM.touched = t0;
-    if (!sM.running && !sM.stopping && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US) && gVitaTagMovieMem == 0 && sArena == NULL) {
-        /* (vitaGL's pool, the drawing thread's call) the player's memory, given back after the film */
-        unsigned total = 0, freeb = 0;
-        uint8_t *raw;
+    if (!sM.running && !sM.stopping && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US) && gVitaTagMovieMem == 0 && sPoolSize == 0) {
+        /* (the drawing thread's call) vitaGL's pool given back to the system for the film; taken again after it */
+        unsigned total = 0, freeb = 0, got;
         Vita_VglPhycontInfo(&total, &freeb);
-        raw = (uint8_t *)Vita_VglPhycontAlloc((TM_ARENA_MB + 1) * 1024u * 1024u);
-        if (raw == NULL) {
-            Vita_Log("tagmovie: vitaGL's physically contiguous pool has no %d MB block (%u of %u KB free): the poster\n", TM_ARENA_MB + 1,
+        got = Vita_VglPhycontRelease();
+        if (got == 0) {
+            Vita_Log("tagmovie: vitaGL's physically contiguous pool cannot be given back (%u of %u KB free: something is allocated in it): the poster\n",
                      freeb / 1024, total / 1024);
             sM.failedAt = t0;
         } else {
-            sArenaRaw = raw;
-            sArena = (uint8_t *)(((uintptr_t)raw + TM_PHYCONT_ALIGN - 1) & ~(uintptr_t)(TM_PHYCONT_ALIGN - 1));
-            sArenaSize = TM_ARENA_MB * 1024u * 1024u;
-            sArenaBump = 0;
-            sArenaLive = 0;
-            Vita_Log("tagmovie: %d MB taken from vitaGL's physically contiguous pool at %p (%u of %u KB were free)\n", TM_ARENA_MB, (void *)sArena,
-                     freeb / 1024, total / 1024);
+            sPoolSize = got;
+            Vita_Log("tagmovie: vitaGL's physically contiguous pool (%u KB) given back to the system for the film\n", got / 1024);
         }
     }
-    if (!sM.running && !sM.stopping && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US) && (gVitaTagMovieMem != 0 || sArena != NULL)) {
+    if (!sM.running && !sM.stopping && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US) && (gVitaTagMovieMem != 0 || sPoolSize != 0)) {
         SceUID th = Vita_ThreadOnCore3("bt3_tagmovie", tm_thread, TM_PRIORITY, TM_STACK, 0x00020000 /* else the second core */);
         if (th >= 0 && sceKernelStartThread(th, 0, NULL) >= 0) {
             sM.running = 1;
@@ -687,14 +644,13 @@ void Vita_TagMovieIdle(void) {
         t = sM.tex;
         sM.tex = 0;
     }
-    if (sArena != NULL && !sM.running && !sM.stopping && sArenaLive == 0 && tm_now() - sArenaEndAt > TM_ARENA_FREE_US) {
-        /* the player closed a while ago and the chip is done with its pictures: the block back to vitaGL's pool (drawing thread) */
-        void *raw = sArenaRaw;
-        sArena = sArenaRaw = NULL;
-        sArenaSize = 0;
+    if (sPoolSize != 0 && !sM.running && !sM.stopping && sM.liveFrame == 0 && sCopy[0].p == NULL && tm_now() - sPoolEndAt > TM_POOL_BACK_US) {
+        /* the player closed a while ago and its memory is back with the system: vitaGL's pool made again (drawing thread) */
+        unsigned want = sPoolSize, got;
+        sPoolSize = 0;
         tm_unlock();
-        Vita_VglPhycontFree(raw);
-        Vita_Log("tagmovie: the %d MB given back to vitaGL's pool\n", TM_ARENA_MB);
+        got = Vita_VglPhycontReacquire(want);
+        Vita_Log("tagmovie: vitaGL's physically contiguous pool taken again: %u of %u KB\n", got / 1024, want / 1024);
         if (t != 0) {
             Vita_VglTexFree(t);
         }

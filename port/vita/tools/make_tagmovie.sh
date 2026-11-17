@@ -3,7 +3,7 @@
 # (port/tbo/ui/tag_ui_intro.pss, tag_ui_loop.pss: BT4decomp's assets, tracked in git, not game data). The .mp4 files
 # are H.264 for the Vita's hardware decoder (SceAvPlayer; 960 x 544, the Vita's screen, so that the frame has no padding); build.py packages them as tbo/ui/tag_ui_{intro,loop}.mp4.
 #
-# Needs ffmpeg with libx264 (on the Mac: /opt/homebrew/bin/ffmpeg). Run from anywhere:
+# Needs ffmpeg with libx264 on the PATH (or FFMPEG=/path/to/ffmpeg). Run from anywhere (a POSIX shell: Git Bash on Windows):
 #   port/vita/tools/make_tagmovie.sh
 # The settings are the ones the two committed files were made with; change them only with new files in the commit.
 set -eu
