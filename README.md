@@ -58,6 +58,14 @@ The Spanish release (Team BT4's Spanish B14 Rev2), read from its `.iso` by the s
 - Music, voices and sound effects; the opening and ending films.
 - Fights are drawn for the Vita's 16:9 screen without stretching; the menus at the screen's full resolution.
 - The touch screen works in the menus, and the rear touch pad gives the L2, R2, L3 and R3 buttons the Vita lacks.
+- **Tag Team**, offline: the PC version's own Tag Team screens, from the main menu's Tag Team entry (or the Duel
+  menu's Tag type). Local Battle: Singleplayer, Two-player, Spectator Mode or Two-player co-op (the two-player modes
+  need a second controller), 1 to 5 fighters a team, the time, the CPUs' level, the presets, revival, each fighter's
+  health and combat rules, the battle rules; Camera mode: the target selection (L3, right stick or D-pad), joint
+  attacks and fusions. Then the simultaneous character select, the fight with its Tag Team HUD (names over the
+  target, the allies' gauges, the radar) and the results with rematch. 2 vs 2 runs at about 28 pictures a second in the
+  console's tests (less in the heaviest specials); 3 vs 3 to 5 vs 5 and Free for All with 10 fighters are there as on
+  PC but not measured on the Vita yet. The screens are in English.
 
 Fights run at 30 fps: every one of the 35 stages averages 28.8 to 29.5 pictures a second on a PS Vita 1000 with
 CapUnlocker (a survey of a duel on each, 2026-11-13); moments of heavy effects drop below that.
@@ -65,8 +73,7 @@ CapUnlocker (a survey of a duel on each, 2026-11-13); moments of heavy effects d
 **Not available on the Vita** (the PC version has them):
 
 - Online play, rooms, tournaments, spectators and voice chat.
-- Tag Team (the simultaneous team battles): it goes through the PC version's network code, which is not in this port
-  yet.
+- Tag Team online (rooms, quick match), and the film behind the Tag Team screens (the Vita shows its still picture).
 - The PC version's added songs and stages, its F1 menu (Lua mods, accessibility, HUD editor) and the choice of
   language in the game: the game is in the language of the disc image you copy, English or Spanish.
 

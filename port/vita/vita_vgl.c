@@ -2331,6 +2331,24 @@ static void tex_free(Tex *t) {
         glDeleteTextures(1, &t->id);
     }
 }
+/* BT4decomp's own screens' pictures and TrueType lines (port/vita/vita_tbo.c): a texture of its own, RGBA with the GS's
+   alpha (0x80 opaque, as the uploads: the shader scales it), made and given back by the drawing thread the old way
+   (the render thread's work done first, as tex_free) */
+unsigned Vita_VglTexRgba(const void *px, int w, int h) {
+    GLuint t = 0;
+    rt_sync();
+    glGenTextures(1, &t);
+    sGlc.tex = 0; /* (the binding changes here) */
+    glBindTexture(GL_TEXTURE_2D, t);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)w, (GLsizei)h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    return t;
+}
+void Vita_VglTexFree(unsigned t) {
+    GLuint n = t;
+    rt_sync();
+    glDeleteTextures(1, &n);
+    sGlc.tex = 0;
+}
 /* for the log: the textures made most often in a stretch (place, format, size, palette's place) */
 static struct { uint64_t key; unsigned n, tw, th; } sTexTop[32];
 static void tex_top_add(uint64_t t0, uint32_t tw, uint32_t th) {
@@ -4392,7 +4410,24 @@ static int state_of_(int ctx, int type, State *d) {
     if (gVglSafe & 2) { abe = 0; }
     if (gVglSafe & 4) { test &= ~1ull; }
     if (gVglSafe & 8) { sc = 0x01BF000001FF0000ull; }
-    if (tme) {
+    if (tme && tpsm == 0x05) {
+        /* BT4decomp's own screens (src/menu/port_screen.c Ps_Sprite: TEX0's reserved format TBO_PSM, the picture's
+           number in CBP, include/menu/tbo_art.h): a picture of port/tbo/ui or a TrueType line, as the PC's renderer
+           takes it (gs_draw.c tbo_texture), from port/vita/vita_tbo.c. bt3.txt tboui=0: not drawn, as before */
+        extern unsigned Vita_TboTexture(uint32_t id);
+        GLuint tx = Vita_TboTexture((uint32_t)((t0 >> 37) & 0x3FFF));
+        if (tx == 0) {
+            sRejWhy = 3;
+            return 0;
+        }
+        sTexXf = 0;
+        d->tex = tx;
+        d->tme = 1;
+        d->env = ((t0 >> 35) & 3) == 1 ? (((t0 >> 34) & 1) ? 1 : 2) : 0;
+        d->linear = (uint8_t)((gGs.tex1[ctx] >> 5) & 1);
+        d->wrapS = (cl & 3) != 0;
+        d->wrapT = ((cl >> 2) & 3) != 0;
+    } else if (tme) {
         if ((tpsm & 0x30) == 0x30 || tbp / 32 == zbp) {
             sRejWhy = 3;
             return 0; /* the depth buffer as a texture */
@@ -7828,6 +7863,10 @@ void GsGpu_FrameEnd(void) {
     al_frame_end(!gVitaGsSkip);
     flush();
     flush_bins_c(1);
+    {
+        extern void Vita_TboFrameEnd(void); /* (vita_tbo.c: the screens' pictures not drawn for a while given back) */
+        Vita_TboFrameEnd();
+    }
     {
         extern int gVitaAbSide, gVitaFilm, Vita_InBattle(void);
         extern volatile int gVitaShotReq;

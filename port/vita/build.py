@@ -232,7 +232,11 @@ def port_sources():
             # give the game, answered as the game without them (online play, Tag Team rooms, the F1 window: vita_bt4.c)
             (S / "gs/presentation.c", "gs"), (S / "gs/snd_spatial.c", "gs"), (V / "vita_bt4.c", "hard"),
             # Tag Team offline: the room model and its local room (docs/vita/tagteam.md)
-            (S / "tag_team.c", "hard"), (V / "vita_tag.c", "hard")]
+            (S / "tag_team.c", "hard"), (V / "vita_tag.c", "hard"),
+            # BT4decomp's own screens (its Tag Team menus, the Tag Team fight's words): their TrueType lines and the main
+            # menu's lettering as on PC, the fight's names over the target, and their pictures for the Vita's renderer
+            (S / "gs/menu_text.c", "gs"), (S / "gs/tbo_text.c", "gs"), (S / "gs/menu_labels.c", "gs"),
+            (S / "fight_panels.c", "ee"), (V / "vita_tbo.c", "hard")]
     return out
 
 
@@ -310,7 +314,7 @@ def compile_all():
     return not bad
 
 
-LIBS = ["-lvitaGL", "-lstdc++", "-lSceCommonDialog_stub", "-lSceGxm_stub", "-lmathneon", "-lvitashark", "-lSceShaccCgExt", "-ltaihen_stub",
+LIBS = ["-lvitaGL", "-lpng16", "-lstdc++", "-lSceCommonDialog_stub", "-lSceGxm_stub", "-lmathneon", "-lvitashark", "-lSceShaccCgExt", "-ltaihen_stub",
         "-lSceShaccCg_stub", "-lSceKernelDmacMgr_stub", "-lSceAudio_stub", "-lScePerf_stub_weak",
         "-lSceDisplay_stub", "-lSceCtrl_stub", "-lSceTouch_stub", "-lScePower_stub", "-lSceAppMgr_stub", "-lSceAppUtil_stub",
         "-lSceSysmodule_stub", "-lSceRtc_stub", "-lSceKernelThreadMgr_stub", "-lSceProcessmgr_stub", "-lSceLibKernel_stub",
@@ -389,6 +393,21 @@ def vpk():
     if bank.exists():
         extra += ["-a", f"{bank}=shbank.bin"]
         print(f"the package carries the shader bank ({bank.stat().st_size} bytes)")
+    # BT4decomp's own screens (port/vita/vita_tbo.c): the pictures of port/tbo/ui as tbo/ui/ and the fonts of
+    # port/third_party/fonts (with fonts.tsv and their licences) as fonts/, as the PC's release has them. Left out: what
+    # only the online hub shows (its radar, hosts, grounds, community button), the unused icon, and the films behind the
+    # Tag Team screens (tag_ui_*.pss, 30 MB; the Vita shows their poster)
+    ui, n = ROOT / "port/tbo/ui", 0
+    online_only = {"radar.png", "bg.png", "discord.png", "tag_team_icon.png"}
+    for f in sorted(ui.iterdir()):
+        if (f.suffix == ".png" and f.name not in online_only and not f.name.startswith("hosts_")) or f.name == "CREDITS.md":
+            extra += ["-a", f"{f}=tbo/ui/{f.name}"]
+            n += 1
+    fonts = ROOT / "port/third_party/fonts"
+    for f in sorted(x for x in fonts.rglob("*") if x.is_file()):
+        extra += ["-a", f"{f}=fonts/{f.relative_to(fonts).as_posix()}"]
+        n += 1
+    print(f"the package carries {n} files of BT4decomp's own screens (tbo/ui, fonts)")
     run("vita-pack-vpk", "-s", OUT / "param.sfo", "-b", OUT / "eboot.bin", *extra, OUT / VPK)
     print(f"{OUT / VPK}: {(OUT / VPK).stat().st_size} bytes")
 

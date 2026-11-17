@@ -362,9 +362,12 @@ void MainMenu_Init(s32 section) {
             continue;
         }
 #ifdef PORT_VITA
-        if (i == MAINMENU_TAG) { /* (the Vita: the PC's dedicated Tag Team entry opens its online hub, which the Vita does
-                                    not draw; the Vita's own Tag Team entry follows item 3, below) */
-            continue;
+        if (i == MAINMENU_TAG) { /* (the Vita: the PC's dedicated Tag Team entry and its screens, bt3.txt tagteam=1, the
+                                    default; tagteam=2 the Vita's earlier entry after item 3 instead, below; 0 neither) */
+            extern int Vita_TagMenu(void);
+            if (Vita_TagMenu() != 1) {
+                continue;
+            }
         }
 #endif
 #else
@@ -376,14 +379,15 @@ void MainMenu_Init(s32 section) {
             continue;
         }
         gMainMenu->items[gMainMenu->itemCount++] = i;
-#if defined(PORT) && !defined(PORT_VITA) /* (the Vita: no online play, and no TrueType lines for its label) */
+#if defined(PORT) && !defined(PORT_VITA) /* (the Vita: no online play) */
         if (i == MAINMENU_TAG) {
             gMainMenu->items[gMainMenu->itemCount++] = MAINMENU_TBO;
         }
-#elif defined(PORT_VITA) /* the Vita: the same entry, for Tag Team offline (one player and CPUs: port/vita/vita_tag.c) */
+#elif defined(PORT_VITA) /* the Vita's earlier Tag Team entry (bt3.txt tagteam=2): the port's screen mode with the Vita's
+                            text setup of a local room (port/vita/vita_main.c Vita_TagSetup, port/vita/vita_tag.c) */
         if (i == 3) {
-            extern int Vita_TagMenu(void); /* (bt3.txt tagteam=0 hides it) */
-            if (Vita_TagMenu()) {
+            extern int Vita_TagMenu(void);
+            if (Vita_TagMenu() == 2) {
                 gMainMenu->items[gMainMenu->itemCount++] = MAINMENU_TBO;
             }
         }

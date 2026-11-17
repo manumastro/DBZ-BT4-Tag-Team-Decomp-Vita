@@ -770,7 +770,11 @@ static s32 PortTag_Run(s32 section,s32 origin,s32 reselect){
         if(result==2){
             if(TeamSel_TagRun(2))goto fight;
             s32 mode=Port_TagOfflineMode();
+#ifdef PORT_VITA /* (no online section: back to Local Battle) */
+            section=mode==3?3:1;
+#else
             section=mode==3?3:mode?1:2;
+#endif
         }
     }while(result==2);
     PortTbo_TagEntry(0);

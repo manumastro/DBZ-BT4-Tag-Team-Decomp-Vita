@@ -4,6 +4,14 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 ## Unreleased
 
+- **Tag Team with the PC version's own screens** (not run on the console yet): the main menu's Tag Team entry and the
+  Duel menu's Tag type open BT4decomp's own Tag Team menus, drawn on the Vita with their pictures and TrueType
+  letters: Local Battle (Singleplayer, Two-player, Spectator Mode, Two-player co-op; 1 to 5 fighters a team, time,
+  CPU level, presets, revival, each fighter's health and combat rules, battle rules) and Camera mode (target
+  selection with L3, the right stick or the D-pad; joint attacks; fusions), then the simultaneous character select.
+  In the fight the Tag Team HUD's words show (the timer, the names over the target, the gauges' figures, the joint
+  attacks' labels). Online Battles is left out. The Vita's earlier Tag Team setup screen stays as `tagteam=2` in
+  `bt3.txt`.
 - **BT4decomp 0.1.39.6 R1 1.3 merged in**: Tag Team's camera no longer shakes between lock-on and free view; aerial
   clashes no longer leave fighters invisible or unable to move.
 - **BT4decomp 0.1.39.6 R1 1.2 merged in** (the PC port this one is built on; run on the console in the 2 vs 2 demo fight and a 1 vs 1 duel: same speed, the beam special faster, no crash):

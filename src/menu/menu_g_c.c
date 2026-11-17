@@ -17,8 +17,12 @@ extern void IconWin_PortHideWords(void);
 extern void MsgWin_PortDrawString(u16 *);
 static s32 sTagHome,sTagHomeFrames,sTagPlate;
 static s32 DuelMenu_TagAvailable(void){
-#if defined(BT4_TAG_TEAM_EXPANDED) && !defined(PORT_VITA) /* (the Vita: its Tag Team entry is the main menu's; this one
-                                                             opens the PC's Tag Team screens, which the Vita does not draw) */
+#if defined(BT4_TAG_TEAM_EXPANDED) && defined(PORT_VITA) /* (the Vita: with BT4decomp's own Tag Team screens, bt3.txt
+                                                            tagteam=1, the default) */
+    extern s32 Port_NetSession(void);
+    extern int Vita_TagMenu(void);
+    return !Port_NetSession() && Vita_TagMenu() == 1;
+#elif defined(BT4_TAG_TEAM_EXPANDED)
     extern s32 Port_NetSession(void);
     return !Port_NetSession();
 #else
