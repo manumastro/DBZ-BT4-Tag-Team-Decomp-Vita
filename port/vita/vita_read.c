@@ -84,7 +84,7 @@ int Vita_ReadOn(void) {
         sRdSema = sceKernelCreateSema("bt3_rdq", 0, 0, 1 << 20, NULL);
         /* above the game's thread (160), below the sound's (100): it mostly waits for the card; on the first two
            cores (the third's drawing thread is the one short of time) */
-        th = sRdMutex >= 0 && sRdSema >= 0 ? sceKernelCreateThread("bt3_read", rd_thread, 140, 0x4000, 0, 0x00030000, NULL) : -1;
+        th = sRdMutex >= 0 && sRdSema >= 0 ? sceKernelCreateThread("bt3_read", rd_thread, 140, 0x10000, 0, 0x00030000, NULL) : -1;
         if (th < 0 || sceKernelStartThread(th, 0, NULL) < 0) {
             Vita_Log("vita: no reading thread (%08x): reads on the caller's thread\n", (unsigned)th);
             return 0;
