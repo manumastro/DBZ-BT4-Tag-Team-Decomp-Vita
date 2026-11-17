@@ -4436,14 +4436,83 @@ static void cc_retire(uint8_t *p) { /* (the back end may still be walking it: fr
 unsigned gVitaCcWhy[9]; /* for the log: calls not kept: too big, wrapped, nothing in them, a strip with its vertices copied, a strip not planned, constants not VU memory 0, another record; GIF data copied in; VU memory 0..31 changed by the call */
 unsigned gVitaCcMax;     /* the largest call recorded (bytes of records) */
 static uint8_t sCcK0[512]; /* VU memory 0..31 when the call being recorded began */
-/* (bindrange=3) a call kept across a bind and read again was found different from its copy: counted, logged */
-static void br_differs(const CallCache *e, const char *how) {
+/* Do two kept copies of a call draw the same? Only what is drawn is compared: each record's type; a register write's
+   register and value (GR_REG); a GIF packet's quadwords (GR_GIFC: count, bytes); a strip's flags, program, layer,
+   context, vertex count and vertex place (GR_VU), its plan's mode, place on the chip, count, upload and, for a
+   fighter's strip, slot and indices' place, and its indices. Not the bookkeeping: the header fields a record does not
+   set (gr_alloc does not clear the ring: GR_REG's b, c, e, GR_GIFC's a, c, e, d hold what was there before), the
+   padding up to 32 bytes after a record's payload (the ring's old bytes, or malloc's in the copy), the plan's 8th word
+   (ChipPlan has 7) and slot / ioff of a stage's strip (not set), and the plan's uh (a hash of the constants, the bones
+   of that frame: put back when sent). bindrange's line found every read differing with memcmp (1,889 of 1,889 kept
+   calls read again now and then, batch 22). 1 the same; 0 not, *at: the first record that differs (its offset). */
+static int cc_same(const uint8_t *x, uint32_t xn, const uint8_t *y, uint32_t yn, uint32_t *at) {
+    uint32_t o = 0;
+    *at = 0;
+    if (x == NULL) {
+        return 0;
+    }
+    while (o < xn && o < yn) {
+        const GRec *p = (const GRec *)(const void *)(x + o), *q = (const GRec *)(const void *)(y + o);
+        *at = o;
+        if (p->type != q->type || p->size != q->size || p->size < 32 || o + p->size > xn || o + p->size > yn) {
+            return 0;
+        }
+        if (p->type == GR_REG) {
+            if (p->a != q->a || p->d != q->d) {
+                return 0;
+            }
+        } else if (p->type == GR_GIFC) {
+            if (p->b != q->b || 32 + p->b * 16 > p->size || memcmp(p + 1, q + 1, p->b * 16) != 0) {
+                return 0;
+            }
+        } else if (p->type == GR_VU) {
+            const uint32_t *u = (const uint32_t *)(const void *)(p + 1), *v = (const uint32_t *)(const void *)(q + 1);
+            uint32_t ib;
+            if (p->flags != q->flags || p->a != q->a || p->b != q->b || p->c != q->c || p->e != q->e || p->d != q->d ||
+                u[0] != v[0] || u[1] != v[1] || u[2] != v[2] || u[4] != v[4] || (u[0] == 1 && (u[5] != v[5] || u[6] != v[6]))) {
+                return 0;
+            }
+            ib = u[2] < 3 ? 0 : u[0] == 1 ? (((u[2] - 2) * 3 * 2 + 3) & ~3u) : (u[2] - 2) * 3 * 4;
+            if (64 + ib > p->size || memcmp(u + 8, v + 8, ib) != 0) {
+                return 0;
+            }
+        } else if (memcmp(p, q, p->size) != 0) {
+            return 0;
+        }
+        o += p->size;
+    }
+    *at = o;
+    return xn == yn;
+}
+/* (the log) the first record two copies differ in: its offset, type, size and fields, the copy kept first */
+static void cc_diff_log(const char *who, const CallCache *e, const uint8_t *buf, uint32_t n, uint32_t at) {
+    extern void Vita_Log(const char *fmt, ...);
+    const GRec *p = e->data != NULL && at + 32 <= e->bytes ? (const GRec *)(const void *)(e->data + at) : NULL;
+    const GRec *q = at + 32 <= n ? (const GRec *)(const void *)(buf + at) : NULL;
+    Vita_Log("gs: %s: the call at %08x: %u bytes kept, %u now; the first record differing at %u:\n", who, e->addr, e->bytes, n, at);
+    if (p != NULL) {
+        const uint32_t *u = (const uint32_t *)(const void *)(p + 1);
+        Vita_Log("gs:   kept: type %u flags %04x size %u a %08x b %08x c %08x e %08x d %016llx | %08x %08x %08x %08x %08x %08x %08x %08x\n",
+                 p->type, p->flags, p->size, p->a, p->b, p->c, p->e, (unsigned long long)p->d, u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]);
+    }
+    if (q != NULL) {
+        const uint32_t *u = (const uint32_t *)(const void *)(q + 1);
+        Vita_Log("gs:   now:  type %u flags %04x size %u a %08x b %08x c %08x e %08x d %016llx | %08x %08x %08x %08x %08x %08x %08x %08x\n",
+                 q->type, q->flags, q->size, q->a, q->b, q->c, q->e, (unsigned long long)q->d, u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]);
+    }
+}
+/* (bindrange=3) a call kept across a bind and read again was found different from its copy: counted, logged (buf, n:
+   the new records, at the first differing one, when they were made) */
+static void br_differs(const CallCache *e, const char *how, const uint8_t *buf, uint32_t n, uint32_t at) {
     extern void Vita_Log(const char *fmt, ...);
     static unsigned lines;
     gVitaBr[4]++;
     if (lines < 40) {
         lines++;
         Vita_Log("gs: bindrange: the call at %08x (MARK %04x), kept across a bind, read again: %s, list %u\n", e->addr, (unsigned)(e->es & 0xFFFFu), how, sFeListSeq);
+        if (buf != NULL) {
+            cc_diff_log("bindrange", e, buf, n, at);
+        }
     }
 }
 static void cc_end(CallCache *e) {
@@ -4469,7 +4538,7 @@ static void cc_end(CallCache *e) {
         gVitaCcWhy[8]++;
         e->state = 3;
         if (chk) {
-            br_differs(e, "it writes the constants now");
+            br_differs(e, "it writes the constants now", NULL, 0, 0);
         }
         return;
     }
@@ -4481,7 +4550,7 @@ static void cc_end(CallCache *e) {
         gVitaCcWhy[end - pos == 0 ? 2 : 0]++;
         e->state = 3;
         if (chk) {
-            br_differs(e, end - pos == 0 ? "it makes nothing now" : "too big now");
+            br_differs(e, end - pos == 0 ? "it makes nothing now" : "too big now", NULL, 0, 0);
         }
         return;
     }
@@ -4557,7 +4626,7 @@ static void cc_end(CallCache *e) {
         free(buf);
         e->state = 3;
         if (chk) {
-            br_differs(e, "not to be kept now");
+            br_differs(e, "not to be kept now", NULL, 0, 0);
         }
         return;
     }
@@ -4574,22 +4643,39 @@ static void cc_end(CallCache *e) {
         e->state = 1;
         return;
     }
-    if (e->es != 0 && was == 2 && !chk) {
-        gVitaBr[6]++; /* (for bindrange's line: a kept call of the seam read again now and then) */
-    }
-    if (e->data != NULL && e->bytes == out && memcmp(e->data, buf, out) == 0) {
-        free(buf); /* (the same as kept: the kept copy stays, the back end may be walking it) */
-    } else {
-        if (chk) {
-            br_differs(e, "its records differ from the copy (the new ones kept)");
-        } else if (e->es != 0 && was == 2) {
-            gVitaBr[7]++;
+    {
+        uint32_t at;
+        /* (the same as kept: with bindrange on, by what the records draw, cc_same; at 0 byte for byte, as before, which
+           the ring's and malloc's leftovers in the records make fail nearly always) */
+        int same = e->data != NULL && (gVitaBindRange != 0 ? cc_same(e->data, e->bytes, buf, out, &at)
+                                                           : e->bytes == out && memcmp(e->data, buf, out) == 0);
+        int sem = gVitaBindRange != 0 ? same : cc_same(e->data, e->bytes, buf, out, &at); /* (the counters: what is drawn) */
+        if (e->es != 0 && was == 2 && !chk) {
+            gVitaBr[6]++; /* (for bindrange's line: a kept call of the seam read again now and then) */
+            if (!sem) {
+                static unsigned lines;
+                gVitaBr[7]++;
+                if (lines < 20) {
+                    lines++;
+                    cc_diff_log("a kept call read again now and then differs", e, buf, out, at);
+                }
+            }
         }
+        if (chk && !sem) {
+            br_differs(e, "its records draw something else than the copy (the new ones kept)", buf, out, at);
+        }
+        if (same) {
+            free(buf); /* (the same as kept: the kept copy stays, the back end may be walking it) */
+            goto kept;
+        }
+    }
+    {
         cc_retire(e->data);
         e->data = buf;
         e->serial = sCcSerial = dp_pick_serial(sCcSerial + 1);
     }
     e->bytes = out;
+kept:
     e->state = 2;
     e->uses = 0;
     gVitaCc[2]++;
