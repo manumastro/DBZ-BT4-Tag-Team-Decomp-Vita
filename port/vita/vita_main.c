@@ -470,12 +470,20 @@ static void tech_name(void *chr, int n, char *out, int size) {
    ends at the blow). Both fighters' health is set to demohp percent (default 100) before each use; below 50 a
    technique that destroys the stage does it, as when it finishes a fight (the demo duel's rule allows it; once a
    fight: the destroyed stage has no further form). No knock-out ends the test (gVitaNoKo). The log: each fighter's
-   five techniques by name, the stage's destroyed form, each use (asked for, started, over) in ms of the run. */
+   five techniques by name, the stage's destroyed form, each use (asked for, started, over) in ms of the run.
+   With more fighters (BT4_TAG_ACTOR_TEST=4: fighters 0 and 2 against 1 and 3; demochara3, demochara4 their
+   characters, src/battle/battle_work.c TagBattle_Prepare): demoultp=4 every fighter in turn (0, 1, 2, 3), or
+   demoultlist=<fighters in their order> (e.g. 0,3); the opponent is the user's target (BtlOpp_GetPlayer: always one
+   of the other team); every fighter's health set to demohp; demostand=2 makes the other three stand, not only the
+   target; whoever still stands when the use is over or given up is released then. Without these the 1 vs 1 test is
+   as before. */
 static void demo_heavy(unsigned state, unsigned vblanks, unsigned long long t) {
     extern void *BtlChar_Get(int player);
     extern int BtlChar_GetCount(void);
     extern int *BtlMember_GetActiveGauge(void *chr);
     extern int BtlCharApi_GetChara(int objId);
+    extern int BattleSide_GetObjId(int side);
+    extern int TagBattle_Team(int actor);
     extern int BtlSuper_GetId(void *chr, int slot);
     extern int BtlSuper_GetType(void *chr, int slot);
     extern int BtlSuper_GetKiCost(void *chr, int slot);
@@ -492,6 +500,8 @@ static void demo_heavy(unsigned state, unsigned vblanks, unsigned long long t) {
     extern int Battle_GetRuleUnk10(void);
     extern int BtlStage_GetChangeTarget(void);
     static int slot = -2, who, sec, hp, stand, turn, pending = -1, started, uses, lastStage = -1, logged[8];
+    static int order[10], norder; /* (demoultlist, or -1 for demoultp=4: every fighter in turn; 0: as demoultp says) */
+    static unsigned stood; /* (the fighters made to stand for the use pending, with more than two fighters) */
     static unsigned lastState = 0xFFFFFFFFu, nextVb, issuedVb, startVb, waitVb;
     unsigned ms = (unsigned)((t - sStart) / 1000);
     int count, p, i;
@@ -510,10 +520,29 @@ static void demo_heavy(unsigned state, unsigned vblanks, unsigned long long t) {
         if (sec < 3) {
             sec = 3;
         }
+        if (who == 4) {
+            norder = -1;
+        }
+        if ((e = getenv("BT3_DEMO_ULTLIST")) != NULL) { /* fighters 0 .. 9, any separator */
+            for (norder = 0; *e != '\0' && norder < 10; e++) {
+                if (*e >= '0' && *e <= '9') {
+                    order[norder++] = *e - '0';
+                }
+            }
+        }
         gVitaNoKo = slot >= 0;
-        if (slot >= 0) {
+        if (slot >= 0 && norder == 0) {
             logf_("vita: heavy: technique slot %d of fighter %s every %d s of the fight, health %d%% before each, the opponent %s\n", slot,
                   who == 2 ? "0 and 1 in turn" : who == 1 ? "1" : "0", sec, hp, stand ? "made to stand" : "left to the computer");
+        } else if (slot >= 0) {
+            char w[40] = "every fighter";
+            if (norder > 0) {
+                for (i = 0, w[0] = '\0'; i < norder; i++) {
+                    snprintf(w + strlen(w), sizeof(w) - strlen(w), i ? ", %d" : "%d", order[i]);
+                }
+            }
+            logf_("vita: heavy: technique slot %d of %s in turn every %d s of the fight, health %d%% before each (every fighter's), %s\n", slot, w, sec,
+                  hp, stand == 2 ? "the three others made to stand" : stand ? "the opponent made to stand" : "the opponent left to the computer");
         }
     }
     if (slot < 0 || sMode != 1) {
@@ -542,7 +571,7 @@ static void demo_heavy(unsigned state, unsigned vblanks, unsigned long long t) {
     for (p = 0; p < count && p < 8; p++) { /* each fighter's techniques, once for each character it is */
         int c;
         chr = BtlChar_Get(p);
-        c = chr != NULL ? BtlCharApi_GetChara(p) : -1;
+        c = chr != NULL ? BtlCharApi_GetChara(BattleSide_GetObjId(p)) : -1;
         if (chr != NULL && c != logged[p] - 1) {
             char n[5][96];
             for (i = 0; i < 5; i++) {
@@ -578,12 +607,32 @@ static void demo_heavy(unsigned state, unsigned vblanks, unsigned long long t) {
             logf_("vita: heavy: use %d: fighter %d's technique not taken in 4 s (action 0x%x), given up at %u ms\n", uses, pending, BtlAct_GetCurrent(chr), ms);
             pending = -1;
         }
+        if (pending < 0 && stood != 0) { /* (more than two fighters: the ones still made to stand let go now, not at their
+                                            own turn, as BtlAct_WaitHandler ends a stand) */
+            for (i = 0; i < count && i < 10; i++) {
+                void *sc = (stood >> i) & 1 ? BtlChar_Get(i) : NULL;
+                int a = sc != NULL ? BtlAct_GetCurrent(sc) : 0;
+                if (a >= 7 && a <= 10) {
+                    logf_("vita: heavy: fighter %d still made to stand (action 0x%x) at %u ms: its stand ended\n", i, a, ms);
+                    BtlAct_Request(sc, 0xB);
+                }
+            }
+            stood = 0;
+        }
         return;
     }
     if ((int)(vblanks - nextVb) < 0) {
         return;
     }
-    p = who == 2 ? (turn & 1) : who;
+    if (norder != 0) { /* (the fighters in turn: demoultp=4 or demoultlist) */
+        p = norder > 0 ? order[turn % norder] : count > 0 ? turn % count : 0;
+        if (p >= count) { /* (not in this fight: the next one) */
+            turn++;
+            return;
+        }
+    } else {
+        p = who == 2 ? (turn & 1) : who;
+    }
     chr = p < count ? BtlChar_Get(p) : NULL;
     if (chr == NULL) {
         return;
@@ -607,6 +656,7 @@ static void demo_heavy(unsigned state, unsigned vblanks, unsigned long long t) {
     {
         int opp = BtlOpp_GetPlayer(chr), *g;
         void *oc = opp >= 0 && opp < count ? BtlChar_Get(opp) : NULL;
+        char teams[40] = "";
         if (hp > 0) {
             g = BtlMember_GetActiveGauge(chr); /* (src/battle/btl_char_member.h BtlMemberGauge: health, healthMax) */
             g[0] = (int)((long long)g[1] * (hp > 100 ? 100 : hp) / 100);
@@ -620,6 +670,16 @@ static void demo_heavy(unsigned state, unsigned vblanks, unsigned long long t) {
                     g[0] = 1;
                 }
             }
+            for (i = 0; count > 2 && i < count; i++) { /* (more fighters: the others too, whoever the blow finds) */
+                void *oc2 = i != p && i != opp ? BtlChar_Get(i) : NULL;
+                if (oc2 != NULL) {
+                    g = BtlMember_GetActiveGauge(oc2);
+                    g[0] = (int)((long long)g[1] * (hp > 100 ? 100 : hp) / 100);
+                    if (g[0] < 1) {
+                        g[0] = 1;
+                    }
+                }
+            }
         }
         if (slot >= 2) { /* the technique's lock counter (src/battle/btl_act_j.c BtlAct_CanUseTechnique: a flag-0x2000 move
                             is refused while it is above 0, outside the story mode; include/battle/btl_act_j.h, gauge
@@ -629,10 +689,20 @@ static void demo_heavy(unsigned state, unsigned vblanks, unsigned long long t) {
         if (stand && oc != NULL) {
             BtlCtrl_ForceReaction(opp, 0);
         }
+        if (count > 2) {
+            stood = stand && oc != NULL && opp < 10 ? 1u << opp : 0;
+            for (i = 0; stand == 2 && i < count && i < 10; i++) {
+                if (i != p && i != opp && BtlChar_Get(i) != NULL) {
+                    BtlCtrl_ForceReaction(i, 0);
+                    stood |= 1u << i;
+                }
+            }
+            snprintf(teams, sizeof(teams), " (team %d against team %d)", TagBattle_Team(p), TagBattle_Team(opp));
+        }
         uses++;
         i = BtlCtrl_UseTechnique(p, slot);
-        logf_("vita: heavy: use %d: fighter %d (character %d) asked for its technique %d at %u ms (the fight's blank %u)%s, opponent %d\n", uses, p,
-              BtlCharApi_GetChara(p), slot, ms, vblanks, i ? "" : ", refused", opp);
+        logf_("vita: heavy: use %d: fighter %d (character %d) asked for its technique %d at %u ms (the fight's blank %u)%s, opponent %d%s\n", uses, p,
+              BtlCharApi_GetChara(BattleSide_GetObjId(p)), slot, ms, vblanks, i ? "" : ", refused", opp, teams);
         if (i) {
             pending = p;
             started = 0;
@@ -2152,10 +2222,12 @@ static void read_settings(void) {
         } else if (strcmp(line, "demostage") == 0 || strcmp(line, "demochara1") == 0 || strcmp(line, "demochara2") == 0 ||
                    strcmp(line, "demoduel") == 0 || strcmp(line, "demoxform") == 0 || strcmp(line, "demosplit") == 0 ||
                    strcmp(line, "demoult") == 0 || strcmp(line, "demoultp") == 0 || strcmp(line, "demoultsec") == 0 ||
-                   strcmp(line, "demohp") == 0 || strcmp(line, "demostand") == 0) {
+                   strcmp(line, "demohp") == 0 || strcmp(line, "demostand") == 0 || strcmp(line, "demoultlist") == 0 ||
+                   (strncmp(line, "demochara", 9) == 0 && atoi(line + 9) >= 3 && atoi(line + 9) <= 10)) {
             /* the test fight: stage, fighters, a duel with intros, the screen split for two players (a second
                controller that nobody holds: the game wants one there); demoult...: a technique used again and again
-               (demo_heavy) */
+               (demo_heavy); demochara3 .. 10: the further fighters' characters with BT4_TAG_ACTOR_TEST
+               (src/battle/battle_work.c TagBattle_Prepare) */
             char env[32];
             snprintf(env, sizeof(env), "BT3_DEMO_%s", line + 4);
             for (char *c = env; *c; c++) {

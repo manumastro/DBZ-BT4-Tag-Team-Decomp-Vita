@@ -616,6 +616,14 @@ void TagBattle_Prepare(void) {
             if(getenv("BT4_TEST_ATTACK_CHARA")){dst->members[0].chara=atoi(getenv("BT4_TEST_ATTACK_CHARA"));dst->startForm.chara=dst->members[0].chara;}
         }
         if(i==2&&getenv("BT4_RENDER_TEST")&&getenv("BT4_TEST_OBSERVER_CHARA")){dst->members[0].chara=atoi(getenv("BT4_TEST_OBSERVER_CHARA"));dst->startForm.chara=dst->members[0].chara;}
+#ifdef PORT_VITA
+        {   /* (Vita, the development build's test fight: bt3.txt demochara3 .. demochara10, fighter i's character
+               instead of a copy of side i & 1's, as BT4_TEST_ATTACK_CHARA does; port/vita/vita_main.c demo_heavy) */
+            char name[24];
+            snprintf(name,sizeof(name),"BT3_DEMO_CHARA%d",i+1);
+            if(getenv(name)!=NULL&&*getenv(name)!='\0'){dst->members[0].chara=atoi(getenv(name));dst->startForm.chara=dst->members[0].chara;}
+        }
+#endif
     }
     if(getenv("BT4_RENDER_TEST")&&getenv("BT4_TAG_CAMERA_VIEW")){s32 a=atoi(getenv("BT4_TAG_CAMERA_VIEW"));sTagTestView=a>=0&&a<sTagActors?a:-1;}
     if(sTagActors>2)fprintf(stderr,"tag actors: loading %d independent actors\n",sTagActors);
