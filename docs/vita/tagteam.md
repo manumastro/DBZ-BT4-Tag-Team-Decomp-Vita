@@ -87,18 +87,23 @@ each line of letters as a GS sprite whose TEX0 has the reserved format `TBO_PSM`
   `port/third_party/lua`, built for the Vita, and their drawing calls answered by the Vita's renderer), touch in
   these screens (pad only; the PC's mouse is only for the online hub's community button).
 - **The film behind the screens** (`tbomovie`, `port/vita/vita_tagmovie.c`): the PC's `port/src/gs/tag_menu_movie.c`
-  plays `tbo/ui/tag_ui_intro.pss`, then `tag_ui_loop.pss` (1280 x 720 MPEG-2, every picture intra) on a thread of its
-  own, with the decoder of `port/src/plat_mpeg2.c`, into one texture. The Vita's file is the same decoder, included
-  under its own names (as `tag_menu_movie.c` includes it: SDL is not on the Vita); the thread and the texture are
-  the Vita's own (vitaGL's `glTexSubImage2D` for each new picture, the picture made 960 x 540). `tbomovie=0` the
-  poster (as before, the default); `1` every picture decoded; `2` every other picture stepped over (the film keeps
-  its time). The package carries the two `.pss` files only when built with `BT4_VITA_TAGMOVIE=1` (30 MB more; the
-  download's size is the reason for the default). Built on `wip/tagmovie`, not run on a console yet. The estimate to
-  check: one core decodes about a third of the 512 x 448 pictures the opening movie has (`plat_movie.c`); 1280 x 720
-  is four times the pixels, so the film may play at a few pictures a second on one core. The log's `tagmovie:` line
-  (every 2 s) says which: pictures decoded and stepped over, decode ms a picture, the upload's ms, the core. The
-  multi-core player (`Mpeg2Player`, used by the opening movie) was not used: its eight finished-picture buffers of
-  1280 x 720 RGBA would take up to some 30 MB of the 80 MB heap.
+  plays `tbo/ui/tag_ui_intro.pss` (6.7 s) once, then `tag_ui_loop.pss` (3.3 s) repeated, 1280 x 720 MPEG-2, decoded in
+  software into one texture. The software decoder on one Vita core (batch 29, `tbomovie=2`, still in the code as
+  `vita_tagmovie_sw.c`) took 180 ms a picture (about 4 pictures a second against the PC's 23.976) and 37 ms to upload
+  one, and the menu ran at 55.4 pictures a second against 59.0 with the poster. So the film is played by the console's
+  hardware H.264 decoder (`SceAvPlayer`): `port/vita/tools/make_tagmovie.sh` makes `tag_ui_intro.mp4` and
+  `tag_ui_loop.mp4` (960 x 544, H.264 Main, 0.86 + 0.45 MB) from upstream's tracked `.pss` with ffmpeg; the files are
+  committed under `port/vita/assets/` (derived from upstream's assets, not game data) and always packaged as
+  `tbo/ui/tag_ui_{intro,loop}.mp4` (1.3 MB). The player's frames are physically contiguous memory mapped for the GPU
+  (its allocator hook, as vitaGL's `samples/video_playback`); the drawing thread points the film's texture at the newest
+  frame (`Vita_VglTexYuv`: a linear YVU 4:2:0 texture on the frame itself) and the chip converts the colour when it
+  samples: no copy, no conversion on the CPU. With `tbomovie=1` vitaGL leaves 16 MB of physically contiguous memory
+  unused at its start for the player (`vita_vgl.c`). `tbomovie=0` the poster (as before, the default); `1` the hardware
+  film (the intro once, then the loop, a second player source for each); `2` the software MPEG-2 film (needs a package
+  built with `BT4_VITA_TAGMOVIE=1`: the two `.pss`, 30 MB more). Built on `wip/tagmovie`, not run on a console yet. To
+  look at: the poster shows for an instant between the intro and the loop (the player's source is changed), the colour
+  (BT.601 as the PS2's film; a swap to `_CSC1` is one word in `Vita_VglTexYuv`), the player's start-up delay, the
+  memory left to vitaGL, and the log's `tagmovie:` line (every 2 s, see `development.md`).
 - **To measure on the console** (memory, speed): the textures held (the report's `tboui` line; the log's `tbo:`
   lines), the cost of a line of letters made on the drawing thread in a fight (the timer's every second; the
   gauges' figures when they change), 3 vs 3 to 5 vs 5 and Free for All 10 (the PC's limits: 5 a team, 10 in all; the

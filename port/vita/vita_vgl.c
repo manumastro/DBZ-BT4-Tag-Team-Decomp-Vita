@@ -36,6 +36,7 @@
 #include <zlib.h>
 #include <math.h>
 #include "../src/gs/gs_internal.h"
+extern int gVitaTagMovie; /* bt3.txt tbomovie (vita_tagmovie.c) */
 
 extern int gGsMainFbp;  /* gs_sony.c: the buffer this frame is drawn into */
 #include <psp2/perf.h>
@@ -1783,8 +1784,17 @@ int GsGpu_Init(void) {
     sFightH = gVitaFightW == 960 ? 544 : gVitaFightW == 720 ? 408 : 368;
     /* the display memory made for the menus' size when they are drawn at it; the fights' size from the
        first picture on (the boot logos and the films are not the menus) */
-    vglInitExtended(0x1000000, gVitaMenuHi ? SCR_W_MENU : SCR_W_FIGHT, gVitaMenuHi ? SCR_H_MENU : SCR_H_FIGHT, 0x1800000,
+    /* (bt3.txt tbomovie=1) vitaGL takes all the free physically contiguous memory (vglInitExtended); the hardware player
+       of the Tag Team screens' film (vita_tagmovie.c) needs some for its frames and its decoder, so 16 MB of it are left
+       unused (vglInitWithCustomThreshold: the same call as vglInitExtended otherwise, a threshold of 0 for it) */
+    {
+        vglInitWithCustomThreshold(0x1000000, gVitaMenuHi ? SCR_W_MENU : SCR_W_FIGHT, gVitaMenuHi ? SCR_H_MENU : SCR_H_FIGHT, 0x1800000,
+                    0, gVitaTagMovie == 1 ? 16 * 1024 * 1024 : 0, 0x8C6000 /* (vitaGL's SCE_KERNEL_MAX_MAIN_CDIALOG_MEM_SIZE: none of that pool) */,
                     gVitaMsaa == 4 ? SCE_GXM_MULTISAMPLE_4X : gVitaMsaa == 2 ? SCE_GXM_MULTISAMPLE_2X : SCE_GXM_MULTISAMPLE_NONE);
+    }
+    if (gVitaTagMovie == 1) {
+        Vita_Log("vgl: 16 MB of physically contiguous memory left to the film's player (tbomovie=1)\n");
+    }
     Vita_Log("vgl: multisampling %s; menus at %s, fights at %d x %d\n", gVitaMsaa == 4 ? "4x" : gVitaMsaa == 2 ? "2x" : "off",
              gVitaMenuHi ? "960 x 544" : "the fights' size", SCR_W_FIGHT, SCR_H_FIGHT);
     vglSetDisplayCallback(pace_cb); /* (the pictures shown in step with the game's clock) */
@@ -2343,7 +2353,34 @@ unsigned Vita_VglTexRgba(const void *px, int w, int h) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)w, (GLsizei)h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     return t;
 }
-/* the film's texture (vita_tagmovie.c): the same texture, its pixels replaced (the render thread's work done first) */
+/* the film's picture (vita_tagmovie.c): a texture whose data is the hardware player's frame itself (NV12-like planes in
+   physically contiguous memory mapped for the GPU): no copy, no conversion on the CPU, the colour conversion is done by the
+   chip when it samples (as vitaGL's samples/video_playback does). t 0 makes the texture (vitaGL's own 8 x 8 data given back
+   at once and its pointer cleared, the frame is not vitaGL's to free); else the same texture is pointed at the new frame
+   (the render thread's work done first). Returns the texture. */
+unsigned Vita_VglTexYuv(unsigned t, const void *frame, int w, int h) {
+    GLuint n = t;
+    SceGxmTexture *g;
+    rt_sync();
+    if (n == 0) {
+        glGenTextures(1, &n);
+        glBindTexture(GL_TEXTURE_2D, n);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 8, 8, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        vglFree(vglGetTexDataPointer(GL_TEXTURE_2D));
+        vglOverloadTexDataPointer(GL_TEXTURE_2D, NULL);
+    } else {
+        glBindTexture(GL_TEXTURE_2D, n);
+    }
+    sGlc.tex = 0; /* (the binding changes here) */
+    g = vglGetGxmTexture(GL_TEXTURE_2D);
+    sceGxmTextureInitLinear(g, frame, SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC0, (unsigned)w, (unsigned)h, 0);
+    sceGxmTextureSetMinFilter(g, SCE_GXM_TEXTURE_FILTER_LINEAR);
+    sceGxmTextureSetMagFilter(g, SCE_GXM_TEXTURE_FILTER_LINEAR);
+    sceGxmTextureSetUAddrMode(g, SCE_GXM_TEXTURE_ADDR_CLAMP);
+    sceGxmTextureSetVAddrMode(g, SCE_GXM_TEXTURE_ADDR_CLAMP);
+    return n;
+}
+/* the software film's texture (vita_tagmovie_sw.c): the same texture, its pixels replaced (the render thread's work done first) */
 void Vita_VglTexUpdate(unsigned t, const void *px, int w, int h) {
     rt_sync();
     glBindTexture(GL_TEXTURE_2D, t);

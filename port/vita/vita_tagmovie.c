@@ -1,195 +1,290 @@
 /*
  * The film behind BT4decomp's Tag Team screens on the PS Vita (bt3.txt tbomovie; default 0: the poster, vita_tbo.c).
  *
- * On PC the film is tbo/ui/tag_ui_intro.pss, then tag_ui_loop.pss: 1280 x 720 MPEG-2, every picture intra (about 30 MB
- * with the port's pictures), played on a thread of its own (port/src/gs/tag_menu_movie.c) with the decoder of
- * port/src/plat_mpeg2.c, into one texture. This is the same: the decoder is that file, included below the way
- * tag_menu_movie.c includes it (its public names renamed, so that the two units do not clash); the thread, the pacing
- * at 24000/1001 pictures a second and the texture are tag_menu_movie.c's, on the Vita's threads and vitaGL.
+ * On PC the film is tbo/ui/tag_ui_intro.pss, then tag_ui_loop.pss (port/src/gs/tag_menu_movie.c, decoded in software).
+ * On the Vita the same two films are H.264 files, port/vita/assets/tag_ui_intro.mp4 and tag_ui_loop.mp4 (960 x 544, made
+ * from upstream's .pss by port/vita/tools/make_tagmovie.sh), packaged as tbo/ui/tag_ui_intro.mp4 and tag_ui_loop.mp4, and
+ * decoded by the console's hardware decoder through SceAvPlayer. The software MPEG-2 path of an earlier commit (724dda0)
+ * is not here: 180 ms a picture on one core, 4 pictures a second.
  *
- *   tbomovie=0  the poster (vita_tbo.c, TBO_TAG_ART), as before
- *   tbomovie=1  the film: every picture decoded; the 1280 x 720 picture made 960 x 540 (nearest neighbour, the texture's
- *               size: the screens show it 960 across) and uploaded into one texture
- *   tbomovie=2  the film with every other picture stepped over (its headers followed, its slices not decoded), so that
- *               the film keeps its time when the processor cannot decode 24 pictures a second
+ *   tbomovie=0  the poster (vita_tbo.c, TBO_TAG_ART), as before; any value other than 1 is the poster too
+ *   tbomovie=1  the film: the intro once, then the loop repeated (the loop's source is set to loop, so the player
+ *               keeps its own time)
  *
- * The package carries the film only when built with BT4_VITA_TAGMOVIE=1 (port/vita/build.py; 30 MB more). Without it the
- * film's files are not found and the poster is drawn.
+ * Frames: the player's allocator hook (allocateTexture) gives it physically contiguous memory (the hardware decoder writes
+ * its pictures there), mapped for the GPU (sceGxmMapMemory), as vitaGL's samples/video_playback does. The drawing thread
+ * points the film's texture at the newest frame (Vita_VglTexYuv: a linear YVU 4:2:0 texture on the frame itself,
+ * SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC0) and the GPU converts the colour when it samples: no copy, no conversion on the CPU.
+ * vitaGL takes all the free physically contiguous memory at its start; with tbomovie=1 (read before it) vita_vgl.c leaves
+ * 16 MB of it unused for the player. The frames' memory is given back TM_FREE_DELAY_US after the player
+ * lets it go (the chip may still be reading the last pictures), and the frame the drawing thread holds is dropped then.
  *
- * When it runs: Port_TagMenuMovieBegin (port_tbo.c, the Tag Team screens opened) restarts the film; the drawing thread
- * starts the decoding thread when the screens ask for the film's picture, and the thread stops, its two buffers given
- * back, 0.5 s after the last one asked for. The texture is given back 600 pictures after it was last drawn (vita_tbo.c
- * KEEP_FRAMES). A film that cannot be opened is retried after 2 s; the poster is drawn meanwhile.
+ * When it runs: Port_TagMenuMovieBegin (port_tbo.c, the Tag Team screens opened) restarts the film. The drawing thread
+ * starts the playing thread when the screens ask for the film's picture; the thread stops, its player closed, 0.5 s
+ * after the last picture asked for. The texture is given back when the film is not playing, or 600 pictures after it was
+ * last drawn (vita_tbo.c KEEP_FRAMES). A film that cannot be played is retried after 2 s; the poster is drawn meanwhile.
  *
- * Threads: the decoding thread on the fourth core when CapUnlocker's plugin is in (vita_main.c Vita_ThreadOnCore3), else
- * the second core, at the helpers' priority. The drawing thread only copies the newest picture into the texture (under
- * the lock: the decoder writes its other buffer meanwhile; the two buffers are never the same one at once). vitaGL's calls
- * are made on the drawing thread, after the render thread's work (vita_vgl.c Vita_VglTexRgba, Vita_VglTexUpdate).
+ * Threads: the playing thread (it polls the player) on the fourth core when CapUnlocker's plugin is in (vita_main.c
+ * Vita_ThreadOnCore3), else the second core. The player's own threads are its business (basePriority). vitaGL's calls are
+ * made on the drawing thread only.
  *
- * The log, every 2 s: "tagmovie:" with the pictures decoded, stepped over, replaced before they were uploaded, uploaded,
- * the decoding time a picture (average and worst), the upload time (average and worst), and the core the thread runs on.
+ * The log, every 2 s: "tagmovie:" with the frames the player gave, the frames shown (the texture pointed at them), the
+ * frames replaced before they were shown, the frames late (more than 85 ms after their time), the time to point the texture
+ * (average, worst), the memory held (the player's frames and its other blocks, from the allocator hooks), the film's source
+ * (intro or loop), and the core.
  */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <malloc.h>
+#include <psp2/avplayer.h>
+#include <psp2/sysmodule.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/cpu.h>
-
-/* the decoder of port/src/plat_mpeg2.c, as port/src/gs/tag_menu_movie.c includes it on PC. The build defines MPEG2_PLAYER
-   for the opening movie's player (build.py): this unit has the plain decoder only, so the player's symbols are not made twice. */
-#undef MPEG2_PLAYER
-#define Mpeg2 TagMovieDecoder
-#define Mpeg2_Open TagMovieDecoder_Open
-#define Mpeg2_Close TagMovieDecoder_Close
-#define Mpeg2_Next TagMovieDecoder_Next
-#define Mpeg2_Width TagMovieDecoder_Width
-#define Mpeg2_Height TagMovieDecoder_Height
-#include "../src/plat_mpeg2.c"
+#include <psp2/kernel/sysmem.h>
+#include <psp2/gxm.h>
+#include <vitaGL.h>
 
 extern void Vita_Log(const char *fmt, ...);
 extern unsigned gGsFrame;
-extern unsigned Vita_VglTexRgba(const void *px, int w, int h);
-extern void Vita_VglTexUpdate(unsigned t, const void *px, int w, int h);
+extern unsigned Vita_VglTexYuv(unsigned t, const void *planes, int w, int h);
 extern void Vita_VglTexFree(unsigned t);
 extern SceUID Vita_ThreadOnCore3(const char *name, SceKernelThreadEntry entry, int prio, int stack, int fallbackMask);
 extern int gVitaCore3;
 
-int gVitaTagMovie = 0; /* bt3.txt tbomovie: 0 the poster (default), 1 the film, 2 the film with every other picture stepped over */
+int gVitaTagMovie = 0; /* bt3.txt tbomovie: 0 the poster (default), 1 the film; other values the poster */
 
-#define TM_W 960
-#define TM_H 540
-#define TM_BYTES ((size_t)TM_W * TM_H * 4)
+#define TM_OUT_FRAMES 6      /* the player's output frame buffers (the GPU reads one for a few pictures after it was given) */
+#define TM_FREE_DELAY_US 150000u /* frames given back this long after the player lets them go */
+#define TM_PHYCONT_ALIGN (1024 * 1024) /* physically contiguous blocks: 1 MB sizes */
 #define TM_IDLE_US 500000u   /* the thread stops this long after the last picture asked for */
-#define TM_KEEP_FRAMES 600   /* the texture given back this many pictures after it was last drawn (vita_tbo.c) */
-#define TM_RETRY_US 2000000u /* a film that could not be opened is not tried again for this long */
+#define TM_KEEP_FRAMES 600   /* the texture given back this many pictures after it was last drawn (vita_tbo.c KEEP_FRAMES) */
+#define TM_RETRY_US 2000000u /* a film that could not be played is not tried again for this long */
+#define TM_NOFRAME_US 3000000u /* the intro gives no picture for this long: the film is given up (the poster) */
+#define TM_LATE_US 85000u    /* a picture more than this late is counted as late */
+#define TM_POLL_US 2000u     /* the player polled this often when it has no picture */
 #define TM_LOG_US 2000000u
 #define TM_PRIORITY 0x10000100 /* the helpers' (vita_tbo.c letter_thread, vita_audio.c's neighbours) */
 #define TM_STACK 0x10000
-#define TM_INTRO "app0:tbo/ui/tag_ui_intro.pss"
-#define TM_LOOP "app0:tbo/ui/tag_ui_loop.pss"
+#define TM_INTRO "app0:tbo/ui/tag_ui_intro.mp4"
+#define TM_LOOP "app0:tbo/ui/tag_ui_loop.mp4"
+#define TM_TRACK 64 /* blocks whose sizes are kept for the memory count (allocator hooks give no size on free) */
 
 static SceUID sLock = -1;
 static struct {
-    uint8_t *buf[2];        /* the decoder's two pictures (NULL while no thread runs) */
-    int front;              /* the picture published last: the drawing thread reads buf[front] under sLock only (-1: none) */
-    int running;
-    int restart;            /* Port_TagMenuMovieBegin: the film from its start */
-    uint32_t serial;        /* pictures published */
-    uint32_t uploaded;      /* the serial of the picture in the texture */
-    uint64_t touched;       /* us: the last picture asked for */
-    uint64_t failedAt;      /* us: the last film that could not be played (0: none) */
-    unsigned tex;           /* the texture (drawing thread) */
-    unsigned texFrame;      /* gGsFrame when it was last drawn */
+    /* the newest frame the player gave (its planes; valid until the player reuses the buffer), under sLock */
+    const uint8_t *frame;
+    uint32_t w, h;
+    uint32_t serial;       /* frames given by the player */
+    uint32_t uploaded;     /* the serial of the frame in the texture (drawing thread) */
+    int running, stopping; /* the playing thread: running, or closing its player */
+    uint64_t touched;      /* us: the last picture asked for */
+    uint64_t failedAt;     /* us: the last film that could not be played (0: none) */
+    unsigned tex;          /* the texture (drawing thread) */
+    unsigned texFrame;     /* gGsFrame when it was last drawn */
+    int restart;           /* Port_TagMenuMovieBegin: the film from its start */
+    int inLoop;            /* the playing thread: the loop's source is playing (for the log) */
     /* the counters of the log (since the last line) */
-    unsigned decoded, stepped, replaced, uploads;
-    uint64_t decodeUs, decodeMax, uploadUs, uploadMax;
-    int core;               /* the core the decoding thread runs on at its last log line */
-} sM = {{NULL, NULL}, -1};
+    unsigned decoded, late, shown, replaced, uploads;
+    uint64_t uploadUs, uploadMax;
+    /* memory: the allocator hooks' blocks (the player's frames and its other blocks) */
+    struct { void *p; size_t n; int frame; } blk[TM_TRACK];
+    size_t liveFrame, liveOther, peak;
+    int core;
+    uint64_t freedAt;      /* us: the last wait before frames were given back */
+} sM;
 
 static uint64_t tm_now(void) { return sceKernelGetProcessTimeWide(); }
 static void tm_lock(void) { sceKernelLockMutex(sLock, 1, NULL); }
 static void tm_unlock(void) { sceKernelUnlockMutex(sLock, 1); }
 
-/* The picture's YUV 4:2:0 planes of the decoder (after decode_unit) to RGBA at TM_W x TM_H with the GS's alpha 0x80:
-   the same arithmetic as plat_mpeg2.c to_rgba (its tables, in this unit), nearest neighbour from the stream's size. */
-static void tm_convert(const TagMovieDecoder *m, uint8_t *out, const uint16_t *xs, const uint16_t *ys) {
-    int stride = m->mbw * 16, cstride = m->mbw * 8, x, y;
-    for (y = 0; y < TM_H; y++) {
-        int sy = ys[y];
-        const uint8_t *py = m->y + sy * stride, *pb = m->cb + (sy >> 1) * cstride, *pr = m->cr + (sy >> 1) * cstride;
-        uint32_t *o = (uint32_t *)(void *)(out + (size_t)y * TM_W * 4);
-        for (x = 0; x < TM_W; x++) {
-            int sx = xs[x], d = pb[sx >> 1], e = pr[sx >> 1];
-            int c = sTy[py[sx]], r = sTrv[e], g = sTgu[d] + sTgv[e], b = sTbu[d];
-            o[x] = (uint32_t)sClip[((c + r) >> 16) + 384] | (uint32_t)sClip[((c + g) >> 16) + 384] << 8 |
-                   (uint32_t)sClip[((c + b) >> 16) + 384] << 16 | 0x80000000u;
+/* the allocator hooks (under sLock; the player calls them on its own threads): the block's size kept for the count */
+static void tm_track(void *p, size_t n, int frame, int add) {
+    int i;
+    if (add) {
+        for (i = 0; i < TM_TRACK; i++) {
+            if (sM.blk[i].p == NULL) {
+                sM.blk[i].p = p;
+                sM.blk[i].n = n;
+                sM.blk[i].frame = frame;
+                break;
+            }
+        }
+        if (frame) sM.liveFrame += n; else sM.liveOther += n;
+        if (sM.liveFrame + sM.liveOther > sM.peak) sM.peak = sM.liveFrame + sM.liveOther;
+        return;
+    }
+    for (i = 0; i < TM_TRACK; i++) {
+        if (sM.blk[i].p == p) {
+            if (sM.blk[i].frame) sM.liveFrame -= sM.blk[i].n; else sM.liveOther -= sM.blk[i].n;
+            sM.blk[i].p = NULL;
+            return;
         }
     }
 }
-
-/* One picture decoded into the planes (the file's units as plat_mpeg2.c next_planes, without its gVitaGsSkip: the
-   game's frame skip must not step over the film). 1: a picture; 0: the end. */
-static int tm_decode(TagMovieDecoder *m) {
-    size_t size = next_unit(m);
-    if (size == 0) {
-        return 0;
+static void *tm_alloc(void *arg, uint32_t alignment, uint32_t size) {
+    void *p;
+    (void)arg;
+    p = memalign(alignment < 16 ? 16 : alignment, size);
+    if (p != NULL) {
+        tm_lock();
+        tm_track(p, size, 0, 1);
+        tm_unlock();
     }
-    m->havePicture = 0;
-    m->headersOnly = 0;
-    decode_unit(m, m->es, m->es + size);
-    unit_done(m, size);
-    return m->y != NULL;
+    return p;
 }
-
-/* A picture stepped over: its headers followed (the sequence state stays right), its slices not decoded. */
-static int tm_step(TagMovieDecoder *m) {
-    size_t size = next_unit(m);
-    if (size == 0) {
-        return 0;
+static void tm_free(void *arg, void *p) {
+    (void)arg;
+    if (p == NULL) return;
+    tm_lock();
+    tm_track(p, 0, 0, 0);
+    tm_unlock();
+    free(p);
+}
+/* the frames: physically contiguous memory mapped for the GPU (as vitaGL's samples/video_playback) */
+static void *tm_alloc_frame(void *arg, uint32_t alignment, uint32_t size) {
+    SceUID blk;
+    void *p = NULL;
+    (void)arg;
+    (void)alignment;
+    size = (size + TM_PHYCONT_ALIGN - 1) & ~(uint32_t)(TM_PHYCONT_ALIGN - 1);
+    blk = sceKernelAllocMemBlock("bt3_tagframe", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, size, NULL);
+    if (blk < 0) {
+        Vita_Log("tagmovie: no physically contiguous memory for a frame of %u KB (0x%08X)\n", size / 1024, (unsigned)blk);
+        return NULL;
     }
-    m->headersOnly = 1;
-    decode_unit(m, m->es, m->es + size);
-    m->headersOnly = 0;
-    unit_done(m, size);
-    return 1;
-}
-
-/* The thread's end: its buffers given back (the drawing thread stops reading them: front -1), its state cleared. */
-static void tm_finish(TagMovieDecoder *m, int failed) {
-    uint8_t *b0, *b1;
-    if (m != NULL) {
-        TagMovieDecoder_Close(m);
+    if (sceKernelGetMemBlockBase(blk, &p) < 0 || p == NULL) {
+        sceKernelFreeMemBlock(blk);
+        return NULL;
+    }
+    if (sceGxmMapMemory(p, size, SCE_GXM_MEMORY_ATTRIB_RW) < 0) {
+        sceKernelFreeMemBlock(blk);
+        return NULL;
     }
     tm_lock();
-    b0 = sM.buf[0];
-    b1 = sM.buf[1];
-    sM.buf[0] = sM.buf[1] = NULL;
-    sM.front = -1;
-    sM.running = 0;
+    tm_track(p, size, 1, 1);
+    tm_unlock();
+    return p;
+}
+static void tm_free_frame(void *arg, void *p) {
+    SceUID blk;
+    size_t n = 0;
+    int i, wait;
+    uint64_t now;
+    (void)arg;
+    if (p == NULL) return;
+    /* the drawing thread must not use it any more, and the chip may still be reading it: dropped first, given back later */
+    tm_lock();
+    for (i = 0; i < TM_TRACK; i++) {
+        if (sM.blk[i].p == p) {
+            n = sM.blk[i].n;
+        }
+    }
+    if (sM.frame != NULL && sM.frame >= (const uint8_t *)p && sM.frame < (const uint8_t *)p + n) {
+        sM.frame = NULL;
+    }
+    tm_track(p, 0, 1, 0);
+    now = tm_now();
+    wait = now - sM.freedAt > TM_FREE_DELAY_US; /* (one wait for the frames let go together) */
+    if (wait) {
+        sM.freedAt = now;
+    }
+    tm_unlock();
+    if (wait) {
+        sceKernelDelayThread(TM_FREE_DELAY_US);
+    }
+    blk = sceKernelFindMemBlockByAddr(p, 0);
+    sceGxmUnmapMemory(p);
+    if (blk >= 0) sceKernelFreeMemBlock(blk);
+}
+
+/* A player with the film's source set, not started (the player starts it when the source is in: autoStart).
+   -1 on error. */
+static SceAvPlayerHandle tm_init(void) {
+    SceAvPlayerInitData init;
+    memset(&init, 0, sizeof(init));
+    init.memoryReplacement.allocate = tm_alloc;
+    init.memoryReplacement.deallocate = tm_free;
+    init.memoryReplacement.allocateTexture = tm_alloc_frame;
+    init.memoryReplacement.deallocateTexture = tm_free_frame;
+    init.basePriority = TM_PRIORITY;
+    init.numOutputVideoFrameBuffers = TM_OUT_FRAMES;
+    init.autoStart = 1;
+    return sceAvPlayerInit(&init);
+}
+
+/* The file to play: the player's source set (a stopped player takes a new one; a player that refuses is made again).
+   0 on success. */
+static int tm_play(SceAvPlayerHandle *h, const char *file, int looping) {
+    if (*h >= 0) {
+        sceAvPlayerStop(*h);
+        sceAvPlayerSetLooping(*h, looping);
+        if (sceAvPlayerAddSource(*h, file) >= 0) {
+            return 0;
+        }
+        sceAvPlayerClose(*h);
+        *h = -1;
+    }
+    *h = tm_init();
+    if (*h < 0) {
+        return -1;
+    }
+    sceAvPlayerSetLooping(*h, looping);
+    if (sceAvPlayerAddSource(*h, file) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
+/* The thread's end: the frame given up first (the drawing thread stops reading it), the player closed, the state cleared. */
+static void tm_finish(SceAvPlayerHandle h, int failed) {
+    tm_lock();
+    sM.frame = NULL;
+    sM.stopping = 1;
     if (failed) {
         sM.failedAt = tm_now();
     }
     tm_unlock();
-    free(b0);
-    free(b1);
+    if (h >= 0) {
+        sceAvPlayerStop(h);
+        sceAvPlayerClose(h);
+    }
+    tm_lock();
+    sM.running = 0;
+    sM.stopping = 0;
+    sM.inLoop = 0;
+    tm_unlock();
     sceKernelExitDeleteThread(0);
 }
 
 static int tm_thread(SceSize args, void *argp) {
-    TagMovieDecoder *m = NULL;
-    uint16_t xs[TM_W], ys[TM_H];
-    int mapW = 0, mapH = 0, inLoop = 0, got = 0;
-    uint64_t origin = 0, logAt, now, due;
-    uint32_t frames = 0;
+    SceAvPlayerHandle h = -1;
+    int seen = 0;
+    uint64_t origin = 0, startedAt = 0, logAt;
     (void)args;
     (void)argp;
 
+    sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER); /* (already loaded: its error is the player's Init's below) */
+    h = tm_init();
+    if (h < 0 || tm_play(&h, TM_INTRO, 0) < 0) {
+        Vita_Log("tagmovie: the player cannot play %s (the package carries tbo/ui/tag_ui_*.mp4?): the poster\n", TM_INTRO);
+        tm_finish(h, 1);
+    }
     tm_lock();
-    sM.buf[0] = malloc(TM_BYTES);
-    sM.buf[1] = malloc(TM_BYTES);
-    sM.front = -1;
-    sM.restart = 0;
-    sM.decoded = sM.stepped = sM.replaced = sM.uploads = 0;
-    sM.decodeUs = sM.decodeMax = sM.uploadUs = sM.uploadMax = 0;
+    sM.inLoop = 0;
+    sM.core = (int)sceKernelGetCpuId();
     tm_unlock();
-    if (sM.buf[0] == NULL || sM.buf[1] == NULL) {
-        Vita_Log("tagmovie: no memory for two pictures of %u KB: the poster\n", (unsigned)(2 * TM_BYTES / 1024));
-        tm_finish(NULL, 1);
-    }
-    m = TagMovieDecoder_Open(TM_INTRO);
-    if (m == NULL) {
-        Vita_Log("tagmovie: cannot open %s (not in the package: build with BT4_VITA_TAGMOVIE=1): the poster\n", TM_INTRO);
-        tm_finish(NULL, 1);
-    }
-    Vita_Log("tagmovie: started, tbomovie=%d, %u KB of pictures, on the %s core\n", gVitaTagMovie, (unsigned)(2 * TM_BYTES / 1024),
-             gVitaCore3 == 1 ? "fourth" : "second");
-    logAt = tm_now() + TM_LOG_US;
+    Vita_Log("tagmovie: started, tbomovie=%d, the hardware player (%d output frames of physically contiguous memory), on the %s core\n", gVitaTagMovie,
+             TM_OUT_FRAMES, gVitaCore3 == 1 ? "fourth" : "second");
+    origin = startedAt = tm_now();
+    logAt = origin + TM_LOG_US;
     for (;;) {
-        int restart = 0, step;
+        SceAvPlayerFrameInfo info;
+        uint64_t now = tm_now();
+        int restart = 0;
         tm_lock();
-        now = tm_now();
         if (now - sM.touched > TM_IDLE_US) {
             tm_unlock();
             break;
@@ -200,120 +295,87 @@ static int tm_thread(SceSize args, void *argp) {
         }
         tm_unlock();
         if (restart) {
-            TagMovieDecoder_Close(m);
-            m = TagMovieDecoder_Open(TM_INTRO);
-            inLoop = got = 0;
-            origin = 0;
-            frames = 0;
-            if (m == NULL) {
-                tm_finish(NULL, 1);
+            /* the intro from its start */
+            if (tm_play(&h, TM_INTRO, 0) < 0) {
+                tm_finish(h, 1);
             }
+            seen = 0;
+            origin = startedAt = now;
+            tm_lock();
+            sM.inLoop = 0;
+            tm_unlock();
         }
         if (now >= logAt) {
-            unsigned n;
-            uint64_t dm, um;
+            unsigned decoded, late, shown, replaced, uploads;
+            uint64_t uploadUs, uploadMax, live, peak;
+            size_t liveFrame, liveOther;
+            int inLoop;
             tm_lock();
-            n = sM.decoded;
-            dm = sM.decodeMax;
-            um = sM.uploadMax;
-            sM.core = (int)sceKernelGetCpuId();
-            Vita_Log("tagmovie: %u pictures decoded, %u stepped over, %u replaced before uploaded, %u uploaded in 2 s; decode %u ms a picture (worst %u), upload %u us (worst %u); the %s core (CPU %d)\n",
-                     n, sM.stepped, sM.replaced, sM.uploads, n ? (unsigned)(sM.decodeUs / n / 1000) : 0u, (unsigned)(dm / 1000),
-                     sM.uploads ? (unsigned)(sM.uploadUs / sM.uploads) : 0u, (unsigned)um, gVitaCore3 == 1 ? "fourth" : "second", sM.core);
-            sM.decoded = sM.stepped = sM.replaced = sM.uploads = 0;
-            sM.decodeUs = sM.decodeMax = sM.uploadUs = sM.uploadMax = 0;
+            decoded = sM.decoded;
+            late = sM.late;
+            shown = sM.shown;
+            replaced = sM.replaced;
+            uploads = sM.uploads;
+            uploadUs = sM.uploadUs;
+            uploadMax = sM.uploadMax;
+            liveFrame = sM.liveFrame;
+            liveOther = sM.liveOther;
+            peak = sM.peak;
+            inLoop = sM.inLoop;
+            sM.decoded = sM.late = sM.shown = sM.replaced = sM.uploads = 0;
+            sM.uploadUs = sM.uploadMax = 0;
             tm_unlock();
+            live = liveFrame + liveOther;
+            Vita_Log("tagmovie: %u frames from the player, %u shown, %u replaced before shown, %u late (over 85 ms); texture set %u us a "
+                     "frame (worst %u us); memory %u KB (frames %u KB, other %u KB; peak %u KB); the %s; the %s core\n",
+                     decoded, shown, replaced, late, uploads ? (unsigned)(uploadUs / uploads) : 0u, (unsigned)uploadMax,
+                     (unsigned)(live / 1024), (unsigned)(liveFrame / 1024), (unsigned)(liveOther / 1024), (unsigned)(peak / 1024),
+                     inLoop ? "loop" : "intro", gVitaCore3 == 1 ? "fourth" : "second");
             logAt = now + TM_LOG_US;
         }
-        /* the picture's time: the PC's 24000 / 1001 pictures a second; a picture is shown late when it is late, and the
-           time is set again when the film is more than 85 ms behind (tag_menu_movie.c) */
-        due = origin + (uint64_t)frames * 1001000000ull / 24000;
-        if (origin != 0 && now < due) {
-            uint64_t wait = due - now;
-            sceKernelDelayThread((SceUInt)(wait > 5000 ? 5000 : wait));
-            continue;
-        }
-        if (origin == 0) {
-            origin = now;
-        }
-        step = gVitaTagMovie == 2 && (frames & 1) && m->y != NULL;
-        if (step ? tm_step(m) : 0) {
+        memset(&info, 0, sizeof(info));
+        if (sceAvPlayerGetVideoData(h, &info)) {
+            /* the picture's time from the source's start (the player's timeStamp, in ms) */
+            int late = now - origin > (uint64_t)info.timeStamp * 1000u + TM_LATE_US;
             tm_lock();
-            sM.stepped++;
+            sM.frame = info.pData;
+            sM.w = info.details.video.width;
+            sM.h = info.details.video.height;
+            sM.serial++;
+            sM.decoded++;
+            if (late) {
+                sM.late++;
+            }
             tm_unlock();
-            got = 1;
-        } else if (!step) {
-            uint64_t d0 = tm_now(), d1;
-            int back;
-            if (tm_decode(m)) {
-                d1 = tm_now();
-                if (m->width != mapW || m->height != mapH) {
-                    int x, y;
-                    for (x = 0; x < TM_W; x++) {
-                        xs[x] = (uint16_t)((x * m->width) / TM_W);
-                    }
-                    for (y = 0; y < TM_H; y++) {
-                        ys[y] = (uint16_t)((y * m->height) / TM_H);
-                    }
-                    mapW = m->width;
-                    mapH = m->height;
-                }
-                back = sM.front == 0 ? 1 : 0; /* (the drawing thread reads only buf[front], under the lock) */
-                tm_convert(m, sM.buf[back], xs, ys);
-                tm_lock();
-                sM.front = back;
-                sM.serial++;
-                sM.decoded++;
-                sM.decodeUs += d1 - d0;
-                if (d1 - d0 > sM.decodeMax) {
-                    sM.decodeMax = d1 - d0;
-                }
-                tm_unlock();
-                got = 1;
-            } else {
-                /* the end of the intro: the loop, and the loop again at its end (tag_menu_movie.c). A loop that gives no
-                   picture ends the film: the poster. */
-                if (inLoop && !got) {
-                    Vita_Log("tagmovie: the loop %s gives no picture: the poster\n", TM_LOOP);
-                    tm_finish(m, 1);
-                }
-                TagMovieDecoder_Close(m);
-                m = TagMovieDecoder_Open(TM_LOOP);
-                inLoop = 1;
-                got = 0;
-                origin = 0;
-                frames = 0;
-                if (m == NULL) {
-                    Vita_Log("tagmovie: cannot open %s: the poster\n", TM_LOOP);
-                    tm_finish(NULL, 1);
-                }
-                continue;
-            }
-        } else {
-            /* stepping over reached the end: the same as a decode reaching it */
-            TagMovieDecoder_Close(m);
-            m = TagMovieDecoder_Open(TM_LOOP);
-            inLoop = 1;
-            got = 0;
-            origin = 0;
-            frames = 0;
-            if (m == NULL) {
-                tm_finish(NULL, 1);
-            }
+            seen = 1;
             continue;
         }
-        frames++;
-        now = tm_now();
-        if (now > origin + (uint64_t)frames * 1001000000ull / 24000 + 85000u) {
-            origin = now - (uint64_t)frames * 1001000000ull / 24000;
+        if (!seen && now - startedAt > TM_NOFRAME_US) {
+            Vita_Log("tagmovie: the player gives no picture from %s in 3 s: the poster\n", sM.inLoop ? TM_LOOP : TM_INTRO);
+            tm_finish(h, 1);
         }
+        if (seen && !sceAvPlayerIsActive(h)) {
+            /* the intro's end: the loop, looping; the loop ending (it should not) starts it again */
+            if (tm_play(&h, TM_LOOP, 1) < 0) {
+                Vita_Log("tagmovie: the player cannot play %s: the poster\n", TM_LOOP);
+                tm_finish(h, 1);
+            }
+            seen = 0;
+            origin = startedAt = tm_now();
+            tm_lock();
+            sM.inLoop = 1;
+            tm_unlock();
+        }
+        sceKernelDelayThread(TM_POLL_US);
     }
-    tm_finish(m, 0);
+    tm_finish(h, 0);
     return 0;
 }
 
 /* The game's Tag Team screens opened (src/menu/port_tbo.c): the film from its start. */
+extern void Vita_TagMovieSwBegin(void); /* vita_tagmovie_sw.c (tbomovie=2) */
 void Port_TagMenuMovieBegin(void) {
+    Vita_TagMovieSwBegin();
     if (sLock < 0) {
         sLock = sceKernelCreateMutex("bt3_tagmovie", 0, 0, NULL);
     }
@@ -325,7 +387,7 @@ void Port_TagMenuMovieBegin(void) {
     tm_unlock();
 }
 
-/* The drawing thread (vita_tbo.c, for the film's picture): the texture of the newest picture, 0 for none (the poster). */
+/* The drawing thread (vita_tbo.c, for the film's picture): the texture of the newest frame, 0 for none (the poster). */
 unsigned Vita_TagMovieTexture(void) {
     uint64_t t0;
     unsigned tex;
@@ -335,7 +397,7 @@ unsigned Vita_TagMovieTexture(void) {
     tm_lock();
     t0 = tm_now();
     sM.touched = t0;
-    if (!sM.running && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US)) {
+    if (!sM.running && !sM.stopping && (sM.failedAt == 0 || t0 - sM.failedAt > TM_RETRY_US)) {
         SceUID th = Vita_ThreadOnCore3("bt3_tagmovie", tm_thread, TM_PRIORITY, TM_STACK, 0x00020000 /* else the second core */);
         if (th >= 0 && sceKernelStartThread(th, 0, NULL) >= 0) {
             sM.running = 1;
@@ -343,25 +405,32 @@ unsigned Vita_TagMovieTexture(void) {
             sM.failedAt = t0;
         }
     }
-    if (sM.front >= 0 && (sM.tex == 0 || sM.serial != sM.uploaded)) {
-        uint64_t u0 = tm_now(), dt;
-        if (sM.tex == 0) {
-            sM.tex = Vita_VglTexRgba(sM.buf[sM.front], TM_W, TM_H);
-        } else {
-            Vita_VglTexUpdate(sM.tex, sM.buf[sM.front], TM_W, TM_H);
+    if (!sM.running) {
+        /* not playing: its texture given back (the drawing thread's, here) */
+        tex = sM.tex;
+        sM.tex = 0;
+        tm_unlock();
+        if (tex != 0) {
+            Vita_VglTexFree(tex);
         }
+        return 0;
+    }
+    if (sM.frame != NULL && sM.serial != sM.uploaded) {
+        uint64_t u0 = tm_now(), dt;
+        sM.tex = Vita_VglTexYuv(sM.tex, sM.frame, (int)sM.w, (int)sM.h);
         if (sM.serial - sM.uploaded > 1) {
             sM.replaced += sM.serial - sM.uploaded - 1;
         }
         sM.uploaded = sM.serial;
         dt = tm_now() - u0;
+        sM.shown++;
         sM.uploads++;
         sM.uploadUs += dt;
         if (dt > sM.uploadMax) {
             sM.uploadMax = dt;
         }
     }
-    tex = sM.tex;
+    tex = sM.frame != NULL ? sM.tex : 0;
     sM.texFrame = gGsFrame;
     tm_unlock();
     return tex;

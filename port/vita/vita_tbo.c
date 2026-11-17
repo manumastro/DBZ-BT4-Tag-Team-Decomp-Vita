@@ -15,10 +15,11 @@
  *     fonts are app0:fonts with fonts.tsv, port/third_party/fonts), made again whenever the line's version changes;
  *   - TBO_MAIN_TAG_OFF / ON: "Tag Team" in the main menu's lettering, put together from the letters of the player's
  *     own disc as on PC (port/src/gs/bt4_main_lettering.inc), in a thread of its own the first time;
- *   - TBO_TAG_MOVIE: the PC plays a film behind the Tag Team screens (tbo/ui/tag_ui_*.pss); with bt3.txt tbomovie=1 or 2
- *     the Vita plays it too (vita_tagmovie.c, its texture; the film is in the package only when built with
- *     BT4_VITA_TAGMOVIE=1). Otherwise, or until its first picture, its poster (TBO_TAG_ART), the picture the PC shows
- *     until the film's first frame.
+ *   - TBO_TAG_MOVIE: the PC plays a film behind the Tag Team screens (tbo/ui/tag_ui_*.pss); with bt3.txt tbomovie=1
+ *     the Vita plays it too, H.264 on the console's hardware player (vita_tagmovie.c, its texture; the films are
+ *     tbo/ui/tag_ui_{intro,loop}.mp4); with tbomovie=2 the PC's own MPEG-2 films in software (vita_tagmovie_sw.c, only in
+ *     a package built with BT4_VITA_TAGMOVIE=1). Otherwise, or until its first frame, its poster (TBO_TAG_ART), the picture the
+ *     PC shows until the film's first frame.
  * The online hub's art (the radar, the hosts, the tournament grounds), the European disc's language selector and
  * the ranked Dragon Balls are not asked for offline; none of them is made here (0: not drawn).
  *
@@ -58,6 +59,8 @@ extern int MenuLabels_Bt4MainItem(const char *root, const char *label, unsigned 
 extern int gVitaTagMovie;                /* vita_tagmovie.c: bt3.txt tbomovie */
 extern unsigned Vita_TagMovieTexture(void);
 extern void Vita_TagMovieIdle(void);
+extern unsigned Vita_TagMovieSwTexture(void); /* vita_tagmovie_sw.c: tbomovie=2, the software path */
+extern void Vita_TagMovieSwIdle(void);
 extern int Vita_MemberFile(const char *archive, int flid, const char *dir);         /* vita_file.c */
 
 int gVitaTboUi = 1;
@@ -450,7 +453,7 @@ unsigned Vita_TboTexture(uint32_t id) {
     }
     if (id == TBO_TAG_MOVIE) {
         /* the film behind the Tag Team screens (vita_tagmovie.c) when tbomovie is on and a picture is ready; else its poster */
-        unsigned film = gVitaTagMovie ? Vita_TagMovieTexture() : 0;
+        unsigned film = gVitaTagMovie == 1 ? Vita_TagMovieTexture() : gVitaTagMovie == 2 ? Vita_TagMovieSwTexture() : 0;
         if (film != 0) {
             return film;
         }
@@ -483,6 +486,7 @@ void Vita_TboFrameEnd(void) {
     unsigned held;
     if ((gGsFrame & 63) == 0) {
         Vita_TagMovieIdle(); /* the film's texture not drawn for a while */
+        Vita_TagMovieSwIdle();
     }
     while (sLateN > 0) {
         sLateN--;
