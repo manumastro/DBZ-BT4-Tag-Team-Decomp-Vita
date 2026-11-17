@@ -4,7 +4,19 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 ## Unreleased
 
-- **Tag Team with the PC version's own screens** (not run on the console yet): the main menu's Tag Team entry and the
+- **Faster fights, above all 2 vs 2 and the big specials**: the 2 vs 2 demo fight averages 29.2 pictures a second
+  (22.7 when this work began, with 10 of 39 stretches under 20; now none), the heavy 1 vs 1 (Super
+  Spirit Bomb against Dragon Fist) 29.9. The settings behind it, all on by default: `sprrun`, `rtswap`,
+  `dpfreelate` (the Super Spirit Bomb's drops), `bindrange` (the long picture at the Super Spirit Bomb's end, 88 ->
+  50 ms), `memsample` and `ftdedupe` (the 2 vs 2 heavy fight's single long pictures: hitch blocks 37 -> 22, no reset
+  of the fighters' buffer on the graphics chip). Each is described in [docs/vita/development.md](docs/vita/development.md).
+- **The start says which BT4 it found**: Team BT4's B14 Rev2 (English or Spanish) is recognised by its program files'
+  sizes and CRC; another build (B13 and older, other mods) stops with a clear message. An archive (`.7z`, `.zip`,
+  `.rar`) left in `ux0:data/bt4/`, a cut `.iso` and the 4 GB limit of FAT32 cards are named on the error screen; the
+  log says which image and folder are used.
+- **README**: a step-by-step installation, more troubleshooting and a FAQ.
+- **Tag Team with the PC version's own screens** (run on the console: the screens, the menus by the pad, 2 vs 2 at
+  29.4 pictures a second; 5 vs 5 runs but is not playable yet): the main menu's Tag Team entry and the
   Duel menu's Tag type open BT4decomp's own Tag Team menus, drawn on the Vita with their pictures and TrueType
   letters: Local Battle (Singleplayer, Two-player, Spectator Mode, Two-player co-op; 1 to 5 fighters a team, time,
   CPU level, presets, revival, each fighter's health and combat rules, battle rules) and Camera mode (target
