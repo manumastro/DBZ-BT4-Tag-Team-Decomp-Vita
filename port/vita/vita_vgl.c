@@ -4891,13 +4891,14 @@ void Vita_AmLog(void) { /* vita_main.c: the model draws that read the picture's 
                 memset(gVitaEsBind, 0, sizeof(gVitaEsBind));
             }
             {   /* (bindrange: gs_marker.c, gs_core.c es_carry) */
-                extern unsigned gVitaBrBind[2], gVitaBr[8], gVitaBrWhy[5];
-                Vita_Log("vgl:   model generations (bindrange): %u with the bound file's range, %u without | the seam's kept calls in a new one: %u kept, %u dropped by a range, %u dropped otherwise | checks (3): %u, %u different, %u not compared | kept calls read again now and then: %u, %u different | read the long way: %u at a new place, %u of an old generation, %u the chip let go, %u now and then, %u checks\n",
-                         gVitaBrBind[0], gVitaBrBind[1], gVitaBr[0], gVitaBr[1], gVitaBr[2], gVitaBr[3], gVitaBr[4], gVitaBr[5], gVitaBr[6], gVitaBr[7],
-                         gVitaBrWhy[0], gVitaBrWhy[1], gVitaBrWhy[2], gVitaBrWhy[3], gVitaBrWhy[4]);
+                extern unsigned gVitaBrBind[2], gVitaBr[11], gVitaBrWhy[5], gVitaBrTex[2];
+                Vita_Log("vgl:   model generations (bindrange): %u with the bound file's range, %u without | the seam's kept calls in a new one: %u kept, %u dropped by a range, dropped otherwise: %u not kept, %u memory not named, %u a generation without ranges, %u too far | checks (3): %u, %u different, %u not compared | kept calls read again now and then: %u, %u different | read the long way: %u at a new place, %u of an old generation, %u the chip let go, %u now and then, %u checks | the models' textures worked out again for a new generation: %u, %u KB\n",
+                         gVitaBrBind[0], gVitaBrBind[1], gVitaBr[0], gVitaBr[1], gVitaBr[2], gVitaBr[8], gVitaBr[9], gVitaBr[10], gVitaBr[3], gVitaBr[4], gVitaBr[5], gVitaBr[6], gVitaBr[7],
+                         gVitaBrWhy[0], gVitaBrWhy[1], gVitaBrWhy[2], gVitaBrWhy[3], gVitaBrWhy[4], gVitaBrTex[0], gVitaBrTex[1] / 1024);
                 memset(gVitaBrBind, 0, sizeof(gVitaBrBind));
                 memset(gVitaBr, 0, sizeof(gVitaBr));
                 memset(gVitaBrWhy, 0, sizeof(gVitaBrWhy));
+                memset(gVitaBrTex, 0, sizeof(gVitaBrTex));
             }
             gVitaRtSwapN[0] = gVitaRtSwapN[1] = 0;
             memset(gVitaDpFreeLateN, 0, sizeof(gVitaDpFreeLateN));

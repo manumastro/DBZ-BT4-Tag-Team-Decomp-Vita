@@ -667,7 +667,9 @@ static void es_gen_model(int ranged) {
 }
 /* (src/battle/btl_obj.c BtlObj_Term) the battle's objects and files are gone: a generation without a range */
 void Port_EsModelsGone(void) {
-    es_gen_model(0);
+    if (gVitaBindRange != 0) { /* (at 0 none, as before) */
+        es_gen_model(0);
+    }
 }
 void Port_EsModelBound(int again, const void *file, const void *buf, int size) {
     sEsGenT = (sEsGenT + 1) & 0xFFF;

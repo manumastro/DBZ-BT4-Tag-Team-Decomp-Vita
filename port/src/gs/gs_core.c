@@ -543,6 +543,11 @@ static int texid_hash(const uint8_t *d, uint32_t len, uint32_t mark, uint64_t *h
     if (e == NULL) {
         e = &sTexId[k & (TEXID_N - 1)]; /* (eight places taken: the first is given to this one) */
     }
+    if (e->p == d && e->len == len && e->mark != mark && (mark & 0x4000u)) {
+        extern unsigned gVitaBrTex[2];
+        gVitaBrTex[0]++; /* (for bindrange's line: a model's texture again for a new generation) */
+        gVitaBrTex[1] += len;
+    }
     if (e->p != d || e->len != len || e->mark != mark) { /* (first seen, or another generation: the bytes read once) */
         e->p = d;
         e->len = len;
@@ -4158,7 +4163,8 @@ static EsSpan *sEsSpan;        /* (SEAM_N, with sEsTab) what each call read; no:
 #define ES_KNOWN 64
 static uint32_t sEsKnownLo[ES_KNOWN], sEsKnownHi[ES_KNOWN], sEsKnownNo; /* (the list reader) the ranges named since the last generation without ranges, up to bind sEsKnownNo */
 static unsigned sEsKnownN, sEsKnownGen = 1; /* (generation 1: the first, before any bind) */
-unsigned gVitaBr[8]; /* for the log: calls kept across a bind, dropped by a bind's range, dropped otherwise (not kept, their memory not named, a generation without ranges, too far); checks (3) made, found different, not compared (written to the chip again); kept calls read again now and then, found different */
+unsigned gVitaBr[11]; /* for the log: calls kept across a bind, dropped by a bind's range, dropped not kept (state not 2, nothing read noted); checks (3) made, found different, not compared (written to the chip again); kept calls read again now and then, found different; dropped as their memory lies outside the ranges binds named, as a generation between was without ranges (or the ring lost it), as more than 64 generations lie between */
+unsigned gVitaBrTex[2]; /* for the log: the models' named textures worked out again for a new generation (sEsGenT, every bind), their bytes */
 unsigned gVitaBrWhy[5]; /* for the log: the seam's calls read the long way: at a new place, after an old generation, after the chip let go, now and then (nativecheck), checks (3) */
 /* (the game's thread, port/src/gs_marker.c) generation gen begun, with n ranges (-1: without) */
 void GsFE_EsBindNote(unsigned gen, int n, const uint32_t *lo, const uint32_t *hi) {
@@ -4241,14 +4247,25 @@ static int es_carry(CallCache *e, uint32_t gen) {
     }
     no = sEsBindR[gen & 0xFFFu].no;
     __sync_synchronize();
-    if (e->state != 2 || e->data == NULL || sp->hi[0] == 0 || no - sp->no == 0 || no - sp->no > 64u) {
+    if (e->state != 2 || e->data == NULL || sp->hi[0] == 0) {
         gVitaBr[2]++;
+        return 0;
+    }
+    if (no - sp->no == 0 || no - sp->no > 64u) {
+        gVitaBr[10]++;
         return 0;
     }
     es_known_sync(gen & 0xFFFu, no);
     for (i = 0; i < 2; i++) {
         if (sp->hi[i] != 0 && !es_span_known(sp->lo[i], sp->hi[i])) {
-            gVitaBr[2]++;
+            extern void Vita_Log(const char *fmt, ...);
+            static unsigned lines;
+            gVitaBr[8]++;
+            if (lines < 20) {
+                lines++;
+                Vita_Log("gs: bindrange: the call at %08x read %08x..%08x and %08x..%08x, not all in the %u ranges binds named (generation %03x)\n",
+                         e->addr, sp->lo[0], sp->hi[0], sp->lo[1], sp->hi[1], sEsKnownN, (unsigned)(gen & 0xFFFu));
+            }
             return 0;
         }
     }
@@ -4258,7 +4275,7 @@ static int es_carry(CallCache *e, uint32_t gen) {
         r = &sEsBindR[g];
         k++;
         if (r->no != k || r->n < 0) {
-            gVitaBr[2]++;
+            gVitaBr[9]++;
             return 0;
         }
         for (j = 0; j < r->n; j++) {
@@ -4271,7 +4288,7 @@ static int es_carry(CallCache *e, uint32_t gen) {
         }
     }
     if (g != (gen & 0xFFFu)) {
-        gVitaBr[2]++;
+        gVitaBr[9]++;
         return 0;
     }
     gVitaBr[0]++;
