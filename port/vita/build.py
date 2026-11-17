@@ -12,6 +12,10 @@ Environment:
     BT3_VITA_DEV=1     the development build: its own title (BTTD00008); it reads every setting of bt3.txt (test
                        fights, statistics in the log), see docs/vita/development.md
     BT3_INCREMENTAL=1  reuse every object newer than its source, the headers its last compile read (<object>.d) and build.py
+                       (the film behind the Tag Team screens is always packaged: tbo/ui/tag_ui_{intro,loop}.mp4, 1.3 MB; played with
+                       bt3.txt tbomovie=1 (vita_tagmovie.c, the hardware player), else the poster)
+    BT4_VITA_TAGMOVIE=1  also the PC's own films, tbo/ui/tag_ui_*.pss (30 MB more), for the software path, bt3.txt
+                       tbomovie=2 (vita_tagmovie_sw.c). Default: not packaged
     BT3_VITA_TITLE_ID, BT3_VITA_TITLE, BT3_VITA_VPK
     BT3_JOBS=<n>       compiles at once (default: the processors; fewer where memory is short, a Docker VM)
                        another title ID, name and package file, so that the build is installed beside another one
@@ -260,6 +264,8 @@ def port_sources():
             # BT4decomp's free / spectator camera and its screens' Spanish, its own files built unchanged
             # (gs/spectator_camera.c, gs/online_language.c; docs/vita/tagteam.md)
             (V / "vita_spectator.c", "gs"), (V / "vita_onlinelang.c", "gs")]
+            # the film behind the Tag Team screens (bt3.txt tbomovie): the hardware player (SceAvPlayer)
+            (V / "vita_tagmovie.c", "hard"), (V / "vita_tagmovie_sw.c", "hard")]
     return out
 
 
@@ -343,7 +349,7 @@ def compile_all():
 LIBS = ["-lvitaGL", "-lpng16", "-lstdc++", "-lSceCommonDialog_stub", "-lSceGxm_stub", "-lmathneon", "-lvitashark", "-lSceShaccCgExt", "-ltaihen_stub",
         "-lSceShaccCg_stub", "-lSceKernelDmacMgr_stub", "-lSceAudio_stub", "-lScePerf_stub_weak",
         "-lSceDisplay_stub", "-lSceCtrl_stub", "-lSceTouch_stub", "-lScePower_stub", "-lSceAppMgr_stub", "-lSceAppUtil_stub",
-        "-lSceSysmodule_stub", "-lSceRtc_stub", "-lSceKernelThreadMgr_stub", "-lSceProcessmgr_stub", "-lSceLibKernel_stub",
+        "-lSceSysmodule_stub", "-lSceAvPlayer_stub", "-lSceRtc_stub", "-lSceKernelThreadMgr_stub", "-lSceProcessmgr_stub", "-lSceLibKernel_stub",
         "-lSceIofilemgr_stub", "-lSceSysmem_stub", "-lpthread", "-lz", "-lm"]
 
 # Game functions replaced by faster equivalents (port/src/port_fast.c: the stage's culling, the effects' task lists).
@@ -422,7 +428,7 @@ def vpk():
     # BT4decomp's own screens (port/vita/vita_tbo.c): the pictures of port/tbo/ui as tbo/ui/ and the fonts of
     # port/third_party/fonts (with fonts.tsv and their licences) as fonts/, as the PC's release has them. Left out: what
     # only the online hub shows (its radar, hosts, grounds, community button), the unused icon, and the films behind the
-    # Tag Team screens (tag_ui_*.pss, 30 MB; the Vita shows their poster)
+    # Tag Team screens (tag_ui_*.pss, 30 MB, packaged only with BT4_VITA_TAGMOVIE=1: the film is the .mp4 files below)
     ui, n = ROOT / "port/tbo/ui", 0
     online_only = {"radar.png", "bg.png", "discord.png", "tag_team_icon.png"}
     for f in sorted(ui.iterdir()):
@@ -434,6 +440,16 @@ def vpk():
         extra += ["-a", f"{f}=fonts/{f.relative_to(fonts).as_posix()}"]
         n += 1
     print(f"the package carries {n} files of BT4decomp's own screens (tbo/ui, fonts)")
+    # the film behind the Tag Team screens (vita_tagmovie.c, bt3.txt tbomovie=1): the two H.264 films made from upstream's
+    # .pss by port/vita/tools/make_tagmovie.sh (1.3 MB; the .pss, 30 MB, only with BT4_VITA_TAGMOVIE=1, below)
+    for f in ("tag_ui_intro.mp4", "tag_ui_loop.mp4"):
+        extra += ["-a", f"{ROOT / 'port/vita/assets' / f}=tbo/ui/{f}"]
+    print("the package carries the film behind the Tag Team screens (tbo/ui/tag_ui_{intro,loop}.mp4, about 1.3 MB)")
+    # the software path (vita_tagmovie_sw.c, tbomovie=2) plays upstream's own .pss: 30 MB more, so only on request
+    if os.environ.get("BT4_VITA_TAGMOVIE") == "1":
+        for f in ("tag_ui_intro.pss", "tag_ui_loop.pss"):
+            extra += ["-a", f"{ui / f}=tbo/ui/{f}"]
+        print("the package carries the PC's films too (tbo/ui/tag_ui_*.pss, 30 MB: BT4_VITA_TAGMOVIE=1)")
     run("vita-pack-vpk", "-s", OUT / "param.sfo", "-b", OUT / "eboot.bin", *extra, OUT / VPK)
     print(f"{OUT / VPK}: {(OUT / VPK).stat().st_size} bytes")
 

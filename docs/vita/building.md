@@ -38,6 +38,7 @@ Other environment variables:
 | `BT3_CLANG_PY` | The folder that holds `clang/cindex.py`, when the bindings are not installed |
 | `BT3_VITA_DEV=1` | The development build, see [development.md](development.md) |
 | `BT3_PGO=gen` / `use` | A profile-guided build, see below |
+| `BT4_VITA_TAGMOVIE=1` | BT4 only: the package also carries the PC's own films behind the Tag Team screens (`tbo/ui/tag_ui_*.pss`, about 30 MB more; `port/vita/build.py`), for the software path `tbomovie=2`. The H.264 films of the hardware path (`tbo/ui/tag_ui_{intro,loop}.mp4`, 1.3 MB, from `port/vita/assets/`, made by `port/vita/tools/make_tagmovie.sh` with ffmpeg) are always packaged; `-lSceAvPlayer_stub` is linked ([tagteam.md](tagteam.md)) |
 
 `python3 port/vita/build.py compile`, `link` or `vpk` runs one step only.
 

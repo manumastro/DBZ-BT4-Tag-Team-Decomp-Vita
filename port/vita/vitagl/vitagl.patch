@@ -771,11 +771,111 @@ index 07d8f47..6cb347d 100644
  // Fixed-function pipeline shader cache settings
  #define FFP_SHADER_CACHE_MAGIC 31 // This must be increased whenever ffp shader sources or shader mask/combiner mask changes
  
+diff --git a/source/utils/mem_utils.c b/source/utils/mem_utils.c
+index 4b791b7..e80aa5b 100644
+--- a/source/utils/mem_utils.c
++++ b/source/utils/mem_utils.c
+@@ -576,6 +576,59 @@ void vgl_mem_provide_phycont(size_t size_phycont) {
+ }
+ #endif
+ 
++#if !defined(PHYCONT_ON_DEMAND) && !defined(HAVE_CUSTOM_HEAP)
++// (BT4 port) The physically contiguous pool given back to the system while nothing is allocated in it (the film of the Tag Team
++// screens needs that memory for the console's video decoder), and taken again afterwards. Returns the size given back, 0 if
++// there is no pool or something is still allocated in it.
++size_t vgl_mem_release_phycont(void) {
++	SceClibMspaceStats stats;
++	void *addr, *mspace;
++	size_t size;
++	SceUID blk;
++	if (!mempool_size[VGL_MEM_PHYCONT] || !mempool_mspace[VGL_MEM_PHYCONT])
++		return 0;
++	sceClibMspaceMallocStats(mempool_mspace[VGL_MEM_PHYCONT], &stats);
++	if (stats.current_in_use > 8192)
++		return 0;
++	size = mempool_size[VGL_MEM_PHYCONT];
++	addr = mempool_addr[VGL_MEM_PHYCONT];
++	mspace = mempool_mspace[VGL_MEM_PHYCONT];
++	blk = sceKernelFindMemBlockByAddr(addr, 0);
++	// forgotten first, so that no new allocation goes into it
++	mempool_size[VGL_MEM_PHYCONT] = 0;
++	mempool_mspace[VGL_MEM_PHYCONT] = NULL;
++	mempool_addr[VGL_MEM_PHYCONT] = NULL;
++	mempool_end[VGL_MEM_PHYCONT] = NULL;
++	sceClibMspaceDestroy(mspace);
++	sceGxmUnmapMemory(addr);
++	sceKernelFreeMemBlock(blk);
++	return size;
++}
++
++// The pool made again (the size asked for or the largest 1 MB step below it that the system gives). Returns its size.
++size_t vgl_mem_reacquire_phycont(size_t size) {
++	if (mempool_size[VGL_MEM_PHYCONT])
++		return mempool_size[VGL_MEM_PHYCONT];
++	size = VGL_ALIGN(size, 1024 * 1024);
++	while (size >= 1024 * 1024) {
++		SceUID blk = sceKernelAllocMemBlock("phycont_mempool", has_cached_mem ? SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_RW : SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, size, NULL);
++		void *base = NULL;
++		if (blk >= 0 && sceKernelGetMemBlockBase(blk, &base) >= 0 && base) {
++			sceGxmMapMemory(base, size, SCE_GXM_MEMORY_ATTRIB_RW);
++			mempool_mspace[VGL_MEM_PHYCONT] = sceClibMspaceCreate(base, size);
++			mempool_addr[VGL_MEM_PHYCONT] = base;
++			mempool_end[VGL_MEM_PHYCONT] = (void *)((uintptr_t)base + size);
++			mempool_size[VGL_MEM_PHYCONT] = size;
++			return size;
++		}
++		if (blk >= 0)
++			sceKernelFreeMemBlock(blk);
++		size -= 1024 * 1024;
++	}
++	return 0;
++}
++#endif
++
+ vglMemType vgl_mem_get_type_by_addr(void *addr) {
+ 	if (addr >= mempool_addr[VGL_MEM_VRAM] && addr < mempool_end[VGL_MEM_VRAM])
+ 		return VGL_MEM_VRAM;
+diff --git a/source/utils/mem_utils.h b/source/utils/mem_utils.h
+index 80f3f86..389fc08 100644
+--- a/source/utils/mem_utils.h
++++ b/source/utils/mem_utils.h
+@@ -95,6 +95,8 @@ void __mark_rt_as_dirty(render_target *rt);
+ #endif
+ 
+ void vgl_mem_init(size_t size_ram, size_t size_cdram, size_t size_phycont, size_t size_cdlg);
++size_t vgl_mem_release_phycont(void);
++size_t vgl_mem_reacquire_phycont(size_t size);
+ void vgl_mem_term(void);
+ size_t vgl_mem_get_free_space(vglMemType type);
+ size_t vgl_mem_get_total_space(vglMemType type);
 diff --git a/source/vgl.c b/source/vgl.c
-index bf5e4d4..a09b42f 100644
+index bf5e4d4..d079403 100644
 --- a/source/vgl.c
 +++ b/source/vgl.c
-@@ -808,5 +808,5 @@ void vglSetShaderCachePath(const char *path) {
+@@ -801,6 +801,22 @@ void vglPhycontMemLazyInit(size_t size) {
+ #endif
+ }
+ 
++size_t vglPhycontMemRelease(void) {
++#if !defined(PHYCONT_ON_DEMAND) && !defined(HAVE_CUSTOM_HEAP)
++	return vgl_mem_release_phycont();
++#else
++	return 0;
++#endif
++}
++
++size_t vglPhycontMemReacquire(size_t size) {
++#if !defined(PHYCONT_ON_DEMAND) && !defined(HAVE_CUSTOM_HEAP)
++	return vgl_mem_reacquire_phycont(size);
++#else
++	return 0;
++#endif
++}
++
+ void vglSetShaderCachePath(const char *path) {
+ #ifdef HAVE_SHADER_CACHE
+ 	strcpy(shader_cache_root, path);
+@@ -808,5 +824,5 @@ void vglSetShaderCachePath(const char *path) {
  }
  
  void vglSetShaderAssociationPath(const char *path) {
@@ -783,10 +883,22 @@ index bf5e4d4..a09b42f 100644
 +	(void)path; /* (not in this SDK's vitashark) */
  }
 diff --git a/source/vitaGL.h b/source/vitaGL.h
-index 336bc14..8296874 100644
+index 336bc14..bda85d1 100644
 --- a/source/vitaGL.h
 +++ b/source/vitaGL.h
-@@ -1319,6 +1319,15 @@ void vglUseVramForUSSE(GLboolean usage);
+@@ -1232,6 +1232,11 @@ void vglOverrideTexFormat(GLenum target);
+ // Allows to init phycont memory heap (VGL_MEM_PHYCONT) after vglInit* calls. Useful for when SceAvPlayer is used only for an intro video.
+ void vglPhycontMemLazyInit(size_t size);
+ 
++// (BT4 port) Gives the physically contiguous heap back to the system if nothing is allocated in it (returns its size, 0 if it could not),
++// and makes it again (returns the size it got).
++size_t vglPhycontMemRelease(void);
++size_t vglPhycontMemReacquire(size_t size);
++
+ // Variant of glReadPixels that uses GPU underneat to perform the readback. The passed data pointer must be GPU mapped (eg: heap memory).
+ void vglReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *data);
+ 
+@@ -1319,6 +1324,15 @@ void vglUseVramForUSSE(GLboolean usage);
  // Allows vitaGL to use newlib memory once all internal mempools are exhausted. Default value: GL_TRUE.
  void vglUseExtraMem(GLboolean usage);
  

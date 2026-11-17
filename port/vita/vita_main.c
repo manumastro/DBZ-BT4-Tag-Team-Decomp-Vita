@@ -2072,6 +2072,18 @@ static void read_settings(void) {
         } else if (strcmp(line, "taglang") == 0) { /* BT4decomp's screens in the disc's language (vita_onlinelang.c): 0 English, 1 as on PC */
             extern int gVitaTagLang;
             gVitaTagLang = atoi(eq) != 0;
+        } else if (strcmp(line, "tbomovie") == 0) { /* the film behind the Tag Team screens (vita_tagmovie.c, the hardware player): 0 the poster (default), 1 the film, 2 the software MPEG-2 film */
+            extern int gVitaTagMovie;
+            gVitaTagMovie = atoi(eq);
+        } else if (strcmp(line, "tbomoviecopy") == 0) { /* tbomovie=1: 1 each picture copied into the film's own aligned buffers (default), 0 the player's frames used in place */
+            extern int gVitaTagMovieCopy;
+            gVitaTagMovieCopy = atoi(eq);
+        } else if (strcmp(line, "tbomoviecsc") == 0) { /* tbomovie=1: the colour conversion of the chip's YUV texture: 0 CSC0 (default), 1 CSC1 (vitaGL's sample) */
+            extern int gVitaTagMovieCsc;
+            gVitaTagMovieCsc = atoi(eq);
+        } else if (strcmp(line, "tbomoviemem") == 0) { /* tbomovie=1: MB of physically contiguous memory vitaGL leaves to the player (default 32; the decoder asks for a 14 MB block) */
+            extern int gVitaTagMovieMem;
+            gVitaTagMovieMem = atoi(eq);
         } else if (strcmp(line, "fxclamp") == 0) { /* the animated effects' triangles (with their CLAMP writes) as runs: 0 off, 1 on, 2 soak B */
             extern int gVitaFxClamp;
             gVitaFxClamp = atoi(eq);
