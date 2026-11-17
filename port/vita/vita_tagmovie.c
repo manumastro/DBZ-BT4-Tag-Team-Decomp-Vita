@@ -66,7 +66,10 @@ int gVitaTagMovie = 0; /* bt3.txt tbomovie: 0 the poster (default), 1 the film; 
 #define TM_LATE_US 85000u    /* a picture more than this late is counted as late */
 #define TM_POLL_US 2000u     /* the player polled this often when it has no picture */
 #define TM_LOG_US 2000000u
-#define TM_PRIORITY 0x10000100 /* the helpers' (vita_tbo.c letter_thread, vita_audio.c's neighbours) */
+/* the player's handle is an address (0x8xxxxxxx: negative as an int), its errors 0x80xxxxxx codes: not a sign test */
+#define TM_NONE ((SceAvPlayerHandle)0)
+#define TM_OK(h) ((h) != 0 && ((unsigned)(h) & 0xFF000000u) != 0x80000000u)
+#define TM_PRIORITY 0xA0 /* the player's own threads (a plain priority, as vitaGL's samples/video_playback: no core bits) */
 #define TM_STACK 0x10000
 #define TM_INTRO "app0:tbo/ui/tag_ui_intro.mp4"
 #define TM_LOOP "app0:tbo/ui/tag_ui_loop.mp4"
@@ -218,22 +221,26 @@ static SceAvPlayerHandle tm_init(void) {
 /* The file to play: the player's source set (a stopped player takes a new one; a player that refuses is made again).
    0 on success. */
 static int tm_play(SceAvPlayerHandle *h, const char *file, int looping) {
-    if (*h >= 0) {
+    if (TM_OK(*h)) {
         sceAvPlayerStop(*h);
         sceAvPlayerSetLooping(*h, looping);
         if (sceAvPlayerAddSource(*h, file) >= 0) {
             return 0;
         }
         sceAvPlayerClose(*h);
-        *h = -1;
+        *h = TM_NONE;
     }
     *h = tm_init();
-    if (*h < 0) {
+    if (!TM_OK(*h)) {
         return -1;
     }
     sceAvPlayerSetLooping(*h, looping);
-    if (sceAvPlayerAddSource(*h, file) < 0) {
-        return -1;
+    {
+        int r = sceAvPlayerAddSource(*h, file);
+        if (r < 0) {
+            Vita_Log("tagmovie: the player refused %s (0x%08X)\n", file, (unsigned)r);
+            return -1;
+        }
     }
     return 0;
 }
@@ -247,7 +254,7 @@ static void tm_finish(SceAvPlayerHandle h, int failed) {
         sM.failedAt = tm_now();
     }
     tm_unlock();
-    if (h >= 0) {
+    if (TM_OK(h)) {
         sceAvPlayerStop(h);
         sceAvPlayerClose(h);
     }
@@ -260,15 +267,20 @@ static void tm_finish(SceAvPlayerHandle h, int failed) {
 }
 
 static int tm_thread(SceSize args, void *argp) {
-    SceAvPlayerHandle h = -1;
+    SceAvPlayerHandle h = TM_NONE;
     int seen = 0;
     uint64_t origin = 0, startedAt = 0, logAt;
     (void)args;
     (void)argp;
 
-    sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER); /* (already loaded: its error is the player's Init's below) */
-    h = tm_init();
-    if (h < 0 || tm_play(&h, TM_INTRO, 0) < 0) {
+    {
+        int m = sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER); /* (already loaded: its error is the player's Init's below) */
+        h = tm_init();
+        if (!TM_OK(h)) {
+            Vita_Log("tagmovie: the player did not start (module 0x%08X, init 0x%08X): the poster\n", (unsigned)m, (unsigned)h);
+        }
+    }
+    if (!TM_OK(h) || tm_play(&h, TM_INTRO, 0) < 0) {
         Vita_Log("tagmovie: the player cannot play %s (the package carries tbo/ui/tag_ui_*.mp4?): the poster\n", TM_INTRO);
         tm_finish(h, 1);
     }
