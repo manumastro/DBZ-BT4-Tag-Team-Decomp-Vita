@@ -348,6 +348,9 @@ extern void Port_SettingsWrite(void);
 extern void Vita_ModsSummary(char *out, int size);
 extern void Vita_UnlockFromOptions(void); /* port/vita/vita_main.c: Unlock All's screen, from level 1 (SQUARE) */
 extern int Vita_UnlockTakeChanged(void);
+#ifndef PORT_VITA_HOME
+#define PORT_VITA_HOME "ux0:data/bt3" /* (the port's folder: port/vita/vita_paths.h; the BT4 port's ux0:data/bt4) */
+#endif
 static s32 sVitaSetLevel; /* 0 closed, 1..6 above */
 static s32 sVitaSetItem;  /* the setting chosen on level 1 */
 static s32 sVitaTouchBtn; /* the button chosen on level 2 */
@@ -374,7 +377,7 @@ static void Option_VitaSetGuide(void) {
         } else if (Option_VitaModsOn()) {
             s32 k, line = 0, sp = -1;
             Vita_ModsSummary(more, 50);
-            sprintf(text, "Mods (ux0:data/bt3/mods): ON.\nIn use: %s.", more);
+            sprintf(text, "Mods (" PORT_VITA_HOME "/mods): ON.\nIn use: %s.", more);
             for (k = 0; text[k] != '\0'; k++) { /* (lines of up to 34 letters, broken at spaces) */
                 if (text[k] == '\n') {
                     line = 0;
@@ -391,7 +394,7 @@ static void Option_VitaSetGuide(void) {
                 }
             }
         } else {
-            sprintf(text, "Mods: files in ux0:data/bt3/mods\nreplace the disc's: OFF.");
+            sprintf(text, "Mods: files in " PORT_VITA_HOME "/mods\nreplace the disc's: OFF.");
         }
         {   /* (Vita_UnlockFromOptions, below; not when the line is long already) */
             s32 k = 0;
@@ -436,7 +439,7 @@ static void Option_VitaSetGuide(void) {
                              : "OFF: a second controller is not\nused.");
         break;
     default:
-        sprintf(text, v == 0 ? "ON: files in ux0:data/bt3/mods\nreplace the disc's, from the\nnext start."
+        sprintf(text, v == 0 ? "ON: files in " PORT_VITA_HOME "/mods\nreplace the disc's, from the\nnext start."
                              : "OFF: the disc's files only, from\nthe next start.");
         break;
     }

@@ -379,7 +379,7 @@ static void quit(void) {
 
 /* A message the program cannot go on after: red on the screen, in the log, then START ends the program. */
 void Vita_Fatal(const char *fmt, ...) {
-    char msg[600];
+    char msg[1400];
     va_list ap;
 
     va_start(ap, fmt);
@@ -1812,9 +1812,10 @@ static int find_below(const char *dir, int depth, char *out, size_t size) {
     return found;
 }
 
-/* An .iso one folder down in `dir`, as an archive unpacks it (Team BT4's release holds PS2_NTSC/<image>.iso): 1, its
-   path in `found`, mounted. The game's own folders are skipped. */
-static int find_iso_below(const char *dir, const char *elf, char *found, int size, int *wrong) {
+/* An .iso one folder down in `dir`, as an archive unpacks it (Team BT4's release holds PS2_NTSC/<image>.iso), or up to
+   `depth` folders down (the archive unpacked into a folder of its own name, then its PS2_NTSC): 1, its path in `found`,
+   mounted. The game's own folders are skipped. */
+static int find_iso_below(const char *dir, const char *elf, char *found, int size, int *wrong, int depth) {
     extern int Vita_IsoFind(const char *dir, const char *file, int keep, char *out, int size, int *seen);
     static const char *const kSkip[] = {"saves", "mods", "shcache", "disc", "disk"};
     SceUID d = sceIoDopen(dir);
@@ -1836,9 +1837,119 @@ static int find_iso_below(const char *dir, const char *elf, char *found, int siz
         }
         ok = Vita_IsoFind(sub, elf, 1, found, size, &looked);
         *wrong += looked;
+        if (!ok && depth > 1) {
+            ok = find_iso_below(sub, elf, found, size, wrong, depth - 1);
+        }
     }
     sceIoDclose(d);
     return ok;
+}
+
+/* --- when the disc's files are not found: what is there instead, said in a few short lines --- */
+
+#define MB(x) ((long long)(x) >> 20)
+#ifdef PORT_VITA_BT4
+#define VITA_RELEASE_NAME "Team BT4's B14 Rev2"
+#define VITA_RELEASE_NEED "This port needs Team BT4's B14 Rev2 (English or Spanish).\n" \
+                          "Other builds (B13, older revisions) are not supported."
+#else
+#define VITA_RELEASE_NAME "the USA release (SLUS-21678)"
+#define VITA_RELEASE_NEED "This port needs the USA release (SLUS-21678)."
+#endif
+#define FAT32_NOTE "\n  4 GB is the most a FAT32 card holds in one file: use an\n  exFAT card, or unpack the .iso (README)."
+
+typedef struct DiscNotes {
+    char text[900]; /* the first lines, for the screen */
+    int n, wrong;   /* notes, of which images of another disc */
+} DiscNotes;
+
+static void disc_note(DiscNotes *ns, const char *fmt, ...) {
+    char line[400];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    logf_("vita: found: %s\n", line);
+    if (ns->n++ < 5 && strlen(ns->text) + strlen(line) + 2 < sizeof(ns->text)) {
+        strcat(ns->text, line);
+        strcat(ns->text, "\n");
+    }
+}
+
+static int has_ext(const char *name, const char *ext) {
+    size_t l = strlen(name), e = strlen(ext);
+    return l > e && strcasecmp(name + l - e, ext) == 0;
+}
+
+/* One file of a folder the disc's files were looked for in: an archive, or an .iso that is cut short, not a disc
+   image, or of another disc. (A file of 4 GB less a byte, or nearly: what a FAT32 card keeps of a larger one.) */
+static void disc_look_at(DiscNotes *ns, const char *dir, const char *name, long long size) {
+    extern int Vita_IsoProbe(const char *path, long long *have, long long *need, int *lost, char *label, int labelSize);
+    extern int Vita_IsoDescribe(const char *path, const char *want, char *out, int size);
+    static const char *const kPack[] = {".7z", ".zip", ".rar", ".001", ".tar", ".gz", ".xz", ".bz2"};
+    char path[300], what[200], label[40];
+    long long have, need;
+    int lost, k, r, fat;
+
+    if (snprintf(path, sizeof(path), "%s/%s", dir, name) >= (int)sizeof(path)) {
+        return;
+    }
+    for (k = 0; k < (int)(sizeof(kPack) / sizeof(kPack[0])); k++) {
+        if (has_ext(name, kPack[k])) {
+            disc_note(ns, "%s (%lld MB) is the archive:\n  extract it on a computer first, then copy the .iso it holds.", path, MB(size));
+            return;
+        }
+    }
+    if (!has_ext(name, ".iso")) {
+        return;
+    }
+    r = Vita_IsoProbe(path, &have, &need, &lost, label, sizeof(label));
+    fat = have >= 0xFFF00000ll && have <= 0x100000000ll;
+    if (r < 0) {
+        disc_note(ns, "%s cannot be opened.", path);
+    } else if (r == 0) {
+        disc_note(ns, "%s (%lld MB) is not a disc image%s%s", path, MB(have),
+                  have < (1ll << 30) ? ":\n  smaller than a DVD image should be (a download or an\n  extraction that stopped early?)" : ".",
+                  fat ? FAT32_NOTE : "");
+    } else if (have < need) {
+        disc_note(ns, "%s is cut short:\n  %lld MB of the disc's %lld MB (a copy that stopped early).%s", path, MB(have), MB(need),
+                  fat ? FAT32_NOTE : "");
+    } else if ((r = Vita_IsoDescribe(path, PORT_VITA_ELF, what, sizeof(what))) == 0) {
+        disc_note(ns, "%s (%lld MB): its folders cannot be read.", path, MB(have));
+    } else {
+        ns->wrong += r == 1; /* (2: it has PORT_VITA_ELF, in a place not looked in) */
+        disc_note(ns, "%s (%lld MB): found %s%s", path, MB(have), what,
+                  r == 1 ? "." : ":\n  move it to " HOME "/.");
+    }
+}
+
+static void disc_look_in(DiscNotes *ns, const char *dir, int depth) {
+    static const char *const kSkip[] = {"saves", "mods", "shcache", "dump", "pgo"};
+    SceUID d = sceIoDopen(dir);
+    SceIoDirent e;
+    int k;
+
+    if (d < 0) {
+        return;
+    }
+    memset(&e, 0, sizeof(e));
+    while (sceIoDread(d, &e) > 0) {
+        char sub[300];
+        int skip = e.d_name[0] == '.';
+        if (!SCE_S_ISDIR(e.d_stat.st_mode)) {
+            if (!skip) {
+                disc_look_at(ns, dir, e.d_name, (long long)e.d_stat.st_size);
+            }
+            continue;
+        }
+        for (k = 0; !skip && k < (int)(sizeof(kSkip) / sizeof(kSkip[0])); k++) {
+            skip = strcasecmp(e.d_name, kSkip[k]) == 0;
+        }
+        if (!skip && depth > 0 && snprintf(sub, sizeof(sub), "%s/%s", dir, e.d_name) < (int)sizeof(sub)) {
+            disc_look_in(ns, sub, depth - 1);
+        }
+    }
+    sceIoDclose(d);
 }
 
 static void find_disc(void) {
@@ -1871,7 +1982,7 @@ static void find_disc(void) {
             }
             wrong += looked;
         }
-        if (find_iso_below(HOME, PORT_VITA_ELF, found, sizeof(found), &wrong)) {
+        if (find_iso_below(HOME, PORT_VITA_ELF, found, sizeof(found), &wrong, 2)) {
             logf_("vita: the disc's files are read from its image %s\n", found);
             snprintf(gVitaDisc, sizeof(gVitaDisc), "%s", found);
             return;
@@ -1897,6 +2008,13 @@ static void find_disc(void) {
             }
             wrong += looked;
         }
+        for (k = 0; k < (int)(sizeof(kAlso) / sizeof(kAlso[0])); k++) { /* (an archive unpacked there: its PS2_NTSC/) */
+            if (find_iso_below(kAlso[k], PORT_VITA_ELF, found, sizeof(found), &wrong, 1)) {
+                logf_("vita: the disc's files are read from its image %s\n", found);
+                snprintf(gVitaDisc, sizeof(gVitaDisc), "%s", found);
+                return;
+            }
+        }
     }
 #endif
     seen[0] = '\0';
@@ -1915,17 +2033,75 @@ static void find_disc(void) {
         }
         sceIoDclose(d);
     }
+    {   /* what is there instead: archives, .iso files cut short or of another disc (each in the log too) */
+        DiscNotes ns;
+        memset(&ns, 0, sizeof(ns));
+        if (strcmp(gVitaDisc, HOME "/disc") != 0) { /* (disc= of bt3.txt: that place only) */
+            const char *slash = strrchr(gVitaDisc, '/');
+            if (has_ext(gVitaDisc, ".iso") && slash != NULL) { /* (its size is the probe's: a mounted image stats as a folder) */
+                char dir[256];
+                snprintf(dir, sizeof(dir), "%.*s", (int)(slash - gVitaDisc), gVitaDisc);
+                disc_look_at(&ns, dir, slash + 1, 0);
+            } else {
+                disc_look_in(&ns, gVitaDisc, 0);
+            }
+        } else {
+            disc_look_in(&ns, HOME, 2);
 #ifdef PORT_VITA_BT4
-#define VITA_RELEASE_NAME "BT4 B14 Rev2"
-#else
-#define VITA_RELEASE_NAME "the USA release (SLUS-21678)"
+            disc_look_in(&ns, "ux0:data/bt3/bt4", 1);
+            disc_look_in(&ns, "ux0:bt4", 1);
+            disc_look_in(&ns, "ux0:bt3/bt4", 1);
 #endif
-    Vita_Fatal("The game's files were not found. Copy your own disc of\n"
-               VITA_RELEASE_NAME " into\n  %s/\n"
-               "as its .iso (a 1:1 image of the disc), or " PORT_VITA_ELF "\n"
-               "and the folders BIN and DATA from it.\n\n%s%s%s",
-               gVitaDisc, n ? "In " HOME " there is:\n" : "", seen,
-               wrong ? "\nThe .iso found is not of " VITA_RELEASE_NAME "\n(it has no " PORT_VITA_ELF "), or it could not be read." : "");
+        }
+        if (ns.n > 5) {
+            snprintf(ns.text + strlen(ns.text), sizeof(ns.text) - strlen(ns.text), "(and %d more: " HOME "/log" SFX ")\n", ns.n - 5);
+        }
+        Vita_Fatal("The game's files were not found. Copy your own disc of\n"
+                   VITA_RELEASE_NAME " into\n  %s/\n"
+                   "as its .iso (a 1:1 image of the disc), or " PORT_VITA_ELF "\n"
+                   "and the folders BIN and DATA from it.\n\n%s%s%s%s",
+                   gVitaDisc, ns.n ? "Found:\n" : n ? "In " HOME " there is:\n" : "", ns.n ? ns.text : seen,
+                   ns.wrong ? "\n" VITA_RELEASE_NEED : "",
+                   wrong && !ns.n ? "\nThe .iso found is not of " VITA_RELEASE_NAME "\n(it has no " PORT_VITA_ELF "), or it could not be read." : "");
+    }
+}
+
+/* The disc's place in a few words, for the start's messages (vita_mem.c): the image's path, size and volume name,
+   or the folder. */
+void Vita_DiscSay(char *out, int size) {
+    extern int Vita_IsoIsMounted(const char *path);
+    extern int Vita_IsoProbe(const char *path, long long *have, long long *need, int *lost, char *label, int labelSize);
+    long long have, need;
+    int lost;
+    char label[40];
+
+    if (Vita_IsoIsMounted(gVitaDisc) && Vita_IsoProbe(gVitaDisc, &have, &need, &lost, label, sizeof(label)) == 1) {
+        snprintf(out, (size_t)size, "%s (%lld MB, volume \"%s\")", gVitaDisc, MB(have), label);
+    } else {
+        snprintf(out, (size_t)size, "the folder %s", gVitaDisc);
+    }
+}
+
+/* Where the game's files are read from and where the port's own are kept, in the log; an image found with files cut
+   off (a copy that stopped early, or a FAT32 card's 4 GB) stops here, before the game asks for one of them. */
+static void disc_found(void) {
+    extern int Vita_IsoIsMounted(const char *path);
+    extern int Vita_IsoProbe(const char *path, long long *have, long long *need, int *lost, char *label, int labelSize);
+    long long have, need;
+    int lost;
+    char label[40];
+
+    if (Vita_IsoIsMounted(gVitaDisc) && Vita_IsoProbe(gVitaDisc, &have, &need, &lost, label, sizeof(label)) == 1) {
+        logf_("vita: the game's files: the disc image %s (%lld bytes, the disc's %lld, volume \"%s\")\n", gVitaDisc, have, need, label);
+        if (lost > 0) {
+            Vita_Fatal("The disc image\n  %s\nis cut short: %lld MB of the disc's %lld MB, %d of its files\n"
+                       "are missing (a copy that stopped early). Copy it again.%s",
+                       gVitaDisc, MB(have), MB(need), lost, have >= 0xFFF00000ll && have <= 0x100000000ll ? FAT32_NOTE : "");
+        }
+    } else {
+        logf_("vita: the game's files: the folder %s\n", gVitaDisc);
+    }
+    logf_("vita: the port's own files (log, saves, settings, bt3.txt, shaders, mods): " HOME "\n");
 }
 
 static void read_settings(void) {
@@ -3175,7 +3351,7 @@ static void log_plugins(void) {
 
 int __wrap_main(int argc, char **argv) {
     SceUID th;
-    int logThread = 0;
+    int logThread = 0, homeMade;
 
     (void)argc;
     (void)argv;
@@ -3187,7 +3363,7 @@ int __wrap_main(int argc, char **argv) {
     sceCtrlSetSamplingModeExt(SCE_CTRL_MODE_ANALOG_WIDE); /* a DualShock's sticks through the Ext2 reads (PS TV, a second pad) */
     psvDebugScreenInit();
     sceIoMkdir("ux0:data", 0777);
-    sceIoMkdir(HOME, 0777);
+    homeMade = sceIoMkdir(HOME, 0777); /* (0 made now; else it is there already, or cannot be made: below) */
     sceIoMkdir(HOME "/mods", 0777); /* (where mods go: vita_file.c) */
 #ifdef PORT_VITA_RELEASE
     {   /* the released program's log, appended to at every start, kept under 1 MB: a longer one becomes log-prev.txt
@@ -3201,6 +3377,14 @@ int __wrap_main(int argc, char **argv) {
 #endif
     sLog = fopen(HOME "/log" SFX, "a");
     logf_("\n======== new run ========\n");
+    {   /* the port's own folder: the log, the saves, the settings are kept there, wherever the disc's files are read from */
+        SceIoStat st;
+        if (sLog == NULL && (sceIoGetstat(HOME, &st) < 0 || !SCE_S_ISDIR(st.st_mode))) {
+            Vita_Fatal("The folder " HOME " could not be made\n(error 0x%08X): the saves and the log go there.\n"
+                       "Make it with VitaShell, then start the game again.", (unsigned)homeMade);
+        }
+        logf_("vita: data folder " HOME " (%s)\n", homeMade >= 0 ? "made now" : "there already");
+    }
     {   /* the parts of a log split before (logsplit=): this run's own, if any, are made anew */
         int k;
         for (k = 2; k <= 9; k++) {
@@ -3257,6 +3441,7 @@ int __wrap_main(int argc, char **argv) {
 #endif
     start_step("the disc's files");
     find_disc();
+    disc_found();
     start_step("the game's data tables");
     Vita_LoadGameData(gVitaDisc);
     {   /* mods (vita_file.c): the packs left out are told of before the game starts */

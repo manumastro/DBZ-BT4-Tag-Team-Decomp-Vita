@@ -97,6 +97,54 @@ static uint8_t *read_file(const char *path, size_t *size) {
     return buf;
 }
 
+#ifdef PORT_VITA_BT4
+#include "bt4_online_compat.h"
+/* Which build of BT4 the disc is. Team BT4's B14 Rev2 only, English or Spanish: its three programs' sizes and CRC-32
+   per language are BT4decomp's (bt4_online_compat.h, [0] Spanish, [1] English). Another build (B13, an older
+   revision) has other programs and other archives, and stopped later on a file it does not have ("archive not
+   found"); now the start says what was found. A size that is not one of B14 Rev2's stops the start; a CRC-32 that is
+   not is said in the log only. */
+static uint32_t crc32_of(const uint8_t *p, size_t n) {
+    uint32_t table[256], c = ~0u, k, i;
+    for (i = 0; i < 256; i++) {
+        uint32_t v = i;
+        for (k = 0; k < 8; k++) {
+            v = (v >> 1) ^ ((v & 1) ? 0xEDB88320u : 0);
+        }
+        table[i] = v;
+    }
+    while (n-- > 0) {
+        c = table[(c ^ *p++) & 255] ^ (c >> 8);
+    }
+    return ~c;
+}
+
+static void bt4_build_check(int file, const char *disc, const char *name, const uint8_t *data, size_t size, int english) {
+    extern void Vita_Log(const char *fmt, ...);
+    extern void Vita_DiscSay(char *out, int size);
+    const Bt4BaseFile *f = &kBt4BaseFiles[file];
+    uint32_t crc;
+
+    if (size != f->size[0] && size != f->size[1]) {
+        char where[300];
+        Vita_DiscSay(where, sizeof(where));
+        Vita_Log("vita: %s/%s is %u bytes: not Team BT4's B14 Rev2 (%u English, %u Spanish)\n", disc, name, (unsigned)size,
+                 f->size[1], f->size[0]);
+        Vita_Fatal("This is not Team BT4's B14 Rev2. Found:\n  %s\n  %s of %u bytes (B14 Rev2's: %u English,\n  %u Spanish).\n\n"
+                   "This port needs Team BT4's B14 Rev2 (English or Spanish).\n"
+                   "Other builds (B13, older revisions) are not supported.",
+                   where, name, (unsigned)size, f->size[1], f->size[0]);
+    }
+    crc = crc32_of(data, size);
+    if (crc != f->crc[english]) {
+        Vita_Log("vita: %s/%s: CRC-32 %08x, not B14 Rev2 %s's %08x (another build, or a changed file)\n", disc, name, (unsigned)crc,
+                 english ? "English" : "Spanish", f->crc[english]);
+    } else {
+        Vita_Log("vita: %s: B14 Rev2 %s's (CRC-32 %08x)\n", name, english ? "English" : "Spanish", (unsigned)crc);
+    }
+}
+#endif
+
 /* Copies the values of the game's data tables in from <disc>/SLUS_216.78 (its loaded sections as one image from
    0x100000) and <disc>/BIN/DBZP.BIN, and checks them against the checksum of port/data: the same step as
    Port_LoadGameData of the PC build, with the destinations as addresses the Vita's loader has already placed. */
@@ -115,6 +163,28 @@ void Vita_LoadGameData(const char *disc) {
     if (elf == NULL || elfSize < 0x34 || memcmp(elf, "\177ELF", 4) != 0) {
         Vita_Fatal("the game's program was not found:\n  %s\nCopy the files of your own disc there (see the README).", path);
     }
+#ifdef PORT_VITA_BT4
+    {   /* which release of BT4 B14 Rev2: the Spanish one's program is 8 bytes shorter (bt4_online_compat.h); the game's
+           texts that depend on it (Port_GameProfileEnglish, vita_bt4.c) follow. Another build stops here. */
+        extern int gVitaBt4English;
+        extern void Vita_Log(const char *fmt, ...);
+        gVitaBt4English = elfSize == kBt4BaseFiles[0].size[1];
+        bt4_build_check(0, disc, PORT_VITA_ELF, elf, elfSize, gVitaBt4English);
+        Vita_Log("vita: BT4 B14 Rev2, the %s release (" PORT_VITA_ELF " of %u bytes)\n", gVitaBt4English ? "English" : "Spanish",
+                 (unsigned)elfSize);
+        snprintf(path, sizeof(path), "%s/BIN/DBZ4.BIN", disc);
+        {
+            size_t n = 0;
+            uint8_t *idx = read_file(path, &n);
+            if (idx == NULL) {
+                Vita_Fatal("BT4's archive index was not found:\n  %s\n\nThis port needs Team BT4's B14 Rev2 (English or Spanish).\n"
+                           "Other builds (B13, older revisions) are not supported.", path);
+            }
+            bt4_build_check(1, disc, "BIN/DBZ4.BIN", idx, n, gVitaBt4English);
+            free(idx);
+        }
+    }
+#endif
     {
         uint32_t shoff, sh[6];
         uint16_t shentsize, shnum;
@@ -135,21 +205,17 @@ void Vita_LoadGameData(const char *disc) {
         }
         free(elf);
     }
-#ifdef PORT_VITA_BT4
-    {   /* which release of BT4 B14 Rev2: the Spanish one's program is 8 bytes shorter (bt4_online_compat.h); the game's
-           texts that depend on it (Port_GameProfileEnglish, vita_bt4.c) follow */
-        extern int gVitaBt4English;
-        extern void Vita_Log(const char *fmt, ...);
-        gVitaBt4English = elfSize != 2115688u;
-        Vita_Log("vita: BT4 B14 Rev2, the %s release (" PORT_VITA_ELF " of %u bytes)\n", gVitaBt4English ? "English" : "Spanish",
-                 (unsigned)elfSize);
-    }
-#endif
     snprintf(path, sizeof(path), "%s/BIN/DBZP.BIN", disc);
     src[1] = read_file(path, &srcSize[1]);
     if (src[1] == NULL) {
         Vita_Fatal("the game's menu program was not found:\n  %s", path);
     }
+#ifdef PORT_VITA_BT4
+    {
+        extern int gVitaBt4English;
+        bt4_build_check(2, disc, "BIN/DBZP.BIN", src[1], srcSize[1], gVitaBt4English);
+    }
+#endif
     for (i = 0; i < gPortDatCount; i++) {
         const PortDatRun *r = &gPortDatRuns[i];
         const uint8_t *from;
