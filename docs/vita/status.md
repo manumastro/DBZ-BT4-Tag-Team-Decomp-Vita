@@ -61,9 +61,9 @@ Not run yet:
   log;
 - **Vita3K**: stage 1 of [compare.md](compare.md) was skipped, the console runs went straight to stage 2;
 - the PS2 matching build and the PC port, for byte identity (the guards were checked by reading);
-- the heavy effects' test fight (`demoult`, [development.md](development.md)): the Super Spirit Bomb and the Dragon
-  Fist used again and again in a 1 vs 1 demo duel, for `fxlowmin` in a fight bound by the graphics chip; built, not
-  run.
+- the heavy effects' test fight in 2 vs 2 (`demoult` with `BT4_TAG_ACTOR_TEST=4`, `demochara3` / `demochara4`,
+  `demoultp=4`, [development.md](development.md)): the Super Spirit Bomb and the Dragon Fist on both teams, every
+  fighter in turn; built, not run (the 1 vs 1 one was run: the Results table).
 
 ## How to test on the console
 
