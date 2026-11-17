@@ -464,6 +464,15 @@ s32 BtlMember_Damage(BtlMemberChr *chr, s32 amount, s32 flags) {
     } else {
         health = g->health;
     }
+#ifdef PORT_VITA
+    {   /* (Vita, the development build's test of the heavy effects, bt3.txt demoult: no knock-out ends it, as in
+           modes 5 and 6; port/vita/vita_main.c) */
+        extern int gVitaNoKo;
+        if (gVitaNoKo && health > 0 && amount > health - 1) {
+            amount = health - 1;
+        }
+    }
+#endif
     if (flags & BTL_DMG_DRAIN) {
         if (amount > health - 1) {
             amount = health - 1;

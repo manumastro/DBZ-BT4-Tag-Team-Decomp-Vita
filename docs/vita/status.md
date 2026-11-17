@@ -60,7 +60,10 @@ Not run yet:
 - **the release build** (BTTD00010): the same code with the defaults, without the development build's switches and
   log;
 - **Vita3K**: stage 1 of [compare.md](compare.md) was skipped, the console runs went straight to stage 2;
-- the PS2 matching build and the PC port, for byte identity (the guards were checked by reading).
+- the PS2 matching build and the PC port, for byte identity (the guards were checked by reading);
+- the heavy effects' test fight (`demoult`, [development.md](development.md)): the Super Spirit Bomb and the Dragon
+  Fist used again and again in a 1 vs 1 demo duel, for `fxlowmin` in a fight bound by the graphics chip; built, not
+  run.
 
 ## How to test on the console
 

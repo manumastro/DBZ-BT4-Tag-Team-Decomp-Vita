@@ -418,6 +418,232 @@ static void summary(int final) {
     }
 }
 
+/* (src/battle/btl_char_member.c BtlMember_Damage) 1: no fighter is knocked out, a blow leaves at least 1 of health, as
+   in the game's modes 5 and 6. Set by the development build's demoult (below); 0 otherwise, in the release too. */
+int gVitaNoKo;
+
+#ifndef PORT_VITA_RELEASE
+/* A fighter's technique name n (0, 1 the Blast 1 skills; 2, 3 the Blast 2 moves; 4 the Ultimate) from the
+   character's command list, the text the HUD shows when the move is used (src/battle/hud_c_b.c: the battle
+   object's script at +0xBC handed to BtlMenu_SetScript2, BtlText_FindEntry), as UTF-8 for the log. */
+static void tech_name(void *chr, int n, char *out, int size) {
+    extern void *BtlChar_GetObj(void *chr);
+    extern unsigned short *BtlMenu_GetScript2(void);
+    extern void BtlMenu_SetScript2(unsigned short *text);
+    extern unsigned short *BtlText_FindEntry(int n);
+    unsigned char *obj = BtlChar_GetObj(chr);
+    unsigned short *keep = BtlMenu_GetScript2(), *s;
+    int k = 0;
+
+    out[0] = '\0';
+    if (obj == NULL || *(unsigned short **)(obj + 0xBC) == NULL) {
+        return;
+    }
+    BtlMenu_SetScript2(*(unsigned short **)(obj + 0xBC));
+    s = BtlText_FindEntry(n);
+    BtlMenu_SetScript2(keep);
+    for (; s != NULL && *s != 0 && *s != '\n' && *s != '\r' && k < size - 4; s++) {
+        unsigned c = *s;
+        if (c >= 0xE000 && c < 0xF900) { /* (the font's own marks) */
+            continue;
+        }
+        if (c < 0x80) {
+            out[k++] = (char)c;
+        } else if (c < 0x800) {
+            out[k++] = (char)(0xC0 | (c >> 6));
+            out[k++] = (char)(0x80 | (c & 0x3F));
+        } else {
+            out[k++] = (char)(0xE0 | (c >> 12));
+            out[k++] = (char)(0x80 | ((c >> 6) & 0x3F));
+            out[k++] = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    out[k] = '\0';
+}
+
+/* Tests: the heavy effects again and again (bt3.txt demoult=<slot>, with mode=demo and demoduel=1). Every
+   demoultsec seconds of the fight's own time (its blanks, the same game frame in every run) the fighter demoultp
+   (0, 1, or 2 for both in turn) uses its technique of that slot (2, 3 a Blast 2; 4 the Ultimate; 0, 1 a Blast 1)
+   through the story scripts' own command (BtlCtrl_UseTechnique, src/battle/btl_capi_b.c: the ki, the blast stock
+   and for the Ultimate the MAX power mode given; the move goes when the fighter is free), with its opponent made
+   to stand facing it first (demostand=1, default: BtlCtrl_ForceReaction, as the scripts' command 29 does; the stand
+   ends at the blow). Both fighters' health is set to demohp percent (default 100) before each use; below 50 a
+   technique that destroys the stage does it, as when it finishes a fight (the demo duel's rule allows it; once a
+   fight: the destroyed stage has no further form). No knock-out ends the test (gVitaNoKo). The log: each fighter's
+   five techniques by name, the stage's destroyed form, each use (asked for, started, over) in ms of the run. */
+static void demo_heavy(unsigned state, unsigned vblanks, unsigned long long t) {
+    extern void *BtlChar_Get(int player);
+    extern int BtlChar_GetCount(void);
+    extern int *BtlMember_GetActiveGauge(void *chr);
+    extern int BtlCharApi_GetChara(int objId);
+    extern int BtlSuper_GetId(void *chr, int slot);
+    extern int BtlSuper_GetType(void *chr, int slot);
+    extern int BtlSuper_GetKiCost(void *chr, int slot);
+    extern int BtlSkill_GetId(void *chr, int slot);
+    extern int BtlAct_GetCurrent(void *chr);
+    extern int BtlAct_GetCurrentClass(void *chr);
+    extern void BtlAct_Request(void *chr, int id);
+    extern void BtlChar_ClearFlag(void *chr, unsigned n);
+    extern int BtlOpp_GetPlayer(void *chr);
+    extern int BtlCtrl_UseTechnique(int player, int kind);
+    extern int BtlCtrl_ForceReaction(int player, unsigned kind);
+    extern int BtlCtrl_CanAct(int player);
+    extern int Battle_GetStage(void);
+    extern int Battle_GetRuleUnk10(void);
+    extern int BtlStage_GetChangeTarget(void);
+    static int slot = -2, who, sec, hp, stand, turn, pending = -1, started, uses, lastStage = -1, logged[8];
+    static unsigned lastState = 0xFFFFFFFFu, nextVb, issuedVb, startVb, waitVb;
+    unsigned ms = (unsigned)((t - sStart) / 1000);
+    int count, p, i;
+    void *chr;
+
+    if (slot == -2) {
+        const char *e = getenv("BT3_DEMO_ULT");
+        slot = e != NULL && *e != '\0' ? atoi(e) : -1;
+        if (slot > 4) {
+            slot = -1;
+        }
+        who = getenv("BT3_DEMO_ULTP") != NULL ? atoi(getenv("BT3_DEMO_ULTP")) : 0;
+        sec = getenv("BT3_DEMO_ULTSEC") != NULL ? atoi(getenv("BT3_DEMO_ULTSEC")) : 15;
+        hp = getenv("BT3_DEMO_HP") != NULL ? atoi(getenv("BT3_DEMO_HP")) : 100;
+        stand = getenv("BT3_DEMO_STAND") != NULL ? atoi(getenv("BT3_DEMO_STAND")) : 1;
+        if (sec < 3) {
+            sec = 3;
+        }
+        gVitaNoKo = slot >= 0;
+        if (slot >= 0) {
+            logf_("vita: heavy: technique slot %d of fighter %s every %d s of the fight, health %d%% before each, the opponent %s\n", slot,
+                  who == 2 ? "0 and 1 in turn" : who == 1 ? "1" : "0", sec, hp, stand ? "made to stand" : "left to the computer");
+        }
+    }
+    if (slot < 0 || sMode != 1) {
+        return;
+    }
+    if (state != 3) {
+        lastState = state;
+        return;
+    }
+    count = BtlChar_GetCount();
+    if (lastState != 3) { /* the fight starts (again, after a pause or a stage change) */
+        if (uses == 0 && pending < 0) {
+            nextVb = vblanks + 5 * 60; /* (the first use 5 s in) */
+        }
+        if (lastStage < 0) {
+            lastStage = Battle_GetStage();
+            logf_("vita: heavy: stage %d, its destroyed form %d (-1: none), the rule lets a stage be destroyed: %d\n", lastStage,
+                  BtlStage_GetChangeTarget(), Battle_GetRuleUnk10());
+        }
+    }
+    lastState = state;
+    if (Battle_GetStage() != lastStage) {
+        logf_("vita: heavy: the stage is now %d (was %d) at %u ms\n", Battle_GetStage(), lastStage, ms);
+        lastStage = Battle_GetStage();
+    }
+    for (p = 0; p < count && p < 8; p++) { /* each fighter's techniques, once for each character it is */
+        int c;
+        chr = BtlChar_Get(p);
+        c = chr != NULL ? BtlCharApi_GetChara(p) : -1;
+        if (chr != NULL && c != logged[p] - 1) {
+            char n[5][96];
+            for (i = 0; i < 5; i++) {
+                tech_name(chr, i, n[i], sizeof(n[i]));
+            }
+            logf_("vita: heavy: fighter %d (character %d): 0 \"%s\" (skill %d), 1 \"%s\" (skill %d), 2 \"%s\" (technique %d, kind %d, ki %d), "
+                  "3 \"%s\" (technique %d, kind %d, ki %d), 4 \"%s\" (technique %d, kind %d, ki %d)\n", p, c, n[0], BtlSkill_GetId(chr, 0), n[1],
+                  BtlSkill_GetId(chr, 1), n[2], BtlSuper_GetId(chr, 2), BtlSuper_GetType(chr, 2), BtlSuper_GetKiCost(chr, 2), n[3],
+                  BtlSuper_GetId(chr, 3), BtlSuper_GetType(chr, 3), BtlSuper_GetKiCost(chr, 3), n[4], BtlSuper_GetId(chr, 4),
+                  BtlSuper_GetType(chr, 4), BtlSuper_GetKiCost(chr, 4));
+            logged[p] = c + 1;
+        }
+    }
+    if (pending >= 0) { /* the use asked for: started, over, or not taken */
+        chr = BtlChar_Get(pending);
+        if (chr == NULL) {
+            pending = -1;
+            return;
+        }
+        if (!started && BtlAct_GetCurrentClass(chr) == slot) {
+            started = 1;
+            startVb = vblanks;
+            logf_("vita: heavy: use %d: fighter %d's technique started (action 0x%x) at %u ms, %u blanks after it was asked for\n", uses, pending,
+                  BtlAct_GetCurrent(chr), ms, vblanks - issuedVb);
+        } else if (started && BtlAct_GetCurrentClass(chr) != slot) {
+            logf_("vita: heavy: use %d: over at %u ms (%u.%u s of the technique)\n", uses, ms, (vblanks - startVb) / 60, (vblanks - startVb) % 60 / 6);
+            pending = -1;
+        } else if (!started && vblanks - issuedVb > 4 * 60) { /* not taken in 4 s: the forced input given up (the fighter's
+                                                                  own input was held off until then) */
+            BtlChar_ClearFlag(chr, 0x120 + (unsigned)slot);
+            BtlChar_ClearFlag(chr, 0x11E);
+            BtlChar_ClearFlag(chr, 0x11F);
+            logf_("vita: heavy: use %d: fighter %d's technique not taken in 4 s (action 0x%x), given up at %u ms\n", uses, pending, BtlAct_GetCurrent(chr), ms);
+            pending = -1;
+        }
+        return;
+    }
+    if ((int)(vblanks - nextVb) < 0) {
+        return;
+    }
+    p = who == 2 ? (turn & 1) : who;
+    chr = p < count ? BtlChar_Get(p) : NULL;
+    if (chr == NULL) {
+        return;
+    }
+    if (!BtlCtrl_CanAct(p)) { /* (busy: tried again at the next blank) */
+        int a = BtlAct_GetCurrent(chr);
+        if (waitVb == 0) {
+            waitVb = vblanks;
+        } else if (a >= 7 && a <= 10 && vblanks - waitVb > 2 * 60) {
+            /* made to stand by a use before and not hit: the stand ended as BtlAct_WaitHandler ends it */
+            logf_("vita: heavy: fighter %d still made to stand (action 0x%x) at %u ms: its stand ended\n", p, a, ms);
+            BtlAct_Request(chr, 0xB);
+            waitVb = vblanks;
+        } else if (vblanks - waitVb > 10 * 60) {
+            logf_("vita: heavy: fighter %d has not been free for 10 s (action 0x%x) at %u ms\n", p, a, ms);
+            waitVb = vblanks;
+        }
+        return;
+    }
+    waitVb = 0;
+    {
+        int opp = BtlOpp_GetPlayer(chr), *g;
+        void *oc = opp >= 0 && opp < count ? BtlChar_Get(opp) : NULL;
+        if (hp > 0) {
+            g = BtlMember_GetActiveGauge(chr); /* (src/battle/btl_char_member.h BtlMemberGauge: health, healthMax) */
+            g[0] = (int)((long long)g[1] * (hp > 100 ? 100 : hp) / 100);
+            if (g[0] < 1) {
+                g[0] = 1;
+            }
+            if (oc != NULL) {
+                g = BtlMember_GetActiveGauge(oc);
+                g[0] = (int)((long long)g[1] * (hp > 100 ? 100 : hp) / 100);
+                if (g[0] < 1) {
+                    g[0] = 1;
+                }
+            }
+        }
+        if (slot >= 2) { /* the technique's lock counter (src/battle/btl_act_j.c BtlAct_CanUseTechnique: a flag-0x2000 move
+                            is refused while it is above 0, outside the story mode; include/battle/btl_act_j.h, gauge
+                            + 0x4C + 4 x slot) */
+            BtlMember_GetActiveGauge(chr)[0x4C / 4 + slot] = 0;
+        }
+        if (stand && oc != NULL) {
+            BtlCtrl_ForceReaction(opp, 0);
+        }
+        uses++;
+        i = BtlCtrl_UseTechnique(p, slot);
+        logf_("vita: heavy: use %d: fighter %d (character %d) asked for its technique %d at %u ms (the fight's blank %u)%s, opponent %d\n", uses, p,
+              BtlCharApi_GetChara(p), slot, ms, vblanks, i ? "" : ", refused", opp);
+        if (i) {
+            pending = p;
+            started = 0;
+            issuedVb = vblanks;
+        }
+        turn++;
+        nextVb = vblanks + (unsigned)sec * 60u;
+    }
+}
+#endif
+
 /* Called by Port_VBlank (port/src/plat_stub.c) at every vertical blank of the game: twice a second it redraws
    the status. The game does not wait for anything in this build, so blanks per second IS the game's speed. */
 static unsigned long long sStallEndT; /* (the game's thread: when it last came out of a blank's wait, and the console's count then) */
@@ -609,6 +835,7 @@ void Vita_VBlank(unsigned vblanks) {
             }
         }
     }
+    demo_heavy(state, vblanks, t); /* (bt3.txt demoult) */
 #endif
     {   /* the soak's fight ended after sSoakSec seconds of fighting (state 3) */
         static unsigned long long sSoakT;
@@ -1923,9 +2150,12 @@ static void read_settings(void) {
             extern int gVitaDump;
             gVitaDump = atoi(eq);
         } else if (strcmp(line, "demostage") == 0 || strcmp(line, "demochara1") == 0 || strcmp(line, "demochara2") == 0 ||
-                   strcmp(line, "demoduel") == 0 || strcmp(line, "demoxform") == 0 || strcmp(line, "demosplit") == 0) {
+                   strcmp(line, "demoduel") == 0 || strcmp(line, "demoxform") == 0 || strcmp(line, "demosplit") == 0 ||
+                   strcmp(line, "demoult") == 0 || strcmp(line, "demoultp") == 0 || strcmp(line, "demoultsec") == 0 ||
+                   strcmp(line, "demohp") == 0 || strcmp(line, "demostand") == 0) {
             /* the test fight: stage, fighters, a duel with intros, the screen split for two players (a second
-               controller that nobody holds: the game wants one there) */
+               controller that nobody holds: the game wants one there); demoult...: a technique used again and again
+               (demo_heavy) */
             char env[32];
             snprintf(env, sizeof(env), "BT3_DEMO_%s", line + 4);
             for (char *c = env; *c; c++) {
