@@ -848,8 +848,16 @@ static s32 BtlCam_PortFreeCamera(s32 selected) {
     }
     previous=sPortFreeCamLive?sPortFreeCamPos:native->pos;
     tanY=224.f/gBtlCam->layouts[0].screenDist;
+#ifdef PORT_VITA
+    {   /* (the Vita: the screen's own shape, 960 x 544 or 4:3 with wide=0; the PC's saved aspect_milli is its window's) */
+        extern int Port_AspectMilli(void);
+        if(!PortSpectator_Camera((f32 *)&native->pos,(f32 *)&native->rot,(f32 *)targets,count,
+            tanY,Port_AspectMilli()/1000.f,(f32 *)&eye,(f32 *)&rotation,&zoom))return 0;
+    }
+#else
     if(!PortSpectator_Camera((f32 *)&native->pos,(f32 *)&native->rot,(f32 *)targets,count,
         tanY,Port_Setting("aspect_milli",1333)/1000.f,(f32 *)&eye,(f32 *)&rotation,&zoom))return 0;
+#endif
     if(sPortFreeCamLive)SpecCamera_AvoidStage(&eye,&previous);
     PortSpectator_ResolveEye((f32 *)&eye);
     sPortFreeCam.view=gBtlCam->layouts[0];sPortFreeCamPos=eye;sPortFreeCamRot=rotation;

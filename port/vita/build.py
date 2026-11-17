@@ -236,7 +236,10 @@ def port_sources():
             # BT4decomp's own screens (its Tag Team menus, the Tag Team fight's words): their TrueType lines and the main
             # menu's lettering as on PC, the fight's names over the target, and their pictures for the Vita's renderer
             (S / "gs/menu_text.c", "gs"), (S / "gs/tbo_text.c", "gs"), (S / "gs/menu_labels.c", "gs"),
-            (S / "fight_panels.c", "ee"), (V / "vita_tbo.c", "hard")]
+            (S / "fight_panels.c", "ee"), (V / "vita_tbo.c", "hard"),
+            # BT4decomp's free / spectator camera and its screens' Spanish, its own files built unchanged
+            # (gs/spectator_camera.c, gs/online_language.c; docs/vita/tagteam.md)
+            (V / "vita_spectator.c", "gs"), (V / "vita_onlinelang.c", "gs")]
     return out
 
 

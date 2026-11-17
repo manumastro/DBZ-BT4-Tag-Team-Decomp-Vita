@@ -44,9 +44,19 @@ each line of letters as a GS sprite whose TEX0 has the reserved format `TBO_PSM`
   pictures), `port/src/gs/menu_text.c` (stb_truetype, the fonts of `fonts.tsv`) and `port/src/gs/menu_labels.c` (the
   main menu's "Tag Team" put together from the disc's own letters, `bt4_main_lettering.inc`) are built for the Vita
   (`port/vita/build.py`). The fonts are in the package (`fonts/`, from `port/third_party/fonts`); the list of the
-  menus' labels made from the disc (the PC's "Menu font" setting, its translated menus) is off: `Vita_GsGetenv`
-  answers `BT3_MENU_FONT` empty. The PC's translations (`menu_translation.c`) are not there: the screens are in
-  English, as written, on both discs.
+  menus' labels made from the disc (the PC's "Menu font" setting: the game's own menus' labels redrawn in TrueType,
+  "Original" by default) is off: `Vita_GsGetenv` answers `BT3_MENU_FONT` empty.
+- **The language (`taglang=1`, the default; branch `wip/tagpc`)**: as the PC. BT4decomp's screens are written in
+  English, and its `port/src/gs/online_language.c` (`PortOnline_Text`, called by `tbo_text.c` for every line, by the
+  HUD, the character select's lines and the main menu's Tag Team description) gives each line in Spanish when the disc
+  is the Spanish B14 Rev2 (`Port_GameProfileEnglish`). It is built unchanged for the Vita
+  (`port/vita/vita_onlinelang.c`), so the Spanish disc (the developer's, `ux0:data/bt4/es`) shows the screens in
+  Spanish, the English disc in English. The PC chooses no differently: its first-start picker
+  (`src/menu/port_language.c`, `port/src/gs/game_profile.c`) chooses the disc and saves the menus' catalog as "en"
+  ("the disc's native text; do not overlay a translation pack"); the catalogs of `menu_translation.c`
+  (`port/translations`) are used only by its Brazilian Portuguese pack (a third profile over the English disc, a PC
+  download), which the Vita does not have. The results' lines and the HUD editor's were already in the disc's
+  language (`Port_GameProfileEnglish` read directly).
 - **The pictures and lines as textures: `port/vita/vita_tbo.c`**, the Vita's `tbo_texture`: `tbo/ui/<name>.png`
   (libpng; `port/tbo/ui`, in the package as `tbo/ui/`) with the PC's touches (the window's teal, the logo's halo, the
   emblem cut from the logo), a line's picture from `TboText_Pixels` made again when its line changes. The renderer
@@ -68,10 +78,18 @@ each line of letters as a GS sprite whose TEX0 has the reserved format `TBO_PSM`
   the PC's side panels. On one screen the PC and the Vita both show the allies' column.
 - **Camera mode**: the special moves' cinematic cameras (on / off, `Port_SpecialMoveCameras`, now as the PC's
   `mods_game.c`: saved, read by `src/battle/btl_cam.c`), the target selection (below), joint attacks and fusions
-  work; the free camera's rows (camera mode, fighter, speed, zoom, reset) are shown but do nothing: the PC's
-  spectator camera (`port/src/gs/spectator_camera.c`) is not built for the Vita (`PortSpectator_*` in
-  `port/vita/vita_bt4.c` answer as the game's own camera). Spectator Mode (all CPUs) watches with the game's own
-  camera.
+  work; so does the free / spectator camera (`tagcam=1`, the default; branch `wip/tagpc`): upstream's
+  `port/src/gs/spectator_camera.c` built unchanged (`port/vita/vita_spectator.c`). Its rows: Camera mode (Game camera,
+  Free camera, Follow fighter, Fight overview), Fighter (the one Follow fighter follows, 1-10), Camera speed (25-400%),
+  Camera zoom (100-300%), Reset camera; saved as the PC saves them. The fight's camera asks it every step
+  (`src/battle/btl_cam.c` `BtlCam_PortFreeCamera`, under `PORT_VITA` with the Vita's screen shape instead of the PC's
+  saved window shape) and draws from there, the game's own camera untouched. As on the PC, while a camera mode other
+  than Game camera is chosen, player 1's pad is the camera's in every fight (START and SELECT still reach the game, the
+  pause menu gives the pad back): left stick moves (Free camera) or turns and comes closer / goes back (Follow fighter,
+  Fight overview), right stick turns, R / L up and down, R2 / L2 zoom while held (SELECT + R / L, or the touch
+  panels), L3 (the touch panels) three times as fast (`port/vita/vita_gfx.c` `PortInput_Spectator`, the pad filtered
+  in `Port_PadRead` as `gs_input.c` does). It is meant for Spectator Mode (all CPUs), where the game's own camera
+  is used with Game camera. `tagcam=0`: the game's camera always, as before.
 - **Target selection** (Camera mode > Target selection: L3, right stick, D-pad): the PC's pad code
   (`gs_input.c`) puts the method and the direction in byte 17 of the pad's report, which `BtlInput_Sample` reads; the
   Vita's pad code does the same (`port/vita/vita_gfx.c` `tag_target`, `PortInput_TagTargetMethod`), saved as the PC
@@ -80,8 +98,8 @@ each line of letters as a GS sprite whose TEX0 has the reserved format `TBO_PSM`
   fight reads it (`TagBattle_ConfigureLocal`: `tag_combat<team><slot>`; `Port_TagOption`: joint attacks, fusions,
   revival; `TagBattle_SetLocalHealth`: per-fighter health). `port/vita/vita_tag.c` answers those calls as
   `tag_team_net.c`'s local room does.
-- **Not the PC's**: the free / spectator camera (above), the film behind the screens (`tbo/ui/tag_ui_*.pss`, 30 MB; the Vita shows its poster, the
-  picture the PC shows until the film's first frame), the translated screens, the online section, the Lua mods'
+- **Not the PC's**: the film behind the screens (`tbo/ui/tag_ui_*.pss`, 30 MB; the Vita shows its poster, the
+  picture the PC shows until the film's first frame), the Brazilian Portuguese pack, the online section, the Lua mods'
   split-screen presentation (`Mods_SplitScreen`; the two-player modes' own split is the game's and is there), the
   Lua Modern HUD (BT4decomp's bundled mod: it would need the Lua runtime and the mods' code, `port/src/gs/mods*.c`,
   `port/third_party/lua`, built for the Vita, and their drawing calls answered by the Vita's renderer), touch in
@@ -104,6 +122,13 @@ The pictures and fonts are in the package only: install the `.vpk` (vita-agent-u
 | 3 | `tagui_menu_off.txt` (`tboui=0`) | The same screens not drawn (as before): that the setting turns them off |
 | 4 | `tagui_2v2_on.txt` against `tagui_2v2_off.txt` | The 2 vs 2 demo fight with and without the HUD's words: pictures a second (`perfsum.py --ab`), the drawing thread's ms, the lines made (`tboui` line) |
 | 5 | `tagui_5v5.txt` (`BT4_TAG_ACTOR_TEST=10`) | 5 vs 5 with the HUD's words: the newlib heap's peak, vitaGL's free memory, the texture table, the speed (as step 0 below) |
+
+The free camera and the language (branch `wip/tagpc`, to do; the `.vpk` installed as above, the Spanish disc):
+
+| Run | Settings | What it shows |
+|---|---|---|
+| 6 | `tagui_menu.txt` | The Tag Team screens in Spanish ("Combate local", "Modo de cámara", the help lines under each row), accents drawn; then `taglang=0` added: in English, as before. The main menu (`tagui_main.txt`, START past the film): the Tag Team description in Spanish in the box |
+| 7 | `tagui_menu.txt`, by hand or with input | R1 to Camera mode; Camera mode row to "Fight overview" ("Vista general") (CROSS or right); L1 back to Local Battle, its first row to Spectator Mode, START, the fighters chosen, the fight: the camera holds all four fighters in view and moves on its own; right stick turns, SELECT + R / L zoom (the zoom row's value follows). Then "Free camera": left stick flies, R / L up / down, the fighters' pad does nothing but START (pause gives the pad back). "Follow fighter" with Fighter 2: follows the second fighter. Reset camera: back to Game camera. `tagcam=0`: the game's camera whatever the row says. The log: no watchdog, the speed as with Game camera |
 
 By hand (a person with the console): the screens' look against the PC's (the backdrop, the window's corners, the
 bars' round ends, the letters' outline, sharpness), every option changed and seen in the fight that follows (time,
@@ -163,7 +188,10 @@ Tag Team runs at 100% on the Vita (`Port_TagRenderActive` 0 there); 114% matters
   exit) > Rematch > the pause's "back to the main menu". No error.
 - **Not yet**: the main menu entry has no label (the PC draws "Tenkaichi Budokai Online" in TrueType) and the
   online mode's description under it; the results' third choice still reads "Tenkaichi Budokai Online"; the HUD's
-  and the selection's words are not drawn (TrueType); 3 vs 3 and up not run; a whole match played by hand.
+  and the selection's words are not drawn (TrueType); 3 vs 3 and up not run; a whole match played by hand. (Since
+  then: the entry, its description and the words are upstream's, 2026-11-17 `wip/tagui`; the results' third choice is
+  "Back to Tag Team" / "Volver a Tag Team" from the Tag Team screens as on the PC, and under `PORT_VITA` also from the
+  earlier text setup, `tagteam=2`, which has no Tenkaichi Budokai Online to go back to, `wip/tagpc`.)
 
 ## Speed-ups for 2 vs 2 (2026-11-15)
 
