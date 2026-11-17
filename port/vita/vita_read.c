@@ -18,6 +18,10 @@ static SceUID sRdMutex = -1, sRdSema = -1;
 static int sRdOn = -1;
 static VitaReadJob *sRdHead, *sRdTail;
 unsigned gVitaRdJobs, gVitaRdBytes; /* (for the log) */
+extern int gVitaHitch; /* (bt3.txt hitchlog, vita_hitch.c) */
+extern void Vita_HitchEv(unsigned kind, unsigned arg, unsigned arg2, unsigned long long t0, unsigned long long dur);
+extern void Vita_WatchThread(int slot, int id, const char *name);
+extern unsigned long long sceKernelGetProcessTimeWide(void);
 
 static int rd_thread(SceSize args, void *argp) {
     (void)args; (void)argp;
@@ -39,7 +43,13 @@ static int rd_thread(SceSize args, void *argp) {
         if (j == NULL) {
             continue;
         }
-        got = __atomic_load_n(&j->cancel, __ATOMIC_ACQUIRE) ? 0 : j->len != 0 ? sceIoPread(j->fd, j->buf, j->len, j->off) : 0;
+        {
+            unsigned long long t0 = gVitaHitch > 0 ? sceKernelGetProcessTimeWide() : 0;
+            got = __atomic_load_n(&j->cancel, __ATOMIC_ACQUIRE) ? 0 : j->len != 0 ? sceIoPread(j->fd, j->buf, j->len, j->off) : 0;
+            if (t0 != 0 && sceKernelGetProcessTimeWide() - t0 >= 2000) {
+                Vita_HitchEv(2, j->len >> 10, 0, t0, sceKernelGetProcessTimeWide() - t0); /* (hitchlog: a read of the card that took long, KB) */
+            }
+        }
         gVitaRdJobs++;
         gVitaRdBytes += got > 0 ? (unsigned)got : 0u;
         again = !__atomic_load_n(&j->cancel, __ATOMIC_ACQUIRE) && j->done != NULL ? j->done(j, got) : 0;
@@ -74,11 +84,12 @@ int Vita_ReadOn(void) {
         sRdSema = sceKernelCreateSema("bt3_rdq", 0, 0, 1 << 20, NULL);
         /* above the game's thread (160), below the sound's (100): it mostly waits for the card; on the first two
            cores (the third's drawing thread is the one short of time) */
-        th = sRdMutex >= 0 && sRdSema >= 0 ? sceKernelCreateThread("bt3_read", rd_thread, 140, 0x4000, 0, 0x00030000, NULL) : -1;
+        th = sRdMutex >= 0 && sRdSema >= 0 ? sceKernelCreateThread("bt3_read", rd_thread, 140, 0x10000, 0, 0x00030000, NULL) : -1;
         if (th < 0 || sceKernelStartThread(th, 0, NULL) < 0) {
             Vita_Log("vita: no reading thread (%08x): reads on the caller's thread\n", (unsigned)th);
             return 0;
         }
+        Vita_WatchThread(8, th, "read");
         sRdOn = 1;
     }
     return sRdOn;

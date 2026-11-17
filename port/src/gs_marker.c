@@ -661,6 +661,7 @@ static void es_gen_model(int ranged) {
         sEsGenM = 1;
     }
     gVitaEsGens[1]++;
+    { extern void Vita_HitchMark(unsigned kind, unsigned arg); Vita_HitchMark(21, ranged ? 1u : 0u); } /* (hitchlog) */
     gVitaBrBind[ranged && sBrN >= 0 ? 0 : 1]++;
     GsFE_EsBindNote(sEsGenM, ranged ? sBrN : -1, sBrLo, sBrHi); /* (before any list carries the new generation) */
     sBrN = 0;

@@ -30,7 +30,17 @@
 #include "spatial_audio.h"
 #ifdef PORT_VITA
 #include <psp2/io/fcntl.h>
+#include <psp2/kernel/processmgr.h>
 #include "vita_read.h"
+extern int gVitaAbSide, gVitaHitch; /* the soak's A/B side, bt3.txt hitchlog */
+int gVitaAdxAsync; /* bt3.txt adxasync (vita_main.c): 0 off, 1 on, 2 in the soak's B battles */
+extern void Vita_HitchEv(unsigned kind, unsigned arg, unsigned arg2, unsigned long long t0, unsigned long long dur);
+/* for the log: streams started with the first piece read by the game's thread (count, microseconds it took, the longest)
+   and with it read on the reading thread (count, microseconds from the start to the stream bound, the longest) */
+unsigned gVitaAdxN[6];
+static int adx_async_on(void) {
+    return gVitaAdxAsync == 2 ? gVitaAbSide == 1 : gVitaAdxAsync != 0;
+}
 #endif
 #include "game_profile.h"
 
@@ -74,6 +84,8 @@ typedef struct Player {
     VitaReadJob job;
     volatile uint32_t loaded;
     int own, waiting;
+    int pending;                 /* (adxasync) the first piece is being read: the stream is made when it is in (adx_piece) */
+    unsigned long long t0;       /* (adxasync) when the game's thread asked for the stream, us */
 #endif
 } Player;
 
@@ -564,6 +576,9 @@ static void stop(Player *p) {
     if (p->stream != NULL && p - sPlayers >= 4) {
         ADX_LOG("adx: player %d stopped at %.1f s of %.1f, status %d (frame %u)\n", (int)(p - sPlayers), (double)p->pos / (double)p->rate, (double)p->total / (double)p->rate, p->stat, gGsFrame);
     }
+#ifdef PORT_VITA
+    Vita_ReadCancel(&p->job); /* (adxasync: a stream being begun on the reading thread is begun before it is destroyed, and its file not freed under it) */
+#endif
     if (p->stream != NULL) {
         SDL_DestroyAudioStream(p->stream); /* waits for a running callback */
         p->stream = NULL;
@@ -571,6 +586,7 @@ static void stop(Player *p) {
     PortPcm_Close(p->lossless);p->lossless=NULL;
 #ifdef PORT_VITA
     Vita_ReadCancel(&p->job); /* (the reading thread done with it) */
+    p->pending = 0;
     if (p->own) {
         sceIoClose(p->job.fd);
         p->own = 0;
@@ -583,16 +599,37 @@ static void stop(Player *p) {
 
 #ifdef PORT_VITA
 #define ADX_PIECE 0x10000 /* 64 KB: about a second of a stereo song at 48 kHz */
-/* (on the reading thread) a piece is in: the next one, until the file's end; a failed read ends the song there */
+static int adx_begin(Player *p);
+/* (on the reading thread) a piece is in: the next one, until the file's end; a failed read ends the song there.
+   adxasync: the first piece, read here instead of by the game's thread, begins the stream (header, decoder, bound to the
+   sound) the way start() did after its own read */
 static int adx_piece(VitaReadJob *j, int got) {
     Player *p = j->user;
     uint32_t at = (uint32_t)((uint8_t *)j->buf - p->file);
     if (got != (int)j->len) {
         p->size = at; /* (the decoder ends where the file stops) */
+        if (p->pending) {
+            p->pending = 0;
+            p->stat = ADXT_STAT_STOP; /* (the first piece could not be read: the stream does not start) */
+        }
         return 0;
     }
     __atomic_store_n(&p->loaded, at + (uint32_t)got, __ATOMIC_RELEASE);
     at += (uint32_t)got;
+    if (p->pending) {
+        unsigned long long dt;
+        p->pending = 0;
+        adx_begin(p);
+        dt = sceKernelGetProcessTimeWide() - p->t0;
+        gVitaAdxN[3]++;
+        gVitaAdxN[4] += (unsigned)dt;
+        if (dt > gVitaAdxN[5]) {
+            gVitaAdxN[5] = (unsigned)dt;
+        }
+        if (p->file == NULL) {
+            return 0; /* (not an ADX file: freed) */
+        }
+    }
     if (at >= p->size) {
         return 0;
     }
@@ -645,11 +682,91 @@ static const char *voice_own_path(const char *path, char *buf, size_t size) {
     return buf;
 }
 
-static void start(Player *p, const char *path) {
+/* The file's first bytes are in (p->file, p->size): the header read, the decoder set up, a stream made and bound to the
+   sound. 0: it is not a file of the kind the game uses, or no stream could be made (nothing plays). */
+static int adx_begin(Player *p) {
     SDL_AudioSpec spec;
+    uint32_t header, highpass;
+
+    if (p->size < 0x40 || be16(p->file) != 0x8000 || p->file[4] != 3 || p->file[5] != FRAME || p->file[6] != 4 ||
+        p->file[7] < 1 || p->file[7] > 2 || (p->file[0x13] & 8)) {
+        fprintf(stderr, "bt3: %s is not an ADX file of the kind the game uses\n", p->path);
+        ADX_LOG("adx: player %d: %s is not an ADX file of the kind the game uses (%u bytes: %02x %02x %02x %02x %02x %02x %02x %02x)\n", (int)(p - sPlayers), p->path, p->size,
+                p->size > 0 ? p->file[0] : 0, p->size > 1 ? p->file[1] : 0, p->size > 4 ? p->file[4] : 0, p->size > 5 ? p->file[5] : 0,
+                p->size > 6 ? p->file[6] : 0, p->size > 7 ? p->file[7] : 0, p->size > 0x12 ? p->file[0x12] : 0, p->size > 0x13 ? p->file[0x13] : 0);
+        free(p->file);
+        p->file = NULL;
+        return 0;
+    }
+    header = be16(p->file + 2) + 4;
+    p->data = header;
+    p->channels = p->file[7];
+    p->rate = be32(p->file + 8);
+    p->total = be32(p->file + 12);
+    highpass = be16(p->file + 16);
+    p->loop = bt4_adx_loop(p->file, p->size, p->total, &p->loopStart, &p->loopEnd);
+    if (!p->loop && p->total >= 64) {
+        /* A song added from outside the disc: the disc's music has its loop in the file and goes on for as long as
+           the fight does; a file made from an mp3 has none and stopped after one play, leaving the rest of the fight
+           silent. It is played again from its start. (A file that has loop points keeps them.) */
+        extern int PortSongs_IsFile(const char *path); /* plat_songs.c */
+        if (PortSongs_IsFile(p->path)) {
+            p->loopStart = 0;
+            p->loopEnd = p->total & ~31u; /* (whole frames) */
+            p->loop = 1;
+        }
+    }
+    adx_coefs(highpass, p->rate, &p->c1, &p->c2);
+    memset(p->hist, 0, sizeof(p->hist));
+    memset(p->loopHist, 0, sizeof(p->loopHist));
+    p->loopHistSet = 0;
+    p->pos = 0;
+#ifndef PORT_VITA /* (no lossless music cache on the Vita, and the song is still being read: its key would hash bytes not there yet) */
+    if(p==sPlayers && !getenv("BT4_MUSIC_NO_CACHE")){
+        char cached[256];bt4_music_path(cached,sizeof(cached),bt4_music_key(p->file,p->size));
+        p->lossless=PortPcm_Open(cached,p->channels,p->rate,p->total);
+        p->losslessPos=0;
+        if(p->lossless&&getenv("BT3_SND_VERBOSE"))fprintf(stderr,"bt4: lossless music %s (%u Hz, %u channels, unity gain)\n",cached,p->rate,p->channels);
+    }
+#endif
+    spec.format = SDL_AUDIO_S16;
+    spec.channels = 2;
+    spec.freq = (int)p->rate;
+    p->stream = SDL_CreateAudioStream(&spec, NULL);
+    if (p->stream == NULL) {
+        fprintf(stderr, "bt3: sound stream: %s\n", SDL_GetError());
+        ADX_LOG("adx: player %d: no stream for %s\n", (int)(p - sPlayers), p->path);
+        return 0;
+    }
+    p->stN = 0;
+    p->stHasTail = 0;
+    p->stSkip = 0.0;
+    if (gPortMusicFollows < 0) {
+        extern int Port_Setting(const char *name, int def); /* plat_settings.c */
+        gPortMusicFollows = Port_Setting("music_follows_speed", 0) != 0;
+    }
+    ADX_LOG("adx: player %d plays %s: %u ch, %u Hz, %.1f s, loop %d, volume %d, paused %d (frame %u)\n", (int)(p - sPlayers), p->path, p->channels, p->rate,
+            (double)p->total / (double)p->rate, p->loop, p->vol, p->paused, gGsFrame);
+    if (getenv("BT3_SND_VERBOSE") != NULL) {
+        fprintf(stderr, "adx: player %d: start %s: %u ch, %u Hz, %.1f s, loop %d, volume %d (0.1 dB), paused %d, pan %d/%d\n", (int)(p - sPlayers), p->path,
+                p->channels, p->rate, (double)p->total / (double)p->rate, p->loop, p->vol, p->paused,p->pan[0],p->pan[1]);
+    }
+    if(p>=sPlayers+ACTOR_FIRST&&p<sPlayers+ACTOR_LAST){
+        int index=(int)(p-sPlayers);p->proximity=PortAudio_Gain((index-ACTOR_FIRST)/2,index&1);
+        if(getenv("BT3_SND_VERBOSE"))fprintf(stderr,"tag stream: actor=%d voice=%d path=%s gain=%.4f\n",(index-ACTOR_FIRST)/2,index&1,p->path,p->proximity);
+    }
+    p->stat = ADXT_STAT_PLAYING;
+    apply_volume(p);
+    SDL_SetAudioStreamGetCallback(p->stream, feed, p);
+    if (!SDL_BindAudioStream(sDevice, p->stream)) {
+        fprintf(stderr, "bt3: sound stream: %s\n", SDL_GetError());
+    }
+    return 1;
+}
+
+static void start(Player *p, const char *path) {
     FILE *fp;
     long size;
-    uint32_t header, highpass;
     char own[512];
 
     path = voice_own_path(path, own, sizeof(own));
@@ -670,12 +787,50 @@ static void start(Player *p, const char *path) {
         (void)fp; (void)size;
         p->size = 0;
         p->file = NULL;
+        first = 0;
         if (Vita_FileSpan(path, &fd, &base, &p->size, &own)) {
             first = p->size < ADX_PIECE ? p->size : ADX_PIECE;
             p->file = malloc(p->size ? p->size : 1);
-            if (p->file != NULL && sceIoPread(fd, p->file, first, base) != (int)first) {
-                free(p->file);
-                p->file = NULL;
+            if (p->file != NULL && adx_async_on() && p->size >= 0x40) { /* (adxasync: the first piece read by the reading thread too, the stream begun there) */
+                memset(&p->job, 0, sizeof(p->job));
+                p->job.fd = fd;
+                p->own = own;
+                p->job.off = (SceOff)base;
+                p->job.buf = p->file;
+                p->job.len = first;
+                p->job.done = adx_piece;
+                p->job.user = p;
+                p->loaded = 0;
+                p->t0 = sceKernelGetProcessTimeWide();
+                p->pending = 1;
+                p->stat = ADXT_STAT_PLAYING; /* (as start() ends: the game is told the stream plays; it is silent until its first piece is in) */
+                if (p >= sPlayers + ACTOR_FIRST && p < sPlayers + ACTOR_LAST) {
+                    int index = (int)(p - sPlayers);
+                    p->proximity = PortAudio_Gain((index - ACTOR_FIRST) / 2, index & 1); /* (the game's state: read here, not on the reading thread) */
+                }
+                if (Vita_ReadStart(&p->job)) {
+                    return;
+                }
+                p->pending = 0; /* (no reading thread: the old way) */
+                p->stat = ADXT_STAT_STOP;
+                p->own = 0;
+            }
+            if (p->file != NULL) {
+                unsigned long long t0 = sceKernelGetProcessTimeWide(), dt;
+                int got = sceIoPread(fd, p->file, first, base);
+                dt = sceKernelGetProcessTimeWide() - t0;
+                gVitaAdxN[0]++;
+                gVitaAdxN[1] += (unsigned)dt;
+                if (dt > gVitaAdxN[2]) {
+                    gVitaAdxN[2] = (unsigned)dt;
+                }
+                if (gVitaHitch > 0 && dt >= 2000) {
+                    Vita_HitchEv(8, first >> 10, 0, t0, dt); /* (hitchlog: the game's thread read a stream's first piece) */
+                }
+                if (got != (int)first) {
+                    free(p->file);
+                    p->file = NULL;
+                }
             }
         }
         if (p->file == NULL) {
@@ -747,79 +902,7 @@ static void start(Player *p, const char *path) {
     p->size = (uint32_t)fread(p->file, 1, (size_t)size, fp);
     fclose(fp);
 #endif
-    if (p->size < 0x40 || be16(p->file) != 0x8000 || p->file[4] != 3 || p->file[5] != FRAME || p->file[6] != 4 ||
-        p->file[7] < 1 || p->file[7] > 2 || (p->file[0x13] & 8)) {
-        fprintf(stderr, "bt3: %s is not an ADX file of the kind the game uses\n", path);
-        ADX_LOG("adx: player %d: %s is not an ADX file of the kind the game uses (%u bytes: %02x %02x %02x %02x %02x %02x %02x %02x)\n", (int)(p - sPlayers), path, p->size,
-                p->size > 0 ? p->file[0] : 0, p->size > 1 ? p->file[1] : 0, p->size > 4 ? p->file[4] : 0, p->size > 5 ? p->file[5] : 0,
-                p->size > 6 ? p->file[6] : 0, p->size > 7 ? p->file[7] : 0, p->size > 0x12 ? p->file[0x12] : 0, p->size > 0x13 ? p->file[0x13] : 0);
-        free(p->file);
-        p->file = NULL;
-        return;
-    }
-    header = be16(p->file + 2) + 4;
-    p->data = header;
-    p->channels = p->file[7];
-    p->rate = be32(p->file + 8);
-    p->total = be32(p->file + 12);
-    highpass = be16(p->file + 16);
-    p->loop = bt4_adx_loop(p->file, p->size, p->total, &p->loopStart, &p->loopEnd);
-    if (!p->loop && p->total >= 64) {
-        /* A song added from outside the disc: the disc's music has its loop in the file and goes on for as long as
-           the fight does; a file made from an mp3 has none and stopped after one play, leaving the rest of the fight
-           silent. It is played again from its start. (A file that has loop points keeps them.) */
-        extern int PortSongs_IsFile(const char *path); /* plat_songs.c */
-        if (PortSongs_IsFile(path)) {
-            p->loopStart = 0;
-            p->loopEnd = p->total & ~31u; /* (whole frames) */
-            p->loop = 1;
-        }
-    }
-    adx_coefs(highpass, p->rate, &p->c1, &p->c2);
-    memset(p->hist, 0, sizeof(p->hist));
-    memset(p->loopHist, 0, sizeof(p->loopHist));
-    p->loopHistSet = 0;
-    p->pos = 0;
-#ifndef PORT_VITA /* (no lossless music cache on the Vita, and the song is still being read: its key would hash bytes not there yet) */
-    if(p==sPlayers && !getenv("BT4_MUSIC_NO_CACHE")){
-        char cached[256];bt4_music_path(cached,sizeof(cached),bt4_music_key(p->file,p->size));
-        p->lossless=PortPcm_Open(cached,p->channels,p->rate,p->total);
-        p->losslessPos=0;
-        if(p->lossless&&getenv("BT3_SND_VERBOSE"))fprintf(stderr,"bt4: lossless music %s (%u Hz, %u channels, unity gain)\n",cached,p->rate,p->channels);
-    }
-#endif
-    spec.format = SDL_AUDIO_S16;
-    spec.channels = 2;
-    spec.freq = (int)p->rate;
-    p->stream = SDL_CreateAudioStream(&spec, NULL);
-    if (p->stream == NULL) {
-        fprintf(stderr, "bt3: sound stream: %s\n", SDL_GetError());
-        ADX_LOG("adx: player %d: no stream for %s\n", (int)(p - sPlayers), path);
-        return;
-    }
-    p->stN = 0;
-    p->stHasTail = 0;
-    p->stSkip = 0.0;
-    if (gPortMusicFollows < 0) {
-        extern int Port_Setting(const char *name, int def); /* plat_settings.c */
-        gPortMusicFollows = Port_Setting("music_follows_speed", 0) != 0;
-    }
-    ADX_LOG("adx: player %d plays %s: %u ch, %u Hz, %.1f s, loop %d, volume %d, paused %d (frame %u)\n", (int)(p - sPlayers), path, p->channels, p->rate,
-            (double)p->total / (double)p->rate, p->loop, p->vol, p->paused, gGsFrame);
-    if (getenv("BT3_SND_VERBOSE") != NULL) {
-        fprintf(stderr, "adx: player %d: start %s: %u ch, %u Hz, %.1f s, loop %d, volume %d (0.1 dB), paused %d, pan %d/%d\n", (int)(p - sPlayers), path,
-                p->channels, p->rate, (double)p->total / (double)p->rate, p->loop, p->vol, p->paused,p->pan[0],p->pan[1]);
-    }
-    if(p>=sPlayers+ACTOR_FIRST&&p<sPlayers+ACTOR_LAST){
-        int index=(int)(p-sPlayers);p->proximity=PortAudio_Gain((index-ACTOR_FIRST)/2,index&1);
-        if(getenv("BT3_SND_VERBOSE"))fprintf(stderr,"tag stream: actor=%d voice=%d path=%s gain=%.4f\n",(index-ACTOR_FIRST)/2,index&1,path,p->proximity);
-    }
-    p->stat = ADXT_STAT_PLAYING;
-    apply_volume(p);
-    SDL_SetAudioStreamGetCallback(p->stream, feed, p);
-    if (!SDL_BindAudioStream(sDevice, p->stream)) {
-        fprintf(stderr, "bt3: sound stream: %s\n", SDL_GetError());
-    }
+    adx_begin(p);
 }
 
 /* Native regression probe: decode the active game's stream through this decoder.

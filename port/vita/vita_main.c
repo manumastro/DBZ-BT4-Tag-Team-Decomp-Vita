@@ -1019,6 +1019,14 @@ void Vita_VBlank(unsigned vblanks) {
                         gVitaAudioStarved = 0;
                     }
                 }
+                {   /* (adxasync: the sound streams' starts) */
+                    extern unsigned gVitaAdxN[6];
+                    if (gVitaAdxN[0] | gVitaAdxN[3]) {
+                        logf_("vita:   sound streams started: %u with the first piece read by the game's thread (%u ms in all, the longest %u ms), %u with it read by the reading thread (%u ms from the start to the stream bound, the longest %u ms)\n",
+                              gVitaAdxN[0], gVitaAdxN[1] / 1000, gVitaAdxN[2] / 1000, gVitaAdxN[3], gVitaAdxN[4] / 1000, gVitaAdxN[5] / 1000);
+                        memset(gVitaAdxN, 0, sizeof(gVitaAdxN));
+                    }
+                }
                 {
                     extern unsigned gVitaUnpack[2], gVitaList[2][2];
                     logf_("vita:   lists: %u not drawn, %u us each; %u drawn, %u us each | vectors unpacked per blank: %u the short way, %u the long way\n",
@@ -1227,7 +1235,7 @@ void Vita_VBlank(unsigned vblanks) {
                                   gVitaSwz = 0; gVitaPal[0] = gVitaPal[1] = gVitaPal[2] = 0;
                                   { extern void Vita_TexTopLog(void); Vita_TexTopLog(); }
                                   { extern void Vita_T121Log(void); Vita_T121Log(); }
-                                  { extern void Vita_PaceLog(void); Vita_PaceLog(); }
+                                  { extern void Vita_PaceLog(void); extern void Vita_HitchLog(void); Vita_PaceLog(); Vita_HitchLog(); }
                                   { extern void Vita_AmLog(void); Vita_AmLog(); }
                                   { extern void Vita_FastLog(void); Vita_FastLog(); }
                                   logf_("vita:   GS primitives cover %u.%02u screens opaque, %u.%02u blended per picture | pictures on the screen for 0 / 1 / 2 / 3 / 4+ blanks: %u %u %u %u %u\n",
@@ -2305,6 +2313,15 @@ static void read_settings(void) {
         } else if (strcmp(line, "snapcut") == 0) { /* snap_make lighter: 0 off, 1 on, 2 in the soak's B battles, 3 a check (gs_core.c gVitaSnapCut) */
             extern int gVitaSnapCut;
             gVitaSnapCut = atoi(eq);
+        } else if (strcmp(line, "hitchlog") == 0) { /* the hitch recorder: a picture on the screen longer than this many ms is explained in the log (vita_hitch.c); 0 off */
+            extern int gVitaHitchWant;
+            gVitaHitchWant = atoi(eq);
+        } else if (strcmp(line, "hitchmax") == 0) { /* hitchlog: the most blocks written (default 60) */
+            extern int gVitaHitchMax;
+            gVitaHitchMax = atoi(eq);
+        } else if (strcmp(line, "memsample") == 0) { /* vitaGL's memory walk (mem_sample) in a fight: 0 every 1024th picture as before, 1 none in a fight, 2 none in the soak's B battles */
+            extern int gVitaMemSample;
+            gVitaMemSample = atoi(eq);
         } else if (strcmp(line, "gzones") == 0) { /* 1: the game's thread timed by part, a step at a time (vita_perf.c Vita_GZ): the report's "game thread by part" */
             extern int gVitaGZOn;
             gVitaGZOn = atoi(eq) != 0;
@@ -2603,6 +2620,12 @@ static void read_settings(void) {
         } else if (strcmp(line, "pgodump") == 0) { /* (a BT3_PGO=gen build) its counts written every <seconds> */
             extern int gVitaPgoEvery;
             gVitaPgoEvery = atoi(eq);
+        } else if (strcmp(line, "ftdedupe") == 0) { /* the fighters' strips found on the chip by their vertices, and a table of 32768 places: 0 off, 1 on, 2 in the soak's B battles (vita_vgl.c) */
+            extern int gVitaFtDedupe;
+            gVitaFtDedupe = atoi(eq);
+        } else if (strcmp(line, "adxasync") == 0) { /* a sound stream's first piece read by the reading thread, the stream begun there: 0 off (the game's thread reads it), 1 on, 2 in the soak's B battles (snd_adx.c) */
+            extern int gVitaAdxAsync;
+            gVitaAdxAsync = atoi(eq);
         } else if (strcmp(line, "asyncread") == 0) { /* 0: reads on the caller's thread (vita_read.c) */
             extern int gVitaAsyncRead;
             gVitaAsyncRead = atoi(eq) != 0;
@@ -3167,9 +3190,21 @@ int Vita_Core3State(void) {
 
 /* The threads that matter, as the system sees them (for the log): processor time, where they ran, how often
    something else took their core. */
-static struct { int id; const char *name; unsigned long long run; unsigned pre, ipre; int chg; } sWatch[8];
+#define NWATCH 10 /* (0 game, 1 list reader, 2 drawing, 3 sound, 4 sampler, 5 render, 6 log, 7 strips, 8 reads, 9 the hitch recorder) */
+static struct { int id; const char *name; unsigned long long run; unsigned pre, ipre; int chg; } sWatch[NWATCH];
+int Vita_WatchGet(int slot, int *id, const char **name) { /* (vita_hitch.c) */
+    if (slot < 0 || slot >= NWATCH || sWatch[slot].id <= 0) {
+        return 0;
+    }
+    *id = sWatch[slot].id;
+    *name = sWatch[slot].name;
+    return 1;
+}
+unsigned Vita_UpMs(void) { /* (the log's own clock: ms since the start) */
+    return (unsigned)((now_us() - sStart) / 1000);
+}
 void Vita_WatchThread(int slot, int id, const char *name) {
-    if (slot >= 0 && slot < 8) {
+    if (slot >= 0 && slot < NWATCH) {
         sWatch[slot].id = id;
         sWatch[slot].name = name;
     }
@@ -3177,7 +3212,7 @@ void Vita_WatchThread(int slot, int id, const char *name) {
 static void watch_log(void) {
     char line[1300];
     int n = 0, i;
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < NWATCH; i++) {
         SceKernelThreadInfo ti;
         if (sWatch[i].id <= 0) {
             continue;
@@ -3263,7 +3298,7 @@ static int watchdog_thread(SceSize args, void *argp) {
                           still / 2, gGsFrame, (unsigned)((now_us() - sStart) / 1000000), gVitaInMenus ? "menus" : "fight", sLogTail, sLogHead, sLogLost);
             Vita_VglState(out + n, (int)sizeof(out) - n);
             n += (int)strlen(out + n);
-            for (i = 0; i < 8 && n < (int)sizeof(out) - 300; i++) {
+            for (i = 0; i < NWATCH && n < (int)sizeof(out) - 300; i++) {
                 SceKernelThreadInfo ti;
                 if (sWatch[i].id <= 0) {
                     continue;

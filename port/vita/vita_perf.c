@@ -25,10 +25,21 @@ unsigned long long gVitaGZ[64];
 unsigned gVitaGZSteps;
 static unsigned sGzLast;
 int Vita_PmonGet(int thid, unsigned int counter, unsigned int *value);
+extern int gVitaHitch; /* (bt3.txt hitchlog, vita_hitch.c) */
+extern void Vita_HitchEv(unsigned kind, unsigned arg, unsigned arg2, unsigned long long t0, unsigned long long dur);
+extern unsigned long long sceKernelGetProcessTimeWide(void);
 void Vita_GZ(int z) {
     unsigned now;
     if (!gVitaGZOn) {
         return;
+    }
+    if (gVitaHitch > 0) { /* (hitchlog: a part of the step that took 5 ms of the clock or more, waits included) */
+        static unsigned long long wall;
+        unsigned long long w = sceKernelGetProcessTimeWide();
+        if (wall != 0 && w - wall >= 5000 && z >= 0) {
+            Vita_HitchEv(4, (unsigned)z, 0, wall, w - wall);
+        }
+        wall = w;
     }
     Vita_PmonGet(0, 31, &now);
     if (z == 0) {
