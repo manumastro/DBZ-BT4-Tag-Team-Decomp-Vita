@@ -2198,6 +2198,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "rtswap") == 0) { /* a fight picture's swap made by the render thread: 0 off, 1 on, 2 in the soak's B battles */
             extern int gVitaRtSwap;
             gVitaRtSwap = atoi(eq);
+        } else if (strcmp(line, "dpfreelate") == 0) { /* the kept parts let go freed a picture late, without a wait for the render thread: 0 off, 1 on, 2 in the soak's B battles */
+            extern int gVitaDpFreeLate;
+            gVitaDpFreeLate = atoi(eq);
         } else if (strcmp(line, "gxmcache") == 0) { /* vitaGL's GXM state calls left out when they change nothing: 0 off, 1 on, 2 in the soak's B battles */
             extern int gVitaGxmCache;
             gVitaGxmCache = atoi(eq);

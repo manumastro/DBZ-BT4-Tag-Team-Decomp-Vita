@@ -2847,6 +2847,7 @@ static inline void wt_swap(void) {
    picture's end needs vitaGL on the drawing thread (the log's pictures, the film, the GPU profile, a change of size,
    the movie): those the old way (fe_sync). 0: the old way; 2: in the soak's B battles. */
 int gVitaRtSwap = 1;
+extern unsigned gVitaDpFreeLateN[4]; /* (dpfreelate, below) */
 unsigned gVitaRtSwapN[2]; /* for the log: pictures swapped by the render thread, the old way */
 typedef struct RtSwap { unsigned seq; int paced; } RtSwap;
 static void pace_swap_pre(RtSwap *s);
@@ -4753,7 +4754,9 @@ void Vita_AmLog(void) { /* vita_main.c: the model draws that read the picture's 
                 memset(sRtSyncAt, 0, sizeof(sRtSyncAt));
             }
             Vita_Log("vgl:   swaps (rtswap): %u made by the render thread, %u the old way\n", gVitaRtSwapN[0], gVitaRtSwapN[1]);
+            Vita_Log("vgl:   kept parts freed a picture late (dpfreelate): %u parts in %u pictures, %u waits after all (still in the ring), %u pictures with none to free\n", gVitaDpFreeLateN[0], gVitaDpFreeLateN[1], gVitaDpFreeLateN[2], gVitaDpFreeLateN[3]);
             gVitaRtSwapN[0] = gVitaRtSwapN[1] = 0;
+            memset(gVitaDpFreeLateN, 0, sizeof(gVitaDpFreeLateN));
         }
     }
     if (sAmRN == 0) {
@@ -9536,8 +9539,43 @@ void GsGpu_DpFree(void *blob) {
     }
     sDpFreeList[sDpFreeN++] = blob;
 }
+/* bt3.txt dpfreelate: the kept parts let go in a picture freed at the next picture's end, once the render thread has
+   done what was handed over before them, not after a wait for it at this one's. With rtswap the picture's end hands its
+   swap to the render thread and goes on, but this wait (sDpRtLive: the fighters' blocks worked out by the render thread
+   point into the parts) still held the drawing thread there: in a Super Spirit Bomb ~56 waits, ~560 ms every 2 s.
+   0 off (the wait), 1 on, 2 in the soak's B battles. */
+extern int gVitaAbSide;
+int gVitaDpFreeLate;
+unsigned gVitaDpFreeLateN[4]; /* (the log: parts freed late, pictures that kept some, waits after all (still in use), pictures with none to free and no wait) */
+static void *sDpWait[4096];
+static int sDpWaitN;
+static uint32_t sDpWaitAt; /* (sRtW when they were kept: done when sRtTail has passed it) */
 static void dp_free_pending(void) {
     int i;
+    const int late = (gVitaDpFreeLate == 2 ? gVitaAbSide == 1 : gVitaDpFreeLate != 0) && sRtOn;
+    if (sDpWaitN > 0) { /* (the ones kept at the picture before) */
+        if ((int32_t)(sRtTail - sDpWaitAt) < 0) {
+            rt_sync(); /* (still in the ring: rare) */
+            gVitaDpFreeLateN[2]++;
+        }
+        for (i = 0; i < sDpWaitN; i++) {
+            free(sDpWait[i]);
+        }
+        sDpWaitN = 0;
+    }
+    if (late) {
+        if (sDpFreeN > 0) {
+            memcpy(sDpWait, sDpFreeList, (size_t)sDpFreeN * sizeof(void *));
+            sDpWaitN = sDpFreeN;
+            sDpWaitAt = sRtW;
+            gVitaDpFreeLateN[0] += (unsigned)sDpFreeN;
+            gVitaDpFreeLateN[1]++;
+            sDpFreeN = 0;
+        } else {
+            gVitaDpFreeLateN[3]++;
+        }
+        return; /* (sDpRtLive stays: GsGpu_DpFree's overflow still waits) */
+    }
     if (sDpRtLive) {
         rt_sync(); /* (dprt: the ring may point into them; done already where this is called, so nothing waited for) */
         sDpRtLive = 0;
