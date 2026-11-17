@@ -49,5 +49,6 @@ def prepare(f):
     new, done, missing = enable_attempts(text)
     out = GEN / f.relative_to(ROOT)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(new)
+    if not out.exists() or out.read_text() != new:  # (unchanged: keep its date, so an incremental build reuses the object)
+        out.write_text(new)
     return out, done, missing

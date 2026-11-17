@@ -11,7 +11,7 @@ Environment:
     BT3_CLANG_PY       the folder that holds clang/cindex.py (libclang's Python bindings), when not installed
     BT3_VITA_DEV=1     the development build: its own title (BTTD00008); it reads every setting of bt3.txt (test
                        fights, statistics in the log), see docs/vita/development.md
-    BT3_INCREMENTAL=1  reuse objects newer than their source (headers are not tracked)
+    BT3_INCREMENTAL=1  reuse every object newer than its source, the headers its last compile read (<object>.d) and build.py
     BT3_VITA_TITLE_ID, BT3_VITA_TITLE, BT3_VITA_VPK
     BT3_JOBS=<n>       compiles at once (default: the processors; fewer where memory is short, a Docker VM)
                        another title ID, name and package file, so that the build is installed beside another one
@@ -115,10 +115,30 @@ def r2l(text):
     return data.decode("latin-1"), n
 
 
+def deps(o):
+    """gcc's dependency file next to object o (-MMD: the headers the compile read, system ones left out)."""
+    return ["-MMD", "-MF", str(o.with_suffix(".d")), "-MT", str(o)]
+
+
+def fresh(o, *srcs):
+    """BT3_INCREMENTAL: object o can be reused when it is newer than its sources, every header its last compile read
+    (o.d) and this file (the flags)."""
+    d = o.with_suffix(".d")
+    if not os.environ.get("BT3_INCREMENTAL") or not o.exists() or not d.exists():
+        return False
+    read = [w for w in d.read_text().split()[1:] if w != "\\"]  # "<object>: <source> <header> \ <header> ..."
+    paths = [pathlib.Path(s) for s in srcs] + [pathlib.Path(__file__)] + [ROOT / p for p in read]
+    t = o.stat().st_mtime
+    try:
+        return all(p.stat().st_mtime < t for p in paths)
+    except FileNotFoundError:  # a header gone: compile again
+        return False
+
+
 def compile_ee(cmd, src, o, game=False):
     """Preprocess, rewrite the float constants as the PS2 compiler read them (eeconst.py) and, for the game's
     sources, the calls whose arguments have side effects (r2l), compile."""
-    r = subprocess.run([a for a in cmd if a != "-c"] + ["-E", str(src)], cwd=ROOT, capture_output=True, text=True, encoding="latin-1")
+    r = subprocess.run([a for a in cmd if a != "-c"] + deps(o) + ["-E", str(src)], cwd=ROOT, capture_output=True, text=True, encoding="latin-1")
     if r.returncode:
         return r
     i = pathlib.Path(str(o)[:-2] + ".i")
@@ -148,7 +168,7 @@ def rename(r, o):
 def cc_game(f):
     o = OBJ / (str(f.relative_to(ROOT / "src")).replace("/", "_")[:-2] + ".o")
     src, done, missing = portsrc.prepare(f)
-    if os.environ.get("BT3_INCREMENTAL") and o.exists() and o.stat().st_mtime > max(src.stat().st_mtime, f.stat().st_mtime):
+    if fresh(o, src, f):
         return o, f, ""
     r = compile_ee(GAME + [f"-I{f.parent}"], src, o, game=True)
     return (o if r.returncode == 0 else None), f, r.stderr
@@ -245,14 +265,15 @@ def port_sources():
 
 def cc_port(item):
     f, kind = item
-    o = OBJ / ("pc_" + f.stem + ".o")
+    o = OBJ / (("gs_" if kind == "gs" else "pc_") + f.stem + ".o")
+    if fresh(o, f):
+        return o, f, ""
     base = [P + "gcc", "-std=gnu99", "-c"] + COMMON + ["-Iinclude", "-Iport/include", "-Iport/src", "-Iport/vita"]
     if kind == "gs":  # the PC's renderer front end and sound: ordinary float code; its environment switches answered at once
-        o = OBJ / ("gs_" + f.stem + ".o")
-        r = subprocess.run(base + ["-O3", "-freorder-blocks-and-partition", "-include", "vita_cold.h", "-Dgetenv=Vita_GsGetenv",
+        r = subprocess.run(base + deps(o) + ["-O3", "-freorder-blocks-and-partition", "-include", "vita_cold.h", "-Dgetenv=Vita_GsGetenv",
                                    f"-I{ROOT / 'port/src/gs'}", f"-I{ROOT / 'port/vita/sdlshim'}", str(f), "-o", str(o)], cwd=ROOT, capture_output=True, text=True)
     elif kind == "hard":
-        r = subprocess.run(base + ["-O3", "-freorder-blocks-and-partition", "-include", "vita_cold.h", f"-I{SAMPLES / 'common'}", f"-I{GEN}",
+        r = subprocess.run(base + deps(o) + ["-O3", "-freorder-blocks-and-partition", "-include", "vita_cold.h", f"-I{SAMPLES / 'common'}", f"-I{GEN}",
                                    str(f), "-o", str(o)], cwd=ROOT, capture_output=True, text=True)
     elif kind == "vu0":  # the vector-library references under the game's names, with the three arithmetic primitives inline
         fast = ["-include", "vita_vu0_inline.h", "-DRefVu0_AddBits=VitaVu_AddBits", "-DRefVu0_MulBits=VitaVu_MulBits", "-DRefVu0_DivBits=VitaVu_DivBits"]
@@ -260,7 +281,7 @@ def cc_port(item):
             fast += [f"-DRefVu0_{n}=VitaVuF_{n}" for n in ("Add", "Sub", "Mul", "Div")]
         mode = ["-O3", "--param", "inline-unit-growth=2000", "--param", "max-inline-insns-auto=400", "--param", "max-inline-insns-single=400",
                 "--param", "large-function-growth=2000", "--param", "large-unit-insns=100000"]
-        r = rename(subprocess.run(base + ABI + mode + fast + ["-include", "math.h", "-include", "stdlib.h", "-include", "port_libm.h",
+        r = rename(subprocess.run(base + deps(o) + ABI + mode + fast + ["-include", "math.h", "-include", "stdlib.h", "-include", "port_libm.h",
                                                                "-include", "vu0_names.h", "-DREF_VU0_EXTERN_ARITH", str(f), "-o", str(o)],
                                   cwd=ROOT, capture_output=True, text=True), o)
     else:
@@ -270,6 +291,8 @@ def cc_port(item):
 
 def cc_libm(f):
     o = OBJ / ("nl_" + f.stem + ".o")
+    if fresh(o, f):
+        return o, f, ""
     r = compile_ee([P + "gcc", "-std=gnu89", "-c"] + COMMON + ABI + NOBUILTIN + ["-Iport/include", f"-I{f.parent}", "-include", "newlib_shim.h"], f, o)
     return (o if r.returncode == 0 else None), f, r.stderr
 

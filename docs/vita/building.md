@@ -27,7 +27,7 @@ VITA_SAMPLES=~/vitasdk-samples python3 port/vita/build.py
 ```
 
 The result is `port/build/vita_rel/Tenkaichi3Decomp-Vita.vpk` (about 2.5 MB). A full build takes a few minutes;
-`BT3_INCREMENTAL=1` reuses the objects of the previous one where the source is older (headers are not tracked).
+`BT3_INCREMENTAL=1` reuses every object of the previous one that is newer than its source, the headers and `.inc` files its last compile read (gcc's `<object>.d`) and `build.py` itself; a build after a one-file change takes about 40 s, one with nothing changed about 20 s (link and package).
 
 Other environment variables:
 
