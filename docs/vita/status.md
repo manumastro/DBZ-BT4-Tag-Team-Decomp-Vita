@@ -41,6 +41,7 @@ switch is in [development.md](development.md)'s table):
 | `skipcc`, `dppf` | Kept calls in lists not drawn sent as registers only; the next kept part prefetched | off | 2026-11-16, 2 vs 2: skipcc worse (27.5 -> 26.6), dppf no gain |
 | `rtcap`, `skipasync`, `texrtfill`, `chipkeep`, `esrebind` | The heavy 2 vs 2 fight's single long lists (50-190 ms): the render thread let fall several pictures behind and then waited for at once; the texture pools never filled in a fight; the stage's copies let go with the fighters'; every model's kept calls made again at each bind of an object's model | off | not run yet (branch `wip/hitch`; causes from the runs `hx2`, `hx2off`) |
 | `bindrange` | A model bind drops only the seam's kept calls whose memory its file (or a character pack loaded for it) meets, instead of all (the list reader's ~90 ms list at the Super Spirit Bomb's end); `3` compares each call so kept with a long read | off | not run yet (branch `wip/bindrange`; sets `br0`, `br1`, `br3`, `br1v1`) |
+| `tboui` | BT4decomp's own screens' pictures (`port/tbo/ui`) and TrueType lines (`tbo_text.c`) drawn by the Vita's renderer (`port/vita/vita_tbo.c`): its Tag Team screens, the main menu's Tag Team entry, the Tag Team HUD's words | on (needed by `tagteam=1`, the default; not compared yet) | not run yet (branch `wip/tagui`; sets `tagui_*`, [tagteam.md](tagteam.md)) |
 
 Removed after a console run: `dpjoin` (never a pair). Also on by default, with all of the above: `runs/final` (10
 minutes, duels and three against three, six stages).

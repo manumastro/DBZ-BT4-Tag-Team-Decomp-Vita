@@ -8,7 +8,8 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
   Duel menu's Tag type open BT4decomp's own Tag Team menus, drawn on the Vita with their pictures and TrueType
   letters: Local Battle (Singleplayer, Two-player, Spectator Mode, Two-player co-op; 1 to 5 fighters a team, time,
   CPU level, presets, revival, each fighter's health and combat rules, battle rules) and Camera mode (target
-  selection with L3, the right stick or the D-pad; joint attacks; fusions), then the simultaneous character select.
+  selection with L3, the right stick or the D-pad; the special moves' cameras; joint attacks; fusions; the PC's free
+  camera is not there), then the simultaneous character select.
   In the fight the Tag Team HUD's words show (the timer, the names over the target, the gauges' figures, the joint
   attacks' labels). Online Battles is left out. The Vita's earlier Tag Team setup screen stays as `tagteam=2` in
   `bt3.txt`.
@@ -18,9 +19,9 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
   Tag Team's crash fixes (the effects of fights with more than two fighters, Ginyu's Body Change), its expanded
   rules (joint attacks and fusions, on by default as on PC, also for the CPU fighters; cooperative revival, off by
   default), the new Tag Team HUD (the game's own gauges for the fighter and the allies, a new radar, the target's
-  ring), and the partners' voices from BT4's own ranges. Not on the Vita: online play, split-screen, the PC's Tag
-  Team menus (the Vita keeps its own Tag Team setup screen), the fighters' names over the HUD, and the English game
-  with the Spanish install's anime songs.
+  ring), and the partners' voices from BT4's own ranges. Not on the Vita: online play, the Lua mods' split-screen,
+  and the English game with the Spanish install's anime songs (the PC's Tag Team menus and the names over the HUD:
+  the entry above).
 
 ## v1.3 (2026-11-14)
 

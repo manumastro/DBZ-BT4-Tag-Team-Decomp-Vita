@@ -66,6 +66,12 @@ each line of letters as a GS sprite whose TEX0 has the reserved format `TBO_PSM`
   split-screen only (`TagHud_FloatingAllies`, called from the split branch of `TagHud_DevLayout`: the two-player
   modes, a second controller needed, the game's own split of the screen); `Port_TagAllyHudFeed` only hands them to
   the PC's side panels. On one screen the PC and the Vita both show the allies' column.
+- **Camera mode**: the special moves' cinematic cameras (on / off, `Port_SpecialMoveCameras`, now as the PC's
+  `mods_game.c`: saved, read by `src/battle/btl_cam.c`), the target selection (below), joint attacks and fusions
+  work; the free camera's rows (camera mode, fighter, speed, zoom, reset) are shown but do nothing: the PC's
+  spectator camera (`port/src/gs/spectator_camera.c`) is not built for the Vita (`PortSpectator_*` in
+  `port/vita/vita_bt4.c` answer as the game's own camera). Spectator Mode (all CPUs) watches with the game's own
+  camera.
 - **Target selection** (Camera mode > Target selection: L3, right stick, D-pad): the PC's pad code
   (`gs_input.c`) puts the method and the direction in byte 17 of the pad's report, which `BtlInput_Sample` reads; the
   Vita's pad code does the same (`port/vita/vita_gfx.c` `tag_target`, `PortInput_TagTargetMethod`), saved as the PC
@@ -74,7 +80,7 @@ each line of letters as a GS sprite whose TEX0 has the reserved format `TBO_PSM`
   fight reads it (`TagBattle_ConfigureLocal`: `tag_combat<team><slot>`; `Port_TagOption`: joint attacks, fusions,
   revival; `TagBattle_SetLocalHealth`: per-fighter health). `port/vita/vita_tag.c` answers those calls as
   `tag_team_net.c`'s local room does.
-- **Not the PC's**: the film behind the screens (`tbo/ui/tag_ui_*.pss`, 30 MB; the Vita shows its poster, the
+- **Not the PC's**: the free / spectator camera (above), the film behind the screens (`tbo/ui/tag_ui_*.pss`, 30 MB; the Vita shows its poster, the
   picture the PC shows until the film's first frame), the translated screens, the online section, the Lua mods'
   split-screen presentation (`Mods_SplitScreen`; the two-player modes' own split is the game's and is there), the
   Lua Modern HUD (BT4decomp's bundled mod: it would need the Lua runtime and the mods' code, `port/src/gs/mods*.c`,

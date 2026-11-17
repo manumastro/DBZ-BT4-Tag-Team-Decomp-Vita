@@ -58,11 +58,11 @@ The Spanish release (Team BT4's Spanish B14 Rev2), read from its `.iso` by the s
 - Music, voices and sound effects; the opening and ending films.
 - Fights are drawn for the Vita's 16:9 screen without stretching; the menus at the screen's full resolution.
 - The touch screen works in the menus, and the rear touch pad gives the L2, R2, L3 and R3 buttons the Vita lacks.
-- **Tag Team**, offline: the PC version's own Tag Team screens, from the main menu's Tag Team entry (or the Duel
+- **Tag Team**, offline (new, being tested): the PC version's own Tag Team screens, from the main menu's Tag Team entry (or the Duel
   menu's Tag type). Local Battle: Singleplayer, Two-player, Spectator Mode or Two-player co-op (the two-player modes
   need a second controller), 1 to 5 fighters a team, the time, the CPUs' level, the presets, revival, each fighter's
-  health and combat rules, the battle rules; Camera mode: the target selection (L3, right stick or D-pad), joint
-  attacks and fusions. Then the simultaneous character select, the fight with its Tag Team HUD (names over the
+  health and combat rules, the battle rules; Camera mode: the target selection (L3, right stick or D-pad), the
+  special moves' cameras, joint attacks and fusions (its free camera is the PC's only). Then the simultaneous character select, the fight with its Tag Team HUD (names over the
   target, the allies' gauges, the radar) and the results with rematch. 2 vs 2 runs at about 28 pictures a second in the
   console's tests (less in the heaviest specials); 3 vs 3 to 5 vs 5 and Free for All with 10 fighters are there as on
   PC but not measured on the Vita yet. The screens are in English.

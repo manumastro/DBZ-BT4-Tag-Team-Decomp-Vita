@@ -28,11 +28,13 @@
  * PortTbo_TextInfo), never by the texture's pixels.
  *
  * What is kept: a texture not drawn for 600 pictures (20 s) is given back (the pictures of the menus during a fight),
- * a line's texture when its line changed and it was not drawn in this picture (as the PC's). All made and given back
- * on the drawing thread, the render thread's work done first (vita_vgl.c Vita_VglTexRgba, Vita_VglTexFree).
+ * but the main menu's emblem and lettering; a line's texture when its line changed (at the picture's end). All made
+ * and given back on the drawing thread, the render thread's work done first (vita_vgl.c Vita_VglTexRgba,
+ * Vita_VglTexFree).
  *
- * bt3.txt tboui: 1 (default) drawn; 0 not drawn (as before: the screens' sprites refused by the renderer); 2 the
- * soak's B battles only. The report's "tboui" line: pictures and lines made, given back, textures held and their KB.
+ * bt3.txt tboui: 1 (default) drawn; 0 not drawn, as before (src/menu/port_screen.c puts neither the pictures' sprites
+ * nor the lines together, and the renderer refuses any that comes); 2 the soak's B battles only. The report's "tboui"
+ * line: pictures and lines made, given back, textures held and their KB.
  */
 #include <png.h>
 #include <pthread.h>
@@ -72,6 +74,15 @@ static int tbo_on(void) {
     extern int gVitaAbSide;
     return gVitaTboUi == 2 ? gVitaAbSide == 1 : gVitaTboUi != 0;
 }
+/* (src/menu/port_screen.c, under PORT_VITA: with tboui=0 the screens' sprites and lines are not even put together) */
+int Vita_TboOn(void) {
+    return tbo_on();
+}
+
+/* A line's texture replaced is given back at the picture's end, not at once: a draw of this picture may still hold
+   it (vita_vgl.c's states of this picture, the batches not yet handed over). */
+static unsigned sLate[64], sLateBytes[64];
+static int sLateN;
 
 /* ---- pictures made smaller: by halves, each pixel the average of four, the colour weighted by the alpha (as the
    PC's smaller copies, gs_draw.c tbo_upload); RGBA with the GS's alpha (0..0x80). Takes px. ---- */
@@ -129,9 +140,14 @@ static unsigned tbo_make(TboTex *t, uint32_t *px, uint32_t w, uint32_t h, const 
         return 0;
     }
     if (t->tex != 0) {
-        Vita_VglTexFree(t->tex);
-        gVitaTboN[3]--;
-        gVitaTboN[4] -= t->bytes;
+        if (sLateN < 64) {
+            sLate[sLateN] = t->tex;
+            sLateBytes[sLateN++] = t->bytes;
+        } else {
+            Vita_VglTexFree(t->tex); /* (not expected: LINES_A_PICTURE a picture) */
+            gVitaTboN[3]--;
+            gVitaTboN[4] -= t->bytes;
+        }
     }
     t->tex = tex;
     t->bytes = w * h * 4;
@@ -450,16 +466,24 @@ static void tbo_drop(TboTex *t, unsigned n) {
     }
 }
 
-/* At every picture's end (vita_vgl.c GsGpu_FrameEnd): every 64th, the textures not drawn for a while given back. */
+/* At every picture's end (vita_vgl.c GsGpu_FrameEnd, after its batches are handed over): the lines' replaced
+   textures given back; every 64th, the textures not drawn for a while. The main menu's emblem and lettering (~600 KB)
+   are kept: made again, they would cost the logo's decoding and the disc's letters at every return to the menu. */
 void Vita_TboFrameEnd(void) {
-    unsigned held = gVitaTboN[3];
+    unsigned held;
+    while (sLateN > 0) {
+        sLateN--;
+        Vita_VglTexFree(sLate[sLateN]);
+        gVitaTboN[2]++;
+        gVitaTboN[3]--;
+        gVitaTboN[4] -= sLateBytes[sLateN];
+    }
+    held = gVitaTboN[3];
     if ((gGsFrame & 63) != 0 || held == 0) {
         return;
     }
     tbo_drop(sPic, TBO_ART_COUNT);
     tbo_drop(sText, TBO_TEXT_SLOTS);
-    tbo_drop(&sEmblem, 1);
-    tbo_drop(sLetters, 2);
     if (gVitaTboN[3] != held) {
         Vita_Log("tbo: textures not drawn for %u pictures given back: %u held, %u KB\n", KEEP_FRAMES, gVitaTboN[3], gVitaTboN[4] / 1024);
     }

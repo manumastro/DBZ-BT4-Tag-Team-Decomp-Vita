@@ -86,7 +86,22 @@ void Port_StateTouch(void *p, unsigned long n) { (void)p; (void)n; }
 /* ---- the F1 window and the PC's presentation (gs/ui.cpp, gs/gs_draw.c) ---- */
 int Port_HudLayout(void) { return 0; }
 int Port_HudSwap(void) { return 0; }
-int Port_SpecialMoveCameras(int change) { (void)change; return 1; } /* the special moves' own cinematic cameras, as the game */
+/* the special moves' own cinematic cameras (on by default, as the game), the Tag Team screens' Camera mode row: as the
+   PC's port/src/mods_game.c, saved as special_move_cameras; src/battle/btl_cam.c reads it */
+int Port_SpecialMoveCameras(int change) {
+    extern int Port_Setting(const char *, int);
+    extern void Port_SettingSave(const char *, int), Port_SettingsWrite(void);
+    static int enabled = -1;
+    if (enabled < 0) {
+        enabled = Port_Setting("special_move_cameras", 1) != 0;
+    }
+    if (change >= 0) {
+        enabled = change != 0;
+        Port_SettingSave("special_move_cameras", enabled);
+        Port_SettingsWrite();
+    }
+    return enabled;
+}
 int Port_TagBattleRenderActive(void) { return 0; }
 int Port_TagNetwork(void) { return 0; }
 void Port_TagMenuSet(int a, int b) { (void)a; (void)b; }
@@ -128,11 +143,13 @@ void PortA11y_StreamStart(const char *path) {}
 #define FIGHTER_NAME_CACHE 512
 static char sNameCache[FIGHTER_NAME_CACHE][64];
 /* line n of one of the game's text files as UTF-8 (a table of byte offsets, entry 0 the count, to UTF-16 strings
-   that begin with U+FEFF; the table ends where the first string starts). Its length; 0 when it is not such a line. */
+   that begin with U+FEFF; the table ends where the first string starts), on one line: line breaks and spaces one
+   space between words (a11y_game.c text_line with gs/a11y.c PortA11y_Utf8, without its translations). Its length;
+   0 when it is not such a line. */
 static int name_line(char *out, int cap, const uint32_t *file, int n) {
     const uint16_t *str;
-    uint32_t ofs;
-    int k = 0;
+    uint32_t ofs, c;
+    int k = 0, i, space = 0, need;
     out[0] = '\0';
     if (file == 0 || n < 0 || n >= 0x1000 || (uint32_t)n + 1 >= file[1] >> 2) {
         return 0;
@@ -145,21 +162,41 @@ static int name_line(char *out, int cap, const uint32_t *file, int n) {
     if (str[0] != 0xFEFF) {
         return 0;
     }
-    for (str++; *str != 0 && *str != 10 && *str != 13 && k < cap - 4; str++) {
-        unsigned c = *str;
-        if (c < 0x80) {
+    for (i = 0; str[i] != 0 && i < 4096; i++) {
+        c = str[i];
+        if (c >= 0xD800 && c < 0xDC00 && str[i + 1] >= 0xDC00 && str[i + 1] < 0xE000) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (str[i + 1] - 0xDC00);
+            i++;
+        } else if (c == 0xFEFF || (c >= 0xD800 && c < 0xE000)) {
+            continue;
+        }
+        if (c <= ' ') {
+            space = k > 0;
+            continue;
+        }
+        need = c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+        if (k + space + need >= cap) {
+            break;
+        }
+        if (space) {
+            out[k++] = ' ';
+            space = 0;
+        }
+        if (need == 1) {
             out[k++] = (char)c;
-        } else if (c < 0x800) {
-            out[k++] = (char)(0xC0 | (c >> 6));
+        } else if (need == 2) {
+            out[k++] = (char)(0xC0 | c >> 6);
+            out[k++] = (char)(0x80 | (c & 0x3F));
+        } else if (need == 3) {
+            out[k++] = (char)(0xE0 | c >> 12);
+            out[k++] = (char)(0x80 | (c >> 6 & 0x3F));
             out[k++] = (char)(0x80 | (c & 0x3F));
         } else {
-            out[k++] = (char)(0xE0 | (c >> 12));
-            out[k++] = (char)(0x80 | ((c >> 6) & 0x3F));
+            out[k++] = (char)(0xF0 | c >> 18);
+            out[k++] = (char)(0x80 | (c >> 12 & 0x3F));
+            out[k++] = (char)(0x80 | (c >> 6 & 0x3F));
             out[k++] = (char)(0x80 | (c & 0x3F));
         }
-    }
-    while (k > 0 && out[k - 1] == ' ') {
-        k--;
     }
     out[k] = '\0';
     return k;

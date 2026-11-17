@@ -4421,6 +4421,7 @@ static int state_of_(int ctx, int type, State *d) {
             return 0;
         }
         sTexXf = 0;
+        sLast = NULL; /* (not the texture table's: state_of_cached keeps no such state for the pictures after) */
         d->tex = tx;
         d->tme = 1;
         d->env = ((t0 >> 35) & 3) == 1 ? (((t0 >> 34) & 1) ? 1 : 2) : 0;
