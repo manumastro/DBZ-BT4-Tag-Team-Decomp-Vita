@@ -164,6 +164,10 @@ def main():
     ap.add_argument("--title", default="BTFV00008")
     ap.add_argument("--rotate-log", type=int, default=16, metavar="MB", help="the console's log moved aside (renamed, kept) before the run when larger than this (0: never)")
     ap.add_argument("--out", type=pathlib.Path)
+    ap.add_argument("--inputs", type=pathlib.Path, help="a JSON list of button presses at given seconds after launch, each "
+                    '{"at": s, "taps": ["START", ...], "hold_ms": 120, "gap_ms": 450, "shot": true}: the game launched '
+                    "without a vita-agent-use run (which refuses input), each step's taps sent with `input submit`, a "
+                    "screenshot after it when \"shot\"")
     o = ap.parse_args()
     out = o.out or ROOT / "port/build/runs" / ("agent-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
     (out / "shots").mkdir(parents=True, exist_ok=True)
@@ -206,7 +210,8 @@ def main():
         if o.eboot and not eboot.is_file():
             note(str(eboot), "not found (BT3_VITA_DEV=1 python3 port/vita/build.py)")
             return 2
-        long_run = o.seconds + 180 > 3600
+        long_run = o.seconds + 180 > 3600 or o.inputs is not None
+        steps = json.loads(o.inputs.read_text()) if o.inputs else []
         t0 = time.time()
         if not long_run:
             spec = {"title_id": o.title, "timeout_s": o.seconds + 180, "performance_interval_ms": 2000, "close_on_completion": True,
@@ -233,6 +238,20 @@ def main():
         while True:
             time.sleep(5)
             el = time.time() - t0
+            while steps and el >= steps[0]["at"]:
+                st = steps.pop(0)
+                hold, gap, t, ev = st.get("hold_ms", 120) * 1000, st.get("gap_ms", 450) * 1000, 0, []
+                for b in st.get("taps", []):
+                    ev += [{"at_us": t, "buttons": [b] if isinstance(b, str) else list(b)}, {"at_us": t + hold, "buttons": []}]
+                    t += hold + gap
+                if ev:
+                    f = out / ("input_%05d.json" % int(st["at"]))
+                    f.write_text(json.dumps({"duration_us": t + 1000, "events": ev}))
+                    rc, objs = agent("input", "submit", f, timeout=120)
+                    note("at %d s: %s (%s)" % (int(el), " ".join(map(str, st.get("taps", []))), "sent" if rc == 0 else "REFUSED: " + json.dumps(last(objs))[:200]))
+                if st.get("shot"):
+                    time.sleep(1.0)
+                    agent("screen", "capture", "--output", out / "shots" / ("in%05d.jpg" % int(time.time() - t0)))
             while shots_at and el >= shots_at[0]:
                 shots_at.pop(0)
                 agent("screen", "capture", "--output", out / "shots" / ("%05d.jpg" % int(el)))
