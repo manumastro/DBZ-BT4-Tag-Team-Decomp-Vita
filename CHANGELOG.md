@@ -4,6 +4,8 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 ## Unreleased
 
+- **BT4decomp 0.1.39.6 R1 1.3 merged in**: Tag Team's camera no longer shakes between lock-on and free view; aerial
+  clashes no longer leave fighters invisible or unable to move.
 - **BT4decomp 0.1.39.6 R1 1.2 merged in** (the PC port this one is built on; run on the console in the 2 vs 2 demo fight and a 1 vs 1 duel: same speed, the beam special faster, no crash):
   Tag Team's crash fixes (the effects of fights with more than two fighters, Ginyu's Body Change), its expanded
   rules (joint attacks and fusions, on by default as on PC, also for the CPU fighters; cooperative revival, off by
