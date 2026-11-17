@@ -37,6 +37,7 @@
 #include <math.h>
 #include "../src/gs/gs_internal.h"
 extern int gVitaTagMovie; /* bt3.txt tbomovie (vita_tagmovie.c) */
+extern int gVitaTagMovieMem; /* bt3.txt tbomoviemem: MB of physically contiguous memory left to the player */
 
 extern int gGsMainFbp;  /* gs_sony.c: the buffer this frame is drawn into */
 #include <psp2/perf.h>
@@ -1786,14 +1787,16 @@ int GsGpu_Init(void) {
        first picture on (the boot logos and the films are not the menus) */
     /* (bt3.txt tbomovie=1) vitaGL takes all the free physically contiguous memory (vglInitExtended); the hardware player
        of the Tag Team screens' film (vita_tagmovie.c) needs some for its frames and its decoder, so 16 MB of it are left
-       unused (vglInitWithCustomThreshold: the same call as vglInitExtended otherwise, a threshold of 0 for it) */
+       unused (vglInitWithCustomThreshold: the same call as vglInitExtended otherwise, a threshold of 0 for it). The decoder asks
+       for a block of 14 MB besides the frames (batch 30: 16 MB was too little, 0x80024302), so the default is 32 MB as
+       vitaGL's samples/video_playback; bt3.txt tbomoviemem sets it */
     {
         vglInitWithCustomThreshold(0x1000000, gVitaMenuHi ? SCR_W_MENU : SCR_W_FIGHT, gVitaMenuHi ? SCR_H_MENU : SCR_H_FIGHT, 0x1800000,
-                    0, gVitaTagMovie == 1 ? 16 * 1024 * 1024 : 0, 0x8C6000 /* (vitaGL's SCE_KERNEL_MAX_MAIN_CDIALOG_MEM_SIZE: none of that pool) */,
+                    0, gVitaTagMovie == 1 ? gVitaTagMovieMem * 1024 * 1024 : 0, 0x8C6000 /* (vitaGL's SCE_KERNEL_MAX_MAIN_CDIALOG_MEM_SIZE: none of that pool) */,
                     gVitaMsaa == 4 ? SCE_GXM_MULTISAMPLE_4X : gVitaMsaa == 2 ? SCE_GXM_MULTISAMPLE_2X : SCE_GXM_MULTISAMPLE_NONE);
     }
     if (gVitaTagMovie == 1) {
-        Vita_Log("vgl: 16 MB of physically contiguous memory left to the film's player (tbomovie=1)\n");
+        Vita_Log("vgl: %d MB of physically contiguous memory left to the film's player (tbomovie=1)\n", gVitaTagMovieMem);
     }
     Vita_Log("vgl: multisampling %s; menus at %s, fights at %d x %d\n", gVitaMsaa == 4 ? "4x" : gVitaMsaa == 2 ? "2x" : "off",
              gVitaMenuHi ? "960 x 544" : "the fights' size", SCR_W_FIGHT, SCR_H_FIGHT);

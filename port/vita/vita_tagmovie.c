@@ -55,8 +55,9 @@ extern SceUID Vita_ThreadOnCore3(const char *name, SceKernelThreadEntry entry, i
 extern int gVitaCore3;
 
 int gVitaTagMovie = 0; /* bt3.txt tbomovie: 0 the poster (default), 1 the film; other values the poster */
+int gVitaTagMovieMem = 32; /* bt3.txt tbomoviemem: MB of physically contiguous memory left to the player (vita_vgl.c) */
 
-#define TM_OUT_FRAMES 6      /* the player's output frame buffers (the GPU reads one for a few pictures after it was given) */
+#define TM_OUT_FRAMES 5      /* the player's output frame buffers (vitaGL's samples/video_playback: 5; the GPU reads one for a few pictures after it was given) */
 #define TM_FREE_DELAY_US 150000u /* frames given back this long after the player lets them go */
 #define TM_PHYCONT_ALIGN (1024 * 1024) /* physically contiguous blocks: 1 MB sizes */
 #define TM_IDLE_US 500000u   /* the thread stops this long after the last picture asked for */
@@ -66,6 +67,7 @@ int gVitaTagMovie = 0; /* bt3.txt tbomovie: 0 the poster (default), 1 the film; 
 #define TM_LATE_US 85000u    /* a picture more than this late is counted as late */
 #define TM_POLL_US 2000u     /* the player polled this often when it has no picture */
 #define TM_LOG_US 2000000u
+#define TM_DIAG_US 250000u   /* the first TM_NOFRAME_US of a source: the player's state logged this often */
 /* the player's handle is an address (0x8xxxxxxx: negative as an int), its errors 0x80xxxxxx codes: not a sign test */
 #define TM_NONE ((SceAvPlayerHandle)0)
 #define TM_OK(h) ((h) != 0 && ((unsigned)(h) & 0xFF000000u) != 0x80000000u)
@@ -96,6 +98,7 @@ static struct {
     struct { void *p; size_t n; int frame; } blk[TM_TRACK];
     size_t liveFrame, liveOther, peak;
     int core;
+    int allocFailed;       /* a frame's memory the player asked for could not be given (it will give no picture) */
     uint64_t freedAt;      /* us: the last wait before frames were given back */
 } sM;
 
@@ -131,6 +134,9 @@ static void *tm_alloc(void *arg, uint32_t alignment, uint32_t size) {
     void *p;
     (void)arg;
     p = memalign(alignment < 16 ? 16 : alignment, size);
+    if (p == NULL) {
+        Vita_Log("tagmovie: allocate(align %u, %u KB): out of memory\n", alignment, size / 1024);
+    }
     if (p != NULL) {
         tm_lock();
         tm_track(p, size, 0, 1);
@@ -150,25 +156,41 @@ static void tm_free(void *arg, void *p) {
 static void *tm_alloc_frame(void *arg, uint32_t alignment, uint32_t size) {
     SceUID blk;
     void *p = NULL;
+    unsigned asked = size;
+    int r;
     (void)arg;
-    (void)alignment;
     size = (size + TM_PHYCONT_ALIGN - 1) & ~(uint32_t)(TM_PHYCONT_ALIGN - 1);
     blk = sceKernelAllocMemBlock("bt3_tagframe", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, size, NULL);
     if (blk < 0) {
-        Vita_Log("tagmovie: no physically contiguous memory for a frame of %u KB (0x%08X)\n", size / 1024, (unsigned)blk);
+        Vita_Log("tagmovie: allocateTexture(align %u, size %u KB -> %u KB): no physically contiguous memory (0x%08X); tbomoviemem too small?\n",
+                 alignment, asked / 1024, size / 1024, (unsigned)blk);
+        tm_lock();
+        sM.allocFailed = 1;
+        tm_unlock();
         return NULL;
     }
-    if (sceKernelGetMemBlockBase(blk, &p) < 0 || p == NULL) {
+    r = sceKernelGetMemBlockBase(blk, &p);
+    if (r < 0 || p == NULL) {
+        Vita_Log("tagmovie: allocateTexture(%u KB): the block's base 0x%08X\n", size / 1024, (unsigned)r);
         sceKernelFreeMemBlock(blk);
+        tm_lock();
+        sM.allocFailed = 1;
+        tm_unlock();
         return NULL;
     }
-    if (sceGxmMapMemory(p, size, SCE_GXM_MEMORY_ATTRIB_RW) < 0) {
+    r = sceGxmMapMemory(p, size, SCE_GXM_MEMORY_ATTRIB_RW);
+    if (r < 0) {
+        Vita_Log("tagmovie: allocateTexture(%u KB): sceGxmMapMemory 0x%08X\n", size / 1024, (unsigned)r);
         sceKernelFreeMemBlock(blk);
+        tm_lock();
+        sM.allocFailed = 1;
+        tm_unlock();
         return NULL;
     }
     tm_lock();
     tm_track(p, size, 1, 1);
     tm_unlock();
+    Vita_Log("tagmovie: allocateTexture(align %u, size %u KB -> %u KB) = %p\n", alignment, asked / 1024, size / 1024, p);
     return p;
 }
 static void tm_free_frame(void *arg, void *p) {
@@ -201,6 +223,7 @@ static void tm_free_frame(void *arg, void *p) {
     blk = sceKernelFindMemBlockByAddr(p, 0);
     sceGxmUnmapMemory(p);
     if (blk >= 0) sceKernelFreeMemBlock(blk);
+    Vita_Log("tagmovie: deallocateTexture(%p, %u KB)\n", p, (unsigned)(n / 1024));
 }
 
 /* A player with the film's source set, not started (the player starts it when the source is in: autoStart).
@@ -215,16 +238,27 @@ static SceAvPlayerHandle tm_init(void) {
     init.basePriority = TM_PRIORITY;
     init.numOutputVideoFrameBuffers = TM_OUT_FRAMES;
     init.autoStart = 1;
-    return sceAvPlayerInit(&init);
+    {
+        SceAvPlayerHandle h = sceAvPlayerInit(&init);
+        Vita_Log("tagmovie: sceAvPlayerInit(priority 0x%X, %d output frames, autoStart) = 0x%08X\n", (unsigned)init.basePriority,
+                 init.numOutputVideoFrameBuffers, (unsigned)h);
+        return h;
+    }
 }
 
-/* The file to play: the player's source set (a stopped player takes a new one; a player that refuses is made again).
-   0 on success. */
+/* The file to play: the player's source set, in the order of vitaGL's samples/video_playback (Init, AddSource, then
+   SetLooping; a player with autoStart starts when the source is in). A player that has played is stopped first, and made
+   again when it refuses the new source. Every call's result is logged. 0 on success. */
 static int tm_play(SceAvPlayerHandle *h, const char *file, int looping) {
+    int r;
     if (TM_OK(*h)) {
-        sceAvPlayerStop(*h);
-        sceAvPlayerSetLooping(*h, looping);
-        if (sceAvPlayerAddSource(*h, file) >= 0) {
+        r = sceAvPlayerStop(*h);
+        Vita_Log("tagmovie: sceAvPlayerStop = 0x%08X\n", (unsigned)r);
+        r = sceAvPlayerAddSource(*h, file);
+        Vita_Log("tagmovie: sceAvPlayerAddSource(%s) = 0x%08X (a player that played)\n", file, (unsigned)r);
+        if (r >= 0) {
+            r = sceAvPlayerSetLooping(*h, looping);
+            Vita_Log("tagmovie: sceAvPlayerSetLooping(%d) = 0x%08X\n", looping, (unsigned)r);
             return 0;
         }
         sceAvPlayerClose(*h);
@@ -234,14 +268,13 @@ static int tm_play(SceAvPlayerHandle *h, const char *file, int looping) {
     if (!TM_OK(*h)) {
         return -1;
     }
-    sceAvPlayerSetLooping(*h, looping);
-    {
-        int r = sceAvPlayerAddSource(*h, file);
-        if (r < 0) {
-            Vita_Log("tagmovie: the player refused %s (0x%08X)\n", file, (unsigned)r);
-            return -1;
-        }
+    r = sceAvPlayerAddSource(*h, file);
+    Vita_Log("tagmovie: sceAvPlayerAddSource(%s) = 0x%08X\n", file, (unsigned)r);
+    if (r < 0) {
+        return -1;
     }
+    r = sceAvPlayerSetLooping(*h, looping);
+    Vita_Log("tagmovie: sceAvPlayerSetLooping(%d) = 0x%08X\n", looping, (unsigned)r);
     return 0;
 }
 
@@ -250,6 +283,7 @@ static void tm_finish(SceAvPlayerHandle h, int failed) {
     tm_lock();
     sM.frame = NULL;
     sM.stopping = 1;
+    sM.allocFailed = 0;
     if (failed) {
         sM.failedAt = tm_now();
     }
@@ -269,18 +303,17 @@ static void tm_finish(SceAvPlayerHandle h, int failed) {
 static int tm_thread(SceSize args, void *argp) {
     SceAvPlayerHandle h = TM_NONE;
     int seen = 0;
-    uint64_t origin = 0, startedAt = 0, logAt;
+    uint64_t origin = 0, startedAt = 0, logAt, diagAt = 0;
+    unsigned polls = 0, active = 0, audio = 0, infoDone = 0;
     (void)args;
     (void)argp;
 
     {
-        int m = sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER); /* (already loaded: its error is the player's Init's below) */
-        h = tm_init();
-        if (!TM_OK(h)) {
-            Vita_Log("tagmovie: the player did not start (module 0x%08X, init 0x%08X): the poster\n", (unsigned)m, (unsigned)h);
-        }
+        int m = sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER); /* (a module already loaded answers an error code too) */
+        Vita_Log("tagmovie: sceSysmoduleLoadModule(AVPLAYER) = 0x%08X\n", (unsigned)m);
     }
-    if (!TM_OK(h) || tm_play(&h, TM_INTRO, 0) < 0) {
+    /* (a fresh player: Init, AddSource, SetLooping: no Stop first) */
+    if (tm_play(&h, TM_INTRO, 0) < 0) {
         Vita_Log("tagmovie: the player cannot play %s (the package carries tbo/ui/tag_ui_*.mp4?): the poster\n", TM_INTRO);
         tm_finish(h, 1);
     }
@@ -292,6 +325,7 @@ static int tm_thread(SceSize args, void *argp) {
              TM_OUT_FRAMES, gVitaCore3 == 1 ? "fourth" : "second");
     origin = startedAt = tm_now();
     logAt = origin + TM_LOG_US;
+    diagAt = origin;
     for (;;) {
         SceAvPlayerFrameInfo info;
         uint64_t now = tm_now();
@@ -312,7 +346,8 @@ static int tm_thread(SceSize args, void *argp) {
                 tm_finish(h, 1);
             }
             seen = 0;
-            origin = startedAt = now;
+            origin = startedAt = diagAt = now;
+            polls = active = audio = infoDone = 0;
             tm_lock();
             sM.inLoop = 0;
             tm_unlock();
@@ -345,8 +380,46 @@ static int tm_thread(SceSize args, void *argp) {
                      inLoop ? "loop" : "intro", gVitaCore3 == 1 ? "fourth" : "second");
             logAt = now + TM_LOG_US;
         }
+        /* the audio queue drained (the films have no audio track; an undrained queue could stall a player) */
+        {
+            SceAvPlayerFrameInfo ainfo;
+            memset(&ainfo, 0, sizeof(ainfo));
+            if (sceAvPlayerGetAudioData(h, &ainfo)) {
+                if (audio++ == 0) {
+                    Vita_Log("tagmovie: the player gave audio data (%u Hz, %u channels, %u bytes): drained\n", ainfo.details.audio.sampleRate,
+                             (unsigned)ainfo.details.audio.channelCount, ainfo.details.audio.size);
+                }
+            }
+        }
+        /* the first seconds of a source: what the player says (IsActive, GetVideoData, the streams), every TM_DIAG_US */
+        polls++;
+        if (!seen && now - startedAt <= TM_NOFRAME_US + TM_DIAG_US) {
+            int act = sceAvPlayerIsActive(h);
+            active += act ? 1 : 0;
+            if (now >= diagAt) {
+                Vita_Log("tagmovie: %u ms after the source: IsActive=%d (%u of %u polls), %u frames so far, current time %u ms\n",
+                         (unsigned)((now - startedAt) / 1000), act, active, polls, sM.decoded, (unsigned)sceAvPlayerCurrentTime(h));
+                diagAt = now + TM_DIAG_US;
+                if (!infoDone && now - startedAt >= 500000u) {
+                    unsigned id;
+                    infoDone = 1;
+                    for (id = 0; id < 2; id++) {
+                        SceAvPlayerStreamInfo si;
+                        int r;
+                        memset(&si, 0, sizeof(si));
+                        r = sceAvPlayerGetStreamInfo(h, id, &si);
+                        Vita_Log("tagmovie: GetStreamInfo(%u) = 0x%08X: type %u, %ux%u, duration %u ms\n", id, (unsigned)r, si.type,
+                                 si.details.video.width, si.details.video.height, (unsigned)si.duration);
+                    }
+                }
+            }
+        }
         memset(&info, 0, sizeof(info));
         if (sceAvPlayerGetVideoData(h, &info)) {
+            if (!seen) {
+                Vita_Log("tagmovie: first picture %u ms after the source: %ux%u at %p, time stamp %u ms\n", (unsigned)((now - startedAt) / 1000),
+                         info.details.video.width, info.details.video.height, (void *)info.pData, (unsigned)info.timeStamp);
+            }
             /* the picture's time from the source's start (the player's timeStamp, in ms) */
             int late = now - origin > (uint64_t)info.timeStamp * 1000u + TM_LATE_US;
             tm_lock();
@@ -362,8 +435,9 @@ static int tm_thread(SceSize args, void *argp) {
             seen = 1;
             continue;
         }
-        if (!seen && now - startedAt > TM_NOFRAME_US) {
-            Vita_Log("tagmovie: the player gives no picture from %s in 3 s: the poster\n", sM.inLoop ? TM_LOOP : TM_INTRO);
+        if (!seen && (now - startedAt > TM_NOFRAME_US || sM.allocFailed)) {
+            Vita_Log("tagmovie: the player gives no picture from %s (%s; IsActive %u of %u polls, audio data %u times): the poster\n",
+                     sM.inLoop ? TM_LOOP : TM_INTRO, sM.allocFailed ? "its memory could not be given" : "in 3 s", active, polls, audio);
             tm_finish(h, 1);
         }
         if (seen && !sceAvPlayerIsActive(h)) {
@@ -373,7 +447,8 @@ static int tm_thread(SceSize args, void *argp) {
                 tm_finish(h, 1);
             }
             seen = 0;
-            origin = startedAt = tm_now();
+            origin = startedAt = diagAt = tm_now();
+            polls = active = audio = infoDone = 0;
             tm_lock();
             sM.inLoop = 1;
             tm_unlock();
