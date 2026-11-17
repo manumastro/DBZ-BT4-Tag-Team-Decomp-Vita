@@ -83,17 +83,35 @@ What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
 Requirements:
 
-- A PS Vita running HENkaku / Ensō
+- A PS Vita (or PS TV) running HENkaku / Ensō, with VitaShell
 - Recommended: the [CapUnlocker](https://github.com/GrapheneCt/CapUnlocker) kernel plugin, which lets the game use
   the Vita's fourth CPU core. Without it the game runs, but heavy scenes are slower.
 - About 6 GB free on `ux0:` for the game files (the `.iso` as it is, or the files unpacked from it)
+- Your own disc image of Team BT4's Budokai Tenkaichi 4 **B14 Rev2** (see [Game files](#game-files))
 
-Steps:
+Steps, for a first installation:
 
-1. Install `BT4-Vita.vpk` from the [releases page](https://github.com/manumastro/DBZ-BT4-Tag-Team-Decomp-Vita/releases)
-   with VitaShell.
-2. Copy your disc image (`.iso`) to `ux0:data/bt4/`, or the files unpacked from it, as described below.
-3. Start **Dragon Ball Z: BT4** from the LiveArea.
+1. **The disc image.** You need your own image of Team BT4's **B14 Rev2**, English or Spanish (no other build works,
+   see [Game files](#game-files)). If it came packed (`.7z`, `.zip`, `.rar`), unpack it **on a computer** with
+   [7-Zip](https://www.7-zip.org/): the game reads the `.iso`, not the archive, and phone unpackers often fail on an
+   archive this large. Check the size of the `.iso`: 5,914,853,376 bytes for the English release, 5,396,742,144 for
+   the Spanish one. A smaller file is a copy cut short; unpack or copy it again.
+2. **The memory card.** The `.iso` is one file of about 6 GB. A card formatted as FAT32 (common with SD2Vita) cannot
+   hold a file over 4 GB: on such a card copy the files unpacked from the image instead (see
+   [Game files](#game-files)), or format the card as exFAT.
+3. **Optional, recommended: CapUnlocker.** Install the [CapUnlocker](https://github.com/GrapheneCt/CapUnlocker)
+   plugin as its page says and restart the Vita. The game runs without it, but heavy scenes are slower.
+4. **The app.** Download `BT4-Vita.vpk` from the
+   [releases page](https://github.com/manumastro/DBZ-BT4-Tag-Team-Decomp-Vita/releases) (the `.vpk`, not the source
+   code). Copy it to the Vita with VitaShell (USB or FTP), open it in VitaShell and confirm the installation.
+5. **The game files.** Copy the `.iso` as it is, under any name ending in `.iso`, to `ux0:data/bt4/` with VitaShell
+   (USB or FTP). If the folder is not there, make it in VitaShell, or start the game once: it makes the folder
+   itself. An image already in `ux0:data/bt3/bt4/` for the BT3 Vita port is found there too: one copy serves both.
+6. **Start Dragon Ball Z: BT4** from the LiveArea. If the files are not found, the screen says where it looked and
+   what it found ([Troubleshooting](#troubleshooting)).
+7. **Optional: everything unlocked**, see [Unlock All](#unlock-all).
+
+Questions players often ask: [FAQ](#faq).
 
 It installs beside the BT3 port: the two keep their files apart (`ux0:data/bt3/` and `ux0:data/bt4/`). For BT3 with
 the same speed-ups as this port, see my BT3 fork's releases:
@@ -261,8 +279,57 @@ not available.
   in `ux0:data/bt4/bt3.txt` (the fights drawn at the screen's own size: sharper, but they may run slower). When
   reporting it, attach `ux0:data/bt4/log.txt`: its lines starting with `display:` and `vgl: the picture is drawn
   at` say what size was drawn and what the system was given.
+- **"The .iso is cut short"**: the copy on the memory card is smaller than the disc (the screen gives both sizes). The
+  copy stopped early, or the card is FAT32, which holds files up to 4 GB: copy the image again, to an exFAT card, or
+  copy the unpacked files instead ([Game files](#game-files)).
+- **A `.7z` (or `.zip`, `.rar`) in the folder does nothing**: the game reads only the `.iso` or the unpacked files.
+  Unpack the archive on a computer with 7-Zip (phone unpackers often fail on one this large) and check the `.iso`'s
+  size against [Game files](#game-files).
+- **An older build (B13, Beta X, earlier betas)**: not supported, only B14 Rev2 (English or Spanish). The game does
+  not check which build an image is: with another one it may not start, or may stop later. Use a B14 Rev2 image.
 - **The game stops** (the picture freezes, the music plays on): the game writes `ux0:data/bt4/hang.txt` when its
   picture stops for a few seconds. Attaching it and `log.txt` to a bug report helps a lot.
+- **Reporting a crash or a bug**: open an [issue](https://github.com/manumastro/DBZ-BT4-Tag-Team-Decomp-Vita/issues)
+  and attach `ux0:data/bt4/log.txt` (and `log-prev.txt` if the problem was a few starts ago), plus `hang.txt` if it is
+  there. Say what you were doing (mode, characters, stage, the move), the console (PS Vita 1000, 2000 or PS TV), the
+  version of the game and the plugins you use (the log lists the ones in `config.txt`). The log is in
+  `ux0:data/bt4/` even when the game files are elsewhere.
+
+## FAQ
+
+**This port or arielxflores's?** arielxflores's [BT3 Vita port](https://github.com/arielxflores/Tenkaichi3Decomp-Vita)
+also runs BT4 B14 Rev2 (experimental there), inside its BT3 app. This one is BT4 only, on the same code with its
+speed-ups. The two can be installed side by side: they are different apps with different titles.
+
+| | This port | arielxflores's BT3 Vita port |
+|---|---|---|
+| The app | BT4 only, its own app: "Dragon Ball Z: BT4", title BTFV00010 | BT3, with BT4 chosen inside it (title BTTD00010) |
+| Game files and saves | `ux0:data/bt4/` (the image is also found in `ux0:data/bt3/bt4/`) | `ux0:data/bt3/bt4/` |
+| Speed-ups | The BT3 fork's renderer work and arielxflores's 1.2 speed-ups, all but his dynamic fight resolution; every stage 28.8 to 29.5 fps on a PS Vita 1000 with CapUnlocker | See its page |
+| Unlock All | Yes, SELECT at the start or held in the menus ([Unlock All](#unlock-all)) | Yes, see its page |
+| Tag Team offline (you and CPUs, 2 vs 2) | From the next version after v1.3 | See its page |
+| Online play | No | See its page |
+
+**Should I install this instead of BT3?** No need to choose: BT3 and BT4 are different games, and this app does not
+replace the BT3 port. Both stay installed, each with its own files and saves (`ux0:data/bt3/` and `ux0:data/bt4/`).
+
+**How do I get the game in Spanish?** Use Team BT4's Spanish B14 Rev2 image instead of the English one. The port runs
+the game in the language of the image it finds, with that release's texts and music; there is no language choice in
+the game. On the Spanish image the Vita's rows of the menus ("Vita Settings", "Multiplayer") keep that disc's own
+names, in the same places.
+
+**Is there a full save?** Use [Unlock All](#unlock-all): every character and form, stage, song and item, and
+4,850,000 Zenni, with a copy of your save kept first.
+
+**Daima characters or missions?** The characters, stages and missions are those of Team BT4's B14 Rev2: the port
+runs that build's own code and data and adds none. Other builds are not supported.
+
+**Online play, or matchmaking with the PC version?** Not on the Vita. The PC version's online code is left out of
+the Vita build; what porting it would take is studied in [docs/vita/online-bt4.md](docs/vita/online-bt4.md), with
+nothing built yet and no date.
+
+**It crashes, or the picture is wrong**: see [Troubleshooting](#troubleshooting), and attach `log.txt` (and
+`hang.txt`) from `ux0:data/bt4/` to the report.
 
 ## Notes
 
