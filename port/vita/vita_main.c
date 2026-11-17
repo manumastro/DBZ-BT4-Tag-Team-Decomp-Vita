@@ -2291,6 +2291,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "esrebind") == 0) { /* an object's model file bound again begins no new generation of the seam: 0 off, 1 on, 2 in the soak's B battles (gs_marker.c) */
             extern int gVitaEsRebind;
             gVitaEsRebind = atoi(eq);
+        } else if (strcmp(line, "bindrange") == 0) { /* a model bind drops only the seam's calls whose memory its file meets: 0 off, 1 on, 2 in the soak's B battles, 3 on and each call so kept compared once (gs_marker.c, gs_core.c es_carry) */
+            extern int gVitaBindRange;
+            gVitaBindRange = atoi(eq);
         } else if (strcmp(line, "gxmcache") == 0) { /* vitaGL's GXM state calls left out when they change nothing: 0 off, 1 on, 2 in the soak's B battles */
             extern int gVitaGxmCache;
             gVitaGxmCache = atoi(eq);

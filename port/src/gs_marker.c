@@ -619,7 +619,57 @@ void Port_EsStageBusy(void) {
    on, 2 the soak's B battles; the report's "esrebind" count. */
 int gVitaEsRebind = 0;
 unsigned gVitaEsBind[2]; /* (the log) binds that began a generation, binds again that did not */
-void Port_EsModelBound(int again) {
+/* bt3.txt bindrange: a new generation of the models' calls tells the list reader what memory changed with it (gs_core.c
+   GsFE_EsBindNote, es_carry): the bound object's model file, file[0] of its resource slot (BtlObjMdl_BindFiles writes
+   into nothing else: the chains it rebases the first time, entries 4..11 and the meshes, and the texture files it
+   relocates are all entries of that file), and the character packs loaded since the bind before (Bt4_CharaPack,
+   Port_EsMemNew: they are loaded just before the bind that needs them). A kept call of the seam whose memory none of
+   those ranges meets then keeps its copy in the new generation instead of being read the long way twice and kept
+   again (2 vs 2, the end of a Super Spirit Bomb: the four fighters' calls, the list reader 84-89 ms on one list). A
+   bind whose file is not where the slot says, and the end of a battle (Port_EsModelsGone), begin a generation without
+   a range: every call is read again, as before. 0 off (every generation without a range), 1 on, 2 the soak's B
+   battles, 3 on and each call so kept read the long way once more and compared with its copy (gs_core.c cc_end). */
+int gVitaBindRange = 0;
+unsigned gVitaBrBind[2]; /* (the log) generations begun with a range, without one */
+extern void GsFE_EsBindNote(unsigned gen, int n, const uint32_t *lo, const uint32_t *hi);
+#define BR_MAX 4
+static uint32_t sBrLo[BR_MAX], sBrHi[BR_MAX];
+static int sBrN; /* the ranges loaded since the last generation (-1: more than BR_MAX) */
+static int br_on(void) {
+    return gVitaBindRange == 2 ? gVitaAbSide == 1 : gVitaBindRange != 0;
+}
+static void br_add(const void *p, int size) {
+    uint32_t a = (uint32_t)(uintptr_t)p, b = a + (uint32_t)size;
+    if (sBrN < 0) {
+        return;
+    }
+    if (p == NULL || size <= 0 || b < a || sBrN == BR_MAX) {
+        sBrN = -1;
+        return;
+    }
+    sBrLo[sBrN] = a;
+    sBrHi[sBrN] = b;
+    sBrN++;
+}
+/* (src/battle/bobj_a.c Bt4_CharaPack) a character pack loaded at p: new data, for the next generation's ranges */
+void Port_EsMemNew(const void *p, int size) {
+    br_add(p, size);
+}
+static void es_gen_model(int ranged) {
+    sEsGenM = (sEsGenM + 1) & 0xFFF;
+    if (sEsGenM == 0) {
+        sEsGenM = 1;
+    }
+    gVitaEsGens[1]++;
+    gVitaBrBind[ranged && sBrN >= 0 ? 0 : 1]++;
+    GsFE_EsBindNote(sEsGenM, ranged ? sBrN : -1, sBrLo, sBrHi); /* (before any list carries the new generation) */
+    sBrN = 0;
+}
+/* (src/battle/btl_obj.c BtlObj_Term) the battle's objects and files are gone: a generation without a range */
+void Port_EsModelsGone(void) {
+    es_gen_model(0);
+}
+void Port_EsModelBound(int again, const void *file, const void *buf, int size) {
     sEsGenT = (sEsGenT + 1) & 0xFFF;
     if (sEsGenT == 0) {
         sEsGenT = 1;
@@ -629,11 +679,15 @@ void Port_EsModelBound(int again) {
         return;
     }
     gVitaEsBind[0]++;
-    sEsGenM = (sEsGenM + 1) & 0xFFF;
-    if (sEsGenM == 0) {
-        sEsGenM = 1;
+    {   /* (the file must lie in the slot's: else no range) */
+        uint32_t f = (uint32_t)(uintptr_t)file, a = (uint32_t)(uintptr_t)buf;
+        if (buf == NULL || size <= 0 || f < a || f - a >= (uint32_t)size) {
+            sBrN = -1;
+        } else {
+            br_add(buf, size);
+        }
     }
-    gVitaEsGens[1]++;
+    es_gen_model(br_on());
 }
 static int es_on(void) {
     return gVitaNative == 2 ? gVitaAbSide == 1 : gVitaNative != 0;

@@ -4061,7 +4061,7 @@ extern unsigned gVitaChipGen;
    CC_STALE lists (bt3.txt ccevict=0: as before). */
 #define CC_N 16384
 #define CC_STALE 150u
-typedef struct CallCache { uint32_t addr, gen, bytes, at, uses, serial, used, es; uint8_t state; uint8_t *data; } CallCache; /* state: 0 new, 1 read once, 2 kept, 3 never; used: the list it was last called in; es: the engine seam's generation (its own table), 0 the cache's */
+typedef struct CallCache { uint32_t addr, gen, bytes, at, uses, serial, used, es; uint8_t state, chk, why; uint8_t *data; } CallCache; /* state: 0 new, 1 read once, 2 kept, 3 never; used: the list it was last called in; es: the engine seam's generation (its own table), 0 the cache's; chk: kept across a bind, to be read and compared once (bindrange=3); why: the seam's, why it is read the long way (0 a new place, 1 an old generation, 2 the chip let go) */
 static uint32_t sCcSerial; /* numbers the kept copies (the back end keeps its own form of each: see dp_part) */
 static CallCache sCC[CC_N];
 static int sCcCap = -1;          /* the entry being read the long way (and recorded), -1: none (CC_N: one of the engine seam's) */
@@ -4135,12 +4135,204 @@ static CallCache *sEsTab;       /* (SEAM_N entries, from the heap at the first u
 static uint32_t sEsMark;        /* the list reader: the MARK of the DMA tag being read (0x10000 | its value), 0 none */
 int gVitaEsCheck = 512;         /* bt3.txt nativecheck */
 unsigned gVitaEs[6];            /* for the log: calls sent from the seam's copies, read the long way, kept, table full (to the cache), entries of an old generation, places taken from calls not seen lately */
+
+/* ---- bt3.txt bindrange (port/src/gs_marker.c Port_EsModelBound): a new generation of the models' calls began with a
+   bind comes with the ranges of memory that may have changed with it (the bound model file, the character packs
+   loaded for it), in a ring by the generation, written by the game's thread before any list carries that
+   generation. A kept call of the seam (state 2) found with a newer generation keeps its copy, its serial (the back
+   end's kept part) and its state when
+   - every piece of memory its chain was seen to read (the tags, the data they point to: es_span_tag, two spans) lies
+     in a range some bind named since the last generation without ranges (so that a change of it comes with a bind),
+   - no generation between its own and the call's is one without ranges, the ring holds them all (64 at most), and
+   - none of their ranges meets its memory.
+   Else it is read again as before (the old way: twice the long way and kept again). The rule's ground: nothing
+   writes into a model's chains but its loading and its first bind (MdlTex_RebaseChain); the old generations rested
+   on it too. At 3 a call so kept is read the long way at its next drawn use and its records compared with the
+   copy (cc_end): a difference is counted and logged, and the new copy taken. ---- */
+extern int gVitaBindRange;
+typedef struct EsBindR { uint32_t no; int n; uint32_t lo[4], hi[4]; } EsBindR;
+static EsBindR sEsBindR[4096]; /* by generation; n -1: without ranges */
+static uint32_t sEsBindNo;     /* (the game's thread) the generations begun */
+typedef struct EsSpan { uint32_t lo[2], hi[2], no; } EsSpan;
+static EsSpan *sEsSpan;        /* (SEAM_N, with sEsTab) what each call read; no: the number of its generation */
+#define ES_KNOWN 64
+static uint32_t sEsKnownLo[ES_KNOWN], sEsKnownHi[ES_KNOWN], sEsKnownNo; /* (the list reader) the ranges named since the last generation without ranges, up to bind sEsKnownNo */
+static unsigned sEsKnownN, sEsKnownGen = 1; /* (generation 1: the first, before any bind) */
+unsigned gVitaBr[8]; /* for the log: calls kept across a bind, dropped by a bind's range, dropped otherwise (not kept, their memory not named, a generation without ranges, too far); checks (3) made, found different, not compared (written to the chip again); kept calls read again now and then, found different */
+unsigned gVitaBrWhy[5]; /* for the log: the seam's calls read the long way: at a new place, after an old generation, after the chip let go, now and then (nativecheck), checks (3) */
+/* (the game's thread, port/src/gs_marker.c) generation gen begun, with n ranges (-1: without) */
+void GsFE_EsBindNote(unsigned gen, int n, const uint32_t *lo, const uint32_t *hi) {
+    EsBindR *r = &sEsBindR[gen & 0xFFF];
+    int i;
+    r->n = n;
+    for (i = 0; i < n && i < 4; i++) {
+        r->lo[i] = lo[i];
+        r->hi[i] = hi[i];
+    }
+    __sync_synchronize();
+    r->no = ++sEsBindNo;
+    __sync_synchronize();
+}
+static uint32_t es_gen_next(uint32_t g) {
+    g = (g + 1) & 0xFFF;
+    return g == 0 ? 1 : g;
+}
+/* the known ranges taken up to generation gen (its number no) */
+static void es_known_sync(uint32_t gen, uint32_t no) {
+    uint32_t g = sEsKnownGen, k = sEsKnownNo;
+    int i;
+    if ((int32_t)(no - k) <= 0) {
+        return; /* (nothing new: or a list with an older generation after a newer one) */
+    }
+    if (no - k > 4000u) {
+        sEsKnownN = 0; /* (too far behind: the ring overrun, none known) */
+        sEsKnownGen = gen;
+        sEsKnownNo = no;
+        return;
+    }
+    while (k != no) {
+        const EsBindR *r;
+        g = es_gen_next(g);
+        r = &sEsBindR[g];
+        k++;
+        if (r->no != k || r->n < 0) {
+            sEsKnownN = 0; /* (a generation without ranges, or the ring overrun) */
+            continue;
+        }
+        for (i = 0; i < r->n; i++) {
+            unsigned j;
+            for (j = 0; j < sEsKnownN; j++) {
+                if (sEsKnownLo[j] == r->lo[i] && sEsKnownHi[j] == r->hi[i]) {
+                    break;
+                }
+            }
+            if (j < sEsKnownN) {
+                continue;
+            }
+            if (sEsKnownN == ES_KNOWN) { /* (full: the oldest forgotten, its calls read again at a bind) */
+                memmove(sEsKnownLo, sEsKnownLo + 1, (ES_KNOWN - 1) * sizeof(uint32_t));
+                memmove(sEsKnownHi, sEsKnownHi + 1, (ES_KNOWN - 1) * sizeof(uint32_t));
+                sEsKnownN--;
+            }
+            sEsKnownLo[sEsKnownN] = r->lo[i];
+            sEsKnownHi[sEsKnownN] = r->hi[i];
+            sEsKnownN++;
+        }
+    }
+    sEsKnownGen = gen;
+    sEsKnownNo = no;
+}
+static int es_span_known(uint32_t a, uint32_t b) {
+    unsigned j;
+    for (j = 0; j < sEsKnownN; j++) {
+        if (a >= sEsKnownLo[j] && b <= sEsKnownHi[j]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+/* Can entry e (generation e->es) keep its copy in generation gen? 1 yes (e->es not changed here). */
+static int es_carry(CallCache *e, uint32_t gen) {
+    const EsSpan *sp = &sEsSpan[e - sEsTab];
+    uint32_t g = e->es & 0xFFFu, no, k;
+    int i, j;
+    if (gVitaBindRange == 0) {
+        return 0;
+    }
+    no = sEsBindR[gen & 0xFFFu].no;
+    __sync_synchronize();
+    if (e->state != 2 || e->data == NULL || sp->hi[0] == 0 || no - sp->no == 0 || no - sp->no > 64u) {
+        gVitaBr[2]++;
+        return 0;
+    }
+    es_known_sync(gen & 0xFFFu, no);
+    for (i = 0; i < 2; i++) {
+        if (sp->hi[i] != 0 && !es_span_known(sp->lo[i], sp->hi[i])) {
+            gVitaBr[2]++;
+            return 0;
+        }
+    }
+    for (k = sp->no; k != no;) {
+        const EsBindR *r;
+        g = es_gen_next(g);
+        r = &sEsBindR[g];
+        k++;
+        if (r->no != k || r->n < 0) {
+            gVitaBr[2]++;
+            return 0;
+        }
+        for (j = 0; j < r->n; j++) {
+            for (i = 0; i < 2; i++) {
+                if (sp->hi[i] != 0 && sp->lo[i] < r->hi[j] && r->lo[j] < sp->hi[i]) {
+                    gVitaBr[1]++;
+                    return 0;
+                }
+            }
+        }
+    }
+    if (g != (gen & 0xFFFu)) {
+        gVitaBr[2]++;
+        return 0;
+    }
+    gVitaBr[0]++;
+    return 1;
+}
+/* the call being read the long way (an entry of the seam's) read [a, b): into its spans (two, each grown to take in
+   what lies within 4 KB of it; when both are taken and far, the one that grows least) */
+static void es_span_put(EsSpan *sp, uint32_t a, uint32_t b) {
+    int i;
+    if (b <= a) {
+        return;
+    }
+    for (i = 0; i < 2; i++) {
+        if (sp->hi[i] != 0 && a <= sp->hi[i] + 4096u && b + 4096u >= sp->lo[i]) {
+            sp->lo[i] = a < sp->lo[i] ? a : sp->lo[i];
+            sp->hi[i] = b > sp->hi[i] ? b : sp->hi[i];
+            return;
+        }
+    }
+    for (i = 0; i < 2; i++) {
+        if (sp->hi[i] == 0) {
+            sp->lo[i] = a;
+            sp->hi[i] = b;
+            return;
+        }
+    }
+    {
+        uint32_t g0 = (a < sp->lo[0] ? sp->lo[0] - a : 0) + (b > sp->hi[0] ? b - sp->hi[0] : 0);
+        uint32_t g1 = (a < sp->lo[1] ? sp->lo[1] - a : 0) + (b > sp->hi[1] ? b - sp->hi[1] : 0);
+        i = g0 <= g1 ? 0 : 1;
+        sp->lo[i] = a < sp->lo[i] ? a : sp->lo[i];
+        sp->hi[i] = b > sp->hi[i] ? b : sp->hi[i];
+    }
+}
+static void es_span_tag(CallCache *e, const uint32_t *tag, uint32_t id, uint32_t addr, uint32_t qwc) {
+    EsSpan *sp = &sEsSpan[e - sEsTab];
+    uint32_t t = (uint32_t)(uintptr_t)tag;
+    if (id == 0 || id == 3 || id == 4) { /* (REFE, REF, REFS: the tag, and its data elsewhere) */
+        es_span_put(sp, t, t + 16);
+        es_span_put(sp, addr, addr + qwc * 16);
+    } else {
+        es_span_put(sp, t, t + 16 + qwc * 16);
+    }
+}
+static void es_span_new(CallCache *e, uint32_t gen) {
+    EsSpan *sp = &sEsSpan[e - sEsTab];
+    memset(sp, 0, sizeof(*sp));
+    sp->no = sEsBindR[gen & 0xFFFu].no;
+}
+
 static CallCache *es_find(uint32_t addr, uint32_t gen) {
     uint32_t h, k, es = gen | 0x10000u;
     CallCache *old = NULL;
     if (sEsTab == NULL) {
         sEsTab = (CallCache *)calloc(SEAM_N, sizeof(CallCache));
-        if (sEsTab == NULL) {
+        sEsSpan = (EsSpan *)calloc(SEAM_N, sizeof(EsSpan));
+        if (sEsTab == NULL || sEsSpan == NULL) {
+            free(sEsTab);
+            free(sEsSpan);
+            sEsTab = NULL;
+            sEsSpan = NULL;
             return NULL;
         }
     }
@@ -4151,13 +4343,20 @@ static CallCache *es_find(uint32_t addr, uint32_t gen) {
     for (k = 0; k < 64; k++, h = (h + 1) & (SEAM_N - 1)) {
         CallCache *e = &sEsTab[h];
         if (e->addr == addr && ((e->es ^ es) & 0x7000u) == 0) {
-            if (e->es != es) { /* (another stage or model at that address: what was kept is another's) */
+            if (e->es != es && (es & 0x4000u) && es_carry(e, gen)) { /* (a model's: kept across the binds, bindrange) */
+                e->es = es;
+                sEsSpan[e - sEsTab].no = sEsBindR[gen & 0xFFFu].no;
+                e->chk = gVitaBindRange == 3;
+            } else if (e->es != es) { /* (another stage or model at that address: what was kept is another's) */
                 cc_retire(e->data);
                 e->data = NULL; e->state = 0; e->uses = 0; e->es = es;
+                e->chk = 0; e->why = 1;
+                es_span_new(e, gen);
                 gVitaEs[4]++;
             }
             if (e->gen != gVitaChipGen) { /* (the chip's buffers were let go: what was kept refers to them) */
                 cc_retire(e->data); e->data = NULL; e->state = 0; e->gen = gVitaChipGen;
+                e->chk = 0; e->why = 2;
             }
             e->used = sFeListSeq;
             return e;
@@ -4185,6 +4384,7 @@ static CallCache *es_find(uint32_t addr, uint32_t gen) {
     old->gen = gVitaChipGen;
     old->es = es;
     old->used = sFeListSeq;
+    es_span_new(old, gen);
     return old;
 }
 
@@ -4219,10 +4419,25 @@ static void cc_retire(uint8_t *p) { /* (the back end may still be walking it: fr
 unsigned gVitaCcWhy[9]; /* for the log: calls not kept: too big, wrapped, nothing in them, a strip with its vertices copied, a strip not planned, constants not VU memory 0, another record; GIF data copied in; VU memory 0..31 changed by the call */
 unsigned gVitaCcMax;     /* the largest call recorded (bytes of records) */
 static uint8_t sCcK0[512]; /* VU memory 0..31 when the call being recorded began */
+/* (bindrange=3) a call kept across a bind and read again was found different from its copy: counted, logged */
+static void br_differs(const CallCache *e, const char *how) {
+    extern void Vita_Log(const char *fmt, ...);
+    static unsigned lines;
+    gVitaBr[4]++;
+    if (lines < 40) {
+        lines++;
+        Vita_Log("gs: bindrange: the call at %08x (MARK %04x), kept across a bind, read again: %s, list %u\n", e->addr, (unsigned)(e->es & 0xFFFFu), how, sFeListSeq);
+    }
+}
 static void cc_end(CallCache *e) {
     unsigned end, pos = sCcStart, uploads = 0, out = 0, extra = 0;
     const uint8_t *k = GsVu1_Consts();
     uint8_t *buf;
+    int chk = e->chk, was = e->state; /* (chk: kept across a bind, compared now: bindrange=3; was 2: a kept call read again) */
+    e->chk = 0;
+    if (chk) {
+        gVitaBr[3]++;
+    }
     if (sRegDefN != 0) {
         reg_def_flush(); /* (what the call put off belongs to it) */
     }
@@ -4236,6 +4451,9 @@ static void cc_end(CallCache *e) {
            left. Read the long way every time. */
         gVitaCcWhy[8]++;
         e->state = 3;
+        if (chk) {
+            br_differs(e, "it writes the constants now");
+        }
         return;
     }
     if (end - pos > gVitaCcMax) {
@@ -4245,10 +4463,17 @@ static void cc_end(CallCache *e) {
         /* nothing, or a whole model in one call: never kept, so that the calls inside it are (each part) */
         gVitaCcWhy[end - pos == 0 ? 2 : 0]++;
         e->state = 3;
+        if (chk) {
+            br_differs(e, end - pos == 0 ? "it makes nothing now" : "too big now");
+        }
         return;
     }
     if ((pos % GR_SIZE) + (end - pos) > GR_SIZE) {
         gVitaCcWhy[1]++; /* (wrapped round the queue: another time) */
+        if (chk) {
+            gVitaBr[3]--;
+            e->chk = 1; /* (compared another time) */
+        }
         return;
     }
     {   /* GIF data the call refers to (in the model, not the list) is kept as a copy: room for it */
@@ -4262,7 +4487,13 @@ static void cc_end(CallCache *e) {
         }
     }
     buf = (uint8_t *)malloc(end - pos + extra);
-    if (buf == NULL) { return; }
+    if (buf == NULL) {
+        if (chk) {
+            gVitaBr[3]--;
+            e->chk = 1;
+        }
+        return;
+    }
     while (pos != end && ok) {
         const GRec *r = (const GRec *)(const void *)&sGr[pos % GR_SIZE];
         uint32_t sz = r->size;
@@ -4308,6 +4539,9 @@ static void cc_end(CallCache *e) {
     if (!ok) {
         free(buf);
         e->state = 3;
+        if (chk) {
+            br_differs(e, "not to be kept now");
+        }
         return;
     }
     gVitaCc[1]++;
@@ -4315,14 +4549,25 @@ static void cc_end(CallCache *e) {
         gVitaEs[1]++;
     }
     if (uploads != 0 || e->state == 0) { /* (first sight, or written to the chip just now: kept from the next sight on) */
+        if (chk) {
+            gVitaBr[5]++; /* (not compared: its strips written to the chip again) */
+        }
         free(buf);
         if (e->state == 2) { gVitaCc[3]++; cc_retire(e->data); e->data = NULL; }
         e->state = 1;
         return;
     }
+    if (e->es != 0 && was == 2 && !chk) {
+        gVitaBr[6]++; /* (for bindrange's line: a kept call of the seam read again now and then) */
+    }
     if (e->data != NULL && e->bytes == out && memcmp(e->data, buf, out) == 0) {
         free(buf); /* (the same as kept: the kept copy stays, the back end may be walking it) */
     } else {
+        if (chk) {
+            br_differs(e, "its records differ from the copy (the new ones kept)");
+        } else if (e->es != 0 && was == 2) {
+            gVitaBr[7]++;
+        }
         cc_retire(e->data);
         e->data = buf;
         e->serial = sCcSerial = dp_pick_serial(sCcSerial + 1);
@@ -6570,6 +6815,9 @@ static void run_chain(uint32_t tadr, int tte) {
         }
 #ifdef PORT_VITA
         lastT[guard & 7][0] = (uint32_t)(uintptr_t)tag; lastT[guard & 7][1] = tag[0]; lastT[guard & 7][2] = tag[1]; lastT[guard & 7][3] = tag[3];
+        if (sCcCap == CC_N && gVitaBindRange != 0 && (sCcCapE->es & 0x4000u)) {
+            es_span_tag(sCcCapE, tag, id, addr, qwc); /* (what a model's call read: bindrange) */
+        }
         if (qwc != 0 && !mem_ok((uint32_t)(uintptr_t)data, qwc * 16)) {
             extern void Vita_Log(const char *fmt, ...);
             static unsigned told;
@@ -6693,7 +6941,7 @@ static void run_chain(uint32_t tadr, int tte) {
                 gr_simple(GR_CHIPRESET, 0, 0, 0);
                 e = NULL;
             }
-            if (e != NULL && e->state == 2 && e->gen == gVitaChipGen &&
+            if (e != NULL && e->state == 2 && e->gen == gVitaChipGen && !e->chk &&
                 (e->es != 0 ? gVitaEsCheck <= 0 || ++e->uses % (unsigned)gVitaEsCheck != 0 : ++e->uses % 64 != 0)) {
                 GZM2(20);
                 cc_replay(e, 0);
@@ -6708,6 +6956,9 @@ static void run_chain(uint32_t tadr, int tte) {
                 }
                 sCcCapE = e;
                 sCcCap = e->es != 0 ? CC_N : (int)(e - sCC); /* read the long way, and recorded */
+                if (e->es != 0) { /* (for the log: why, bindrange's line) */
+                    gVitaBrWhy[e->state == 2 ? (e->chk ? 4 : 3) : e->why < 3 ? e->why : 0]++;
+                }
                 sCcStart = sGrTail;
                 sCcDepth = sp - 1;
                 memcpy(sCcK0, GsVu1_Consts(), 512); /* (the constants as the call found them: cc_end) */

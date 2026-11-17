@@ -2351,6 +2351,12 @@ static void *Bt4_CharaPack(BObjSlot *slot, s32 kind) {
         size = File_GetSize(id);
         sBt4CharaPack[c][kind] = (void *)Port_GameBigAlloc(size);
         File_LoadSync(id, sBt4CharaPack[c][kind], 0);
+#ifdef PORT_VITA
+        {   /* (the port's engine seam: new data there, for the next model generation's ranges: bindrange) */
+            extern void Port_EsMemNew(const void *p, int size);
+            Port_EsMemNew(sBt4CharaPack[c][kind], size);
+        }
+#endif
     }
     return sBt4CharaPack[c][kind];
 }

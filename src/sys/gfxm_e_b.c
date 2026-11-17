@@ -173,9 +173,11 @@ void BtlObjMdl_BindFiles(ObjMdlObj *obj) {
     s32 i;
 #ifdef PORT_VITA
     {   /* the port's engine seam: the models' chains may be other data now (port/src/gs_marker.c); a file bound
-           before keeps its chains as they were (esrebind) */
-        extern void Port_EsModelBound(int again);
-        Port_EsModelBound(mdl->file->bound);
+           before keeps its chains as they were (esrebind); what may have changed is the slot's model file, file[0]
+           of the BtlResSlot (buf, size: bindrange) */
+        extern void Port_EsModelBound(int again, const void *file, const void *buf, int size);
+        void **slot = (void **)res;
+        Port_EsModelBound(mdl->file->bound, mdl->file, slot != NULL ? slot[0] : NULL, slot != NULL ? ((s32 *)slot)[1] : 0);
     }
 #endif
 

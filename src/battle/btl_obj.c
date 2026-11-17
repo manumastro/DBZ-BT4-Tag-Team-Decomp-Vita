@@ -596,6 +596,12 @@ void BtlObj_Term(void) {
     s32 actor;
     extern u8 *gTagCharaWork[10];
     extern void Bt4_FreeCharaPacks(void);
+#ifdef PORT_VITA
+    {   /* (the port's engine seam: the battle's model files and packs are let go: bindrange) */
+        extern void Port_EsModelsGone(void);
+        Port_EsModelsGone();
+    }
+#endif
     Bt4_FreeCharaPacks();
     BtlObj_TermDraw();
     BtlObj_TermNop();
