@@ -9545,7 +9545,7 @@ void GsGpu_DpFree(void *blob) {
    point into the parts) still held the drawing thread there: in a Super Spirit Bomb ~56 waits, ~560 ms every 2 s.
    0 off (the wait), 1 on, 2 in the soak's B battles. */
 extern int gVitaAbSide;
-int gVitaDpFreeLate;
+int gVitaDpFreeLate = 1;
 unsigned gVitaDpFreeLateN[4]; /* (the log: parts freed late, pictures that kept some, waits after all (still in use), pictures with none to free and no wait) */
 static void *sDpWait[4096];
 static int sDpWaitN;
