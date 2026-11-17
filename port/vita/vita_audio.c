@@ -35,19 +35,39 @@ static int sPort = -1;
 unsigned gVitaAudioBlocks, gVitaAudioStarved;
 extern void Vita_Log(const char *fmt, ...);
 
+extern int gVitaHitch, gVitaGameThreadId; /* (bt3.txt hitchlog, vita_hitch.c) */
+extern void Vita_HitchEv(unsigned kind, unsigned arg, unsigned arg2, unsigned long long t0, unsigned long long dur);
+extern unsigned long long sceKernelGetProcessTimeWide(void);
+static unsigned long long sLockT; /* (hitchlog: when the owner took the lock) */
 static void lock(void) {
     int me = sceKernelGetThreadId();
+    unsigned long long t0;
     if (sOwner == me) {
         sDepth++;
         return;
     }
+    t0 = gVitaHitch > 0 ? sceKernelGetProcessTimeWide() : 0;
     sceKernelLockMutex(sMutex, 1, NULL);
     sOwner = me;
     sDepth = 1;
+    if (t0 != 0) {
+        unsigned long long t1 = sceKernelGetProcessTimeWide();
+        sLockT = t1;
+        if (t1 - t0 >= 2000) {
+            Vita_HitchEv(6, me == gVitaGameThreadId ? 0 : 1, 0, t0, t1 - t0); /* (the game's thread, 0, or another waited for the sound's lock) */
+        }
+    }
 }
 
 static void unlock(void) {
     if (--sDepth == 0) {
+        if (gVitaHitch > 0 && sLockT != 0) {
+            unsigned long long t1 = sceKernelGetProcessTimeWide();
+            if (t1 - sLockT >= 3000) {
+                Vita_HitchEv(7, sceKernelGetThreadId() == gVitaGameThreadId ? 0 : 1, 0, sLockT, t1 - sLockT); /* (held for long: 1 the sound thread mixing, 0 the game) */
+            }
+            sLockT = 0;
+        }
         sOwner = -1;
         sceKernelUnlockMutex(sMutex, 1);
     }
