@@ -2066,6 +2066,12 @@ static void read_settings(void) {
         } else if (strcmp(line, "tboui") == 0) { /* BT4decomp's own screens' pictures and TrueType lines drawn (vita_tbo.c): 0 off, 1 on, 2 soak B */
             extern int gVitaTboUi;
             gVitaTboUi = atoi(eq);
+        } else if (strcmp(line, "tagcam") == 0) { /* BT4decomp's free / spectator camera (vita_spectator.c): 0 the game's camera, 1 as on PC */
+            extern int gVitaTagCam;
+            gVitaTagCam = atoi(eq) != 0;
+        } else if (strcmp(line, "taglang") == 0) { /* BT4decomp's screens in the disc's language (vita_onlinelang.c): 0 English, 1 as on PC */
+            extern int gVitaTagLang;
+            gVitaTagLang = atoi(eq) != 0;
         } else if (strcmp(line, "fxclamp") == 0) { /* the animated effects' triangles (with their CLAMP writes) as runs: 0 off, 1 on, 2 soak B */
             extern int gVitaFxClamp;
             gVitaFxClamp = atoi(eq);

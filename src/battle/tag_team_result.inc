@@ -35,7 +35,11 @@ u16 *TagBattle_ResultText(s32 id) {
     case 0x7112: text=en?"Return to Character Select":"Volver a elegir personaje";break;
     default:{
         extern s32 PortTag_DedicatedMenu(void);
+#ifdef PORT_VITA /* (no Tenkaichi Budokai Online on the Vita: the earlier text setup, bt3.txt tagteam=2, is where it goes back to) */
+        text=en?"Back to Tag Team":"Volver a Tag Team";
+#else
         text=PortTag_DedicatedMenu()?(en?"Back to Tag Team":"Volver a Tag Team"):"Tenkaichi Budokai Online";
+#endif
         break;}
     }
     for(i=0;text[i]&&i<127;++i)line[i]=(u8)text[i];

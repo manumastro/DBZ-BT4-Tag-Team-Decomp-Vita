@@ -10,6 +10,7 @@
 #include <psp2/ctrl.h>
 #include <psp2/display.h>
 #include <psp2/kernel/processmgr.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -259,9 +260,56 @@ static float tag_axis(unsigned char raw) { /* (gs_input.c game_axis: the game's 
     }
     return value / (127.5f - 50.0f);
 }
+/* ---- BT4decomp's free camera (Camera mode > Camera mode: Free camera, Follow fighter, Fight overview), upstream's
+   gs/spectator_camera.c built for the Vita (port/vita/vita_spectator.c). As the PC's gs_input.c: while it is on in a
+   fight, player 1's pad is the camera's (spectator_camera.c PortSpectator_ConsumesInput): the game gets START and SELECT
+   only, sticks centred, no target choice; PortInput_Spectator reads the pad as it was. The PC's pad gives: the left stick
+   moves (Free camera) or turns and comes closer / goes back (Follow fighter, Fight overview), the right stick turns,
+   R1 / L1 up / down, the triggers R2 / L2 zoom in / out (held), L3 three times as fast. The handheld's R2 / L2 / L3 are as
+   in a fight: SELECT + R / L, or the touch panels (vita_touch.c). bt3.txt tagcam=0: none of it (vita_spectator.c) ---- */
+extern int gVitaTagCam;
+extern int PortSpectator_ConsumesInput(void);
+extern unsigned PortSpectator_FilterButtons(unsigned buttons);
+static struct { unsigned btn; unsigned char lx, ly, rx, ry; } sSpecPad = {0, 0x80, 0x80, 0x80, 0x80};
+static int spec_consumes(void) {
+    return gVitaTagCam && PortSpectator_ConsumesInput();
+}
+static void spec_stick(unsigned char bx, unsigned char by, float out[2]) { /* (gs_input.c game_stick) */
+    float len;
+    out[0] = tag_axis(bx);
+    out[1] = tag_axis(by);
+    len = out[0] * out[0] + out[1] * out[1];
+    if (len > 1.0f) {
+        len = 1.0f / sqrtf(len);
+        out[0] *= len;
+        out[1] *= len;
+    }
+}
+/* (spectator_camera.c PortSpectator_Camera, the game's thread): right, forward, up, yaw, pitch, zoom, boost */
+void PortInput_Spectator(float *axes) {
+    float l[2], r[2];
+    unsigned btn = sSpecPad.btn;
+    int i;
+    for (i = 0; i < 7; i++) {
+        axes[i] = 0.0f;
+    }
+    if (!gVitaTagCam) {
+        return;
+    }
+    spec_stick(sSpecPad.lx, sSpecPad.ly, l);
+    spec_stick(sSpecPad.rx, sSpecPad.ry, r);
+    axes[0] = l[0];
+    axes[1] = -l[1];
+    axes[3] = r[0];
+    axes[4] = -r[1];
+    axes[2] = (float)((btn & B_R1) != 0) - (float)((btn & B_L1) != 0);
+    axes[5] = (float)((btn & B_R2) != 0) - (float)((btn & B_L2) != 0);
+    axes[6] = (btn & B_L3) != 0;
+}
+
 static void tag_target(int socket, unsigned btn, unsigned char *data) {
     extern int TagBattle_Active(void), Vita_InBattle(void);
-    int method, tag = TagBattle_Active() && Vita_InBattle();
+    int method, tag = TagBattle_Active() && Vita_InBattle() && !spec_consumes();
     if (!tag) {
         sTargetLatch[socket] = 0;
         sTagTargetDpadHeld[socket] = 0;
@@ -346,6 +394,17 @@ int Port_PadRead(int socket, unsigned char *data) {
         btn |= Vita_TouchPad();
     }
     clash_square(socket, &btn, &pad.lx, &pad.ly);
+    if (socket == 0) { /* (the free camera: the pad as it was for it, then the game's part of it, as gs_input.c) */
+        sSpecPad.btn = btn;
+        sSpecPad.lx = pad.lx;
+        sSpecPad.ly = pad.ly;
+        sSpecPad.rx = pad.rx;
+        sSpecPad.ry = pad.ry;
+        if (spec_consumes()) {
+            btn = PortSpectator_FilterButtons(btn);
+            pad.lx = pad.ly = pad.rx = pad.ry = 0x80;
+        }
+    }
     memset(data, 0, 18);
     data[0] = (unsigned char)(~btn & 0xFF);
     data[1] = (unsigned char)(~(btn >> 8) & 0xFF);

@@ -31,6 +31,8 @@ void SDL_DestroyAudioStream(SDL_AudioStream *stream);
 static inline uint64_t SDL_GetTicks(void) { return sceKernelGetProcessTimeWide() / 1000u; }
 /* (BT4decomp's fighters' sounds by distance, gs/snd_spatial.c) */
 typedef uint64_t Uint64;
+/* (BT4decomp's free camera, gs/spectator_camera.c through port/vita/vita_spectator.c: the time between two steps) */
+static inline Uint64 SDL_GetTicksNS(void) { return (Uint64)sceKernelGetProcessTimeWide() * 1000u; }
 typedef int SDL_SpinLock;
 /* Not a bare spin: the sound thread (higher priority) taking a lock the game thread holds on the same core spun for
    ever, the game thread never running again to let it go (a hang in Tag Team, whose extra fighters' voices take it

@@ -3,9 +3,9 @@
  *
  * Left out on the Vita, as online play was left out of the BT3 Vita port: online play and its lobbies, the online Tag
  * Team rooms (port/src/gs/tag_team_net.c; its local room, one player and CPUs, is port/vita/vita_tag.c), the F1
- * window (ui.cpp), voice chat, the screen reader, the script mods, spectating, the PC renderer's own markers and
- * panels, mp3/wav songs and stages added from outside the disc, and the language choice (the Vita reads the one
- * disc in ux0:data/bt4/disc; English).
+ * window (ui.cpp), voice chat, the screen reader, the script mods, online spectating, the PC renderer's own markers
+ * and panels, mp3/wav songs and stages added from outside the disc, and the language choice (the Vita reads the one
+ * disc in ux0:data/bt4: its screens in that disc's language, port/vita/vita_onlinelang.c).
  *
  * Each function answers as the game without these: no session, nothing added, the game's own settings. A value
  * that is not 0 says why. What none of these covers is a generated stub (port/build/gen/.../stubs.c) that stops the
@@ -80,7 +80,6 @@ int Port_LobbyRelease(int *min, int *latest) { (void)min; (void)latest; return 0
 int Port_LobbyStartCode(int host, const char *code) { (void)host; (void)code; return 0; }
 int Port_LobbyStartQuick(int queue) { (void)queue; return 0; }
 int Port_TrLine(const char *original, char *out, int size) { (void)original; (void)out; (void)size; return 0; }
-int PortSpectator_Mode(void) { return 0; } /* the game's own camera */
 void Port_StateTouch(void *p, unsigned long n) { (void)p; (void)n; }
 
 /* ---- the F1 window and the PC's presentation (gs/ui.cpp, gs/gs_draw.c) ---- */
@@ -286,8 +285,9 @@ void Port_PadVibrate(int socket, int small, int large) {}
 
 /* (port/src/gs/menu_text.c, menu_labels.c and tbo_text.c are the PC's own: BT4decomp's own screens' TrueType lines,
    port/vita/vita_tbo.c. The list of the menus' labels made from the disc is off, vita_gfx.c Vita_GsGetenv) */
-/* (port/src/gs/menu_translation.c: the PC's menus in another language, from its translations folder; the Vita's are
-   in English, as written) */
+/* (port/src/gs/menu_translation.c: the PC's menus in another language, from its translations folder. On the PC the
+   Spanish and the English disc both leave it at "en", the disc's own text (game_profile.c Port_GameProfileChoose); only
+   its Brazilian Portuguese pack has a catalog. The screens' Spanish is online_language.c's: port/vita/vita_onlinelang.c) */
 void MenuTranslation_SaveChoice(const char *locale) {}
 int MenuTranslation_Ensure(void) { return 0; }
 int MenuTranslation_BootPending(void) { return 0; }
@@ -354,24 +354,9 @@ void Port_LobbyDo(int what, int a, int b) {}
 void Port_LobbyReviewFixture(int entrants) {}
 void Port_LobbySay(const char *text) {}
 
-/* (port/src/gs/online_language.c) */
-const char * PortOnline_Text(const char *text) { return text; }
-void PortOnline_Raw(int on) {}
+/* (port/src/gs/online_language.c is the PC's own: port/vita/vita_onlinelang.c) */
 
-/* (port/src/gs/spectator_camera.c) */
-int PortSpectator_Camera(const float *native_eye,const float *native_rot,const float *targets,int count, float tan_y,float aspect,float *eye,float *rotation,float *zoom) { return 0; }
-void PortSpectator_EndBattle(void) {}
-void PortSpectator_ResolveEye(const float *eye) {}
-void PortSpectator_SetInputActive(int active) {}
-/* (its F1 page's settings, read and kept as on PC; the Vita has no spectator camera) */
-int PortSpectator_Target(void) { return 0; }
-int PortSpectator_Speed(void) { return 100; }
-int PortSpectator_Zoom(void) { return 100; }
-void PortSpectator_SetMode(int mode) {}
-void PortSpectator_SetTarget(int target) {}
-void PortSpectator_SetSpeed(int speed) {}
-void PortSpectator_SetZoom(int zoom) {}
-void PortSpectator_ResetCamera(void) {}
+/* (port/src/gs/spectator_camera.c is the PC's own: port/vita/vita_spectator.c; its pad, vita_gfx.c) */
 
 /* (port/src/gs/stage_art.c) */
 unsigned Port_StageArt(int stage,int kind) { return 0; }
