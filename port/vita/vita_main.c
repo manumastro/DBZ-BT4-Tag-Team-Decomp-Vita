@@ -2420,6 +2420,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "pgodump") == 0) { /* (a BT3_PGO=gen build) its counts written every <seconds> */
             extern int gVitaPgoEvery;
             gVitaPgoEvery = atoi(eq);
+        } else if (strcmp(line, "ftdedupe") == 0) { /* the fighters' strips found on the chip by their vertices, and a table of 32768 places: 0 off, 1 on, 2 in the soak's B battles (vita_vgl.c) */
+            extern int gVitaFtDedupe;
+            gVitaFtDedupe = atoi(eq);
         } else if (strcmp(line, "adxasync") == 0) { /* a sound stream's first piece read by the reading thread, the stream begun there: 0 off (the game's thread reads it), 1 on, 2 in the soak's B battles (snd_adx.c) */
             extern int gVitaAdxAsync;
             gVitaAdxAsync = atoi(eq);

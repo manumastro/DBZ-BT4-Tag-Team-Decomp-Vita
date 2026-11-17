@@ -236,7 +236,18 @@ static const struct StageBin *sStageDraw; /* the batch being drawn is one of the
 static GLuint sFtProg, sFtVbo;
 static GLint sFtU[5]; /* uF, uMode, uTest, uTex, uS */
 static const float *sFtDraw; /* the batch being drawn is the fighters' (its 20 uniforms; else NULL) */
-static struct { const float *src; uint32_t count, sig, at, seen, slot, ioff; } sFtCache[8192];
+static struct { const float *src; uint32_t count, sig, at, seen, slot, ioff; } sFtCache[32768]; /* (8192 of them, 32768 with ftdedupe) */
+/* bt3.txt ftdedupe=0/1/2 (default 0): the fighters' strips found on the chip by what they hold, and a table four times as large.
+   The strips of a model are known by where they lie in the game's memory; a technique's models are loaded at other places
+   each time, so the same vertices were written to the chip again and again (a 2 vs 2 heavy fight: 16,000 strips, 160,000
+   vertices written in 170 s into a buffer of 65,536, 4,900 of them because the table had no free place) until the buffer was 7/8
+   full and everything was let go (every kept call read the long way again: the list reader 110-127 ms on one list, at 64, 84,
+   146 s). A strip new to the table, or changed, is now looked up by a hash of all its vertices (sFtContent): found, it takes
+   the vertices' and indices' place of the one before (its own table entry and slot) and writes nothing. 0 off, 1 on, 2 on in the
+   soak's B battles. */
+int gVitaFtDedupe;
+typedef struct FtContent { uint64_t hash; uint32_t count, at, ioff; } FtContent;
+static FtContent sFtContent[8192];
 #define FT_IDX (3 * FT_VERTS)   /* the fighters' strips as triangles, indices kept on the chip beside their vertices */
 static GLuint sFtIbo;
 static uint8_t *sStageVboPtr, *sFtVboPtr, *sDpIboPtr; /* the chip's buffers, written straight (no vitaGL call: the render thread may be in it) */
@@ -2936,11 +2947,11 @@ static volatile int gVitaDrawWhere;
 /* (the log) the lowest free video and main memory seen since the last report, read every 64th picture (two
    graphics-chip crashes in 2 vs 2 fights on stage 0; the first one's last reading was 5 MB of video memory free) */
 unsigned gVitaMemLow[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0}; /* (and [2], the longest reading in us) */
-/* bt3.txt memsample=0/1/2 (default 0, the old way): the walk below in a fight. It took 10 ms at 41 s of the 2 vs 2 heavy
+/* bt3.txt memsample=0/1/2 (default 1 since batch hc: the walk is gone from fights; 0 the old way): the walk below in a fight. It took 10 ms at 41 s of the 2 vs 2 heavy
    fight, 33 at 77, 57 at 112, 55 at 146 (68 and 90 ms in another run), every 1024th picture: a picture lost each time.
    1: none in a fight (the log's and the watchdog's memory figures are those of the last picture outside one), 2: none in the
    soak's B battles. */
-int gVitaMemSample;
+int gVitaMemSample = 1;
 static void mem_sample(void) {
     unsigned v, m;
     extern int Vita_InBattle(void), gVitaAbSide;
@@ -4938,13 +4949,13 @@ void Vita_AmLog(void) { /* vita_main.c: the model draws that read the picture's 
             Vita_Log("vgl:   kept parts freed a picture late (dpfreelate): %u parts in %u pictures, %u waits after all (still in the ring), %u pictures with none to free\n", gVitaDpFreeLateN[0], gVitaDpFreeLateN[1], gVitaDpFreeLateN[2], gVitaDpFreeLateN[3]);
             {   /* (rtcap, skipasync, texrtfill, chipkeep, esrebind) */
                 extern unsigned gVitaEsBind[2], gVitaRtCapW[4], gVitaSkipAsyncN, gVitaChipKeepN[2];
-                extern unsigned gVitaFtWhy[3][2];
+                extern unsigned gVitaFtWhy[4][2];
                 Vita_Log("vgl:   pictures behind in the render thread's ring (rtcap): at most %u at a handover (of %u); %u waits, %u ms | lists not drawn ended without a wait (skipasync): %u\n",
                          gVitaRtCapW[2], gVitaRtCapW[3], gVitaRtCapW[0], gVitaRtCapW[1] / 1000, gVitaSkipAsyncN);
                 Vita_Log("vgl:   texture pools filled by the render thread (texrtfill): %u requests, %u pieces taken over, %u takes at an empty pool | the chip's copies let go in a fight, the stage's kept / not (chipkeep): %u / %u | model binds (esrebind): %u began a generation, %u again without one\n",
                          gVitaTexRtFillN[0], gVitaTexRtFillN[1], gVitaTexRtFillN[2], gVitaChipKeepN[0], gVitaChipKeepN[1], gVitaEsBind[0], gVitaEsBind[1]);
-                Vita_Log("vgl:   fighters' strips written to the chip, by cause (strips / vertices): new to the table %u / %u, its vertices changed %u / %u, no free place in the table %u / %u | in use now: %u of %u vertices, %u of %u indices\n",
-                         gVitaFtWhy[0][0], gVitaFtWhy[0][1], gVitaFtWhy[1][0], gVitaFtWhy[1][1], gVitaFtWhy[2][0], gVitaFtWhy[2][1], (unsigned)sFtUsed, (unsigned)FT_VERTS,
+                Vita_Log("vgl:   fighters' strips written to the chip, by cause (strips / vertices): new to the table %u / %u, its vertices changed %u / %u, no free place in the table %u / %u, found on the chip by their vertices (ftdedupe) %u / %u | in use now: %u of %u vertices, %u of %u indices\n",
+                         gVitaFtWhy[0][0], gVitaFtWhy[0][1], gVitaFtWhy[1][0], gVitaFtWhy[1][1], gVitaFtWhy[2][0], gVitaFtWhy[2][1], gVitaFtWhy[3][0], gVitaFtWhy[3][1], (unsigned)sFtUsed, (unsigned)FT_VERTS,
                          (unsigned)sFtIdxUsed, (unsigned)FT_IDX);
                 memset(gVitaFtWhy, 0, sizeof(gVitaFtWhy));
                 memset(gVitaRtCapW, 0, sizeof(gVitaRtCapW));
@@ -8050,6 +8061,7 @@ void GsGpu_FrameEnd(void) {
                 memset(sStageCache, 0, sizeof(sStageCache));
                 sStageUsed = 0;
                 memset(sFtCache, 0, sizeof(sFtCache));
+                memset(sFtContent, 0, sizeof(sFtContent));
                 sFtUsed = 0;
                 sFtIdxUsed = 0;
             }
@@ -8837,7 +8849,7 @@ __attribute__((hot)) static int stage_draw(const State *d, const float *v, uint3
 }
 
 unsigned gVitaFt[3];
-unsigned gVitaFtWhy[3][2]; /* for the log: fighter strips written to the chip by cause: new to the table, its vertices changed, no free place; strips, vertices */
+unsigned gVitaFtWhy[4][2]; /* for the log: fighter strips written to the chip by cause: new to the table, its vertices changed, no free place; strips, vertices */
 unsigned gVitaGpuWait[2]; /* for the log: microseconds the chip still worked at the swap, times measured */ /* for the log: fighter strips drawn from the chip, strips written to it, vertices kept */
 __attribute__((hot)) static int fighter_draw(const State *d, int layer, const float *v, uint32_t count, const float (*u)[4]) {
     if (1) { return 0; } /* (the fighters' shader now wants each strip's place in its vertices: only the planned path, chip_emit, gives it) */
@@ -9007,6 +9019,7 @@ int Vita_ChipResetDue(void) {
             sStageUsed = 0;
         }
         memset(sFtCache, 0, sizeof(sFtCache));
+        memset(sFtContent, 0, sizeof(sFtContent));
         sFtUsed = 0;
         sFtIdxUsed = 0;
         r = 1;
@@ -9073,6 +9086,47 @@ void Vita_T116FeListEnd(void) {
     gT116Fe = 0;
 }
 
+static int ft_dedupe_on(void) {
+    extern int gVitaAbSide;
+    return gVitaFtDedupe == 2 ? gVitaAbSide == 1 : gVitaFtDedupe != 0;
+}
+static uint64_t ft_content_hash(const float *v, uint32_t count) {
+    const uint32_t *w = (const uint32_t *)(const void *)v;
+    uint64_t h = 0x9E3779B97F4A7C15ull ^ count;
+    uint32_t i, j;
+    for (i = 0; i < count; i++, w += 12) {
+        for (j = 0; j < 10; j++) { /* (the 40 bytes of a vertex the chip is given) */
+            h = (h ^ w[j]) * 0xC2B2AE3D27D4EB4Full;
+            h ^= h >> 29;
+        }
+    }
+    return h != 0 ? h : 1;
+}
+static int ft_content_find(uint64_t ch, uint32_t count) {
+    uint32_t i = (uint32_t)(ch >> 40) & 8191, k;
+    for (k = 0; k < 8; k++, i = (i + 1) & 8191) {
+        if (sFtContent[i].hash == ch && sFtContent[i].count == count) {
+            return (int)i;
+        }
+        if (sFtContent[i].hash == 0) {
+            break;
+        }
+    }
+    return -1;
+}
+static void ft_content_add(uint64_t ch, uint32_t count, uint32_t at, uint32_t ioff) {
+    uint32_t i = (uint32_t)(ch >> 40) & 8191, k, first = i;
+    for (k = 0; k < 8; k++, i = (i + 1) & 8191) {
+        if (sFtContent[i].hash == 0) {
+            first = i;
+            break;
+        }
+    }
+    sFtContent[first].hash = ch;
+    sFtContent[first].count = count;
+    sFtContent[first].at = at;
+    sFtContent[first].ioff = ioff;
+}
 /* The front end: can this strip be drawn from the chip's buffers? Fills `p` and returns the bytes it needs
    behind it (vertices to write, then the indices), or -1. */
 int Vita_ChipPlan(int which, int layer, const float *v, uint32_t count, const float *consts, int stable, ChipPlan *p) {
@@ -9084,8 +9138,9 @@ int Vita_ChipPlan(int which, int layer, const float *v, uint32_t count, const fl
         return -1;
     }
     if (which == 0 && layer <= 2 && sFtProg != 0 && Vita_InBattle() && !(gT116Fe & 4)) { /* (the fighters not on the chip; layer 2, the silhouettes, too) */
-        h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 19;
-        for (k = 0; k < 8; k++, h = (h + 1) & 8191) {
+        uint32_t fb = ft_dedupe_on() ? 15u : 13u, fmask = (1u << fb) - 1u;
+        h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> (32u - fb);
+        for (k = 0; k < 8; k++, h = (h + 1) & fmask) {
             if (sFtCache[h].src == NULL || (sFtCache[h].src == v && sFtCache[h].count == count)) {
                 break;
             }
@@ -9110,20 +9165,37 @@ int Vita_ChipPlan(int which, int layer, const float *v, uint32_t count, const fl
         p->upload = 0;
         if (k == 8 || sFtCache[h].src == NULL || sFtCache[h].sig != sig) {
             int why = k == 8 ? 2 : sFtCache[h].src == NULL ? 0 : 1; /* (the log: what fills the fighters' buffers) */
+            int dup = -1, dd = ft_dedupe_on();
+            uint64_t ch = 0;
             if (k == 8) {
-                h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 19;
+                h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> (32u - fb);
             }
-            if (sFtUsed + count > FT_VERTS || sFtIdxUsed + need > FT_IDX) {
-                return -1;
+            if (dd) { /* (ftdedupe) the same vertices already on the chip, from another place in the game's memory */
+                ch = ft_content_hash(v, count);
+                dup = ft_content_find(ch, count);
             }
-            gVitaFtWhy[why][0]++;
-            gVitaFtWhy[why][1] += count;
-            sFtCache[h].src = v; sFtCache[h].count = count; sFtCache[h].sig = sig; sFtCache[h].at = sFtUsed; sFtCache[h].seen = gGsFrame;
-            sFtCache[h].slot = sFtSlotNext++ & 15;
-            sFtCache[h].ioff = sFtIdxUsed;
-            sFtUsed += count;
-            sFtIdxUsed += need;
-            p->upload = 1;
+            if (dup >= 0) {
+                sFtCache[h].src = v; sFtCache[h].count = count; sFtCache[h].sig = sig; sFtCache[h].at = sFtContent[dup].at; sFtCache[h].seen = gGsFrame;
+                sFtCache[h].slot = sFtSlotNext++ & 15;
+                sFtCache[h].ioff = sFtContent[dup].ioff;
+                gVitaFtWhy[3][0]++;
+                gVitaFtWhy[3][1] += count;
+            } else {
+                if (sFtUsed + count > FT_VERTS || sFtIdxUsed + need > FT_IDX) {
+                    return -1;
+                }
+                gVitaFtWhy[why][0]++;
+                gVitaFtWhy[why][1] += count;
+                sFtCache[h].src = v; sFtCache[h].count = count; sFtCache[h].sig = sig; sFtCache[h].at = sFtUsed; sFtCache[h].seen = gGsFrame;
+                sFtCache[h].slot = sFtSlotNext++ & 15;
+                sFtCache[h].ioff = sFtIdxUsed;
+                if (dd) {
+                    ft_content_add(ch, count, sFtUsed, sFtIdxUsed);
+                }
+                sFtUsed += count;
+                sFtIdxUsed += need;
+                p->upload = 1;
+            }
         }
         if (!sDsOn) { /* (the batches' way only) */
             const uint32_t *w = (const uint32_t *)(const void *)consts;
