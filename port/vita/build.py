@@ -263,7 +263,7 @@ def port_sources():
             (S / "fight_panels.c", "ee"), (V / "vita_tbo.c", "hard"),
             # BT4decomp's free / spectator camera and its screens' Spanish, its own files built unchanged
             # (gs/spectator_camera.c, gs/online_language.c; docs/vita/tagteam.md)
-            (V / "vita_spectator.c", "gs"), (V / "vita_onlinelang.c", "gs")]
+            (V / "vita_spectator.c", "gs"), (V / "vita_onlinelang.c", "gs"),
             # the film behind the Tag Team screens (bt3.txt tbomovie): the hardware player (SceAvPlayer)
             (V / "vita_tagmovie.c", "hard"), (V / "vita_tagmovie_sw.c", "hard")]
     return out
