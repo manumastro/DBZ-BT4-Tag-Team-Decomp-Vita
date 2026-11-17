@@ -28,6 +28,7 @@
 #include <ctype.h>
 #include <psp2/io/dirent.h>
 #include <psp2/io/fcntl.h>
+#include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
 #include <stdint.h>
@@ -851,4 +852,50 @@ void *Vita_LoadWhole(const char *path, uint32_t *size) {
         *size = (uint32_t)n;
         return p;
     }
+}
+
+/* A member of the disc's archive `archive` (its name in lower case, without ".afs": "pzs4us1") as the PC's loose file
+   <dir>/<archive>/<NNNNN>.bin, written once, for the PC's own code that reads such files: BT4decomp's main menu
+   lettering of its Tag Team entry (port/src/gs/bt4_main_lettering.inc, through port/vita/vita_tbo.c). The file is
+   the player's disc's, on the memory card beside its other files (PORT_VITA_HOME); a mod of that member is taken as
+   the game takes it. 1 when the file is there. */
+int Vita_MemberFile(const char *archive, int flid, const char *dir) {
+    char path[300];
+    SceUID fd;
+    int i, ok = 0;
+
+    snprintf(path, sizeof(path), "%s/%s/%05d.bin", dir, archive, flid);
+    fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+    if (fd >= 0) {
+        sceIoClose(fd);
+        return 1;
+    }
+    for (i = 0; i < 8; i++) {
+        if (sPart[i].fd > 0 && strcmp(sPart[i].name, archive) == 0) {
+            char name[32], tmp[310];
+            uint32_t n = 0;
+            void *data;
+            snprintf(name, sizeof(name), "afs:%d:%d", i, flid);
+            data = Vita_LoadWhole(name, &n);
+            if (data == NULL) {
+                return 0;
+            }
+            sceIoMkdir(dir, 0777);
+            snprintf(tmp, sizeof(tmp), "%s/%s", dir, archive);
+            sceIoMkdir(tmp, 0777);
+            snprintf(tmp, sizeof(tmp), "%s.part", path); /* (written whole, then named: a cut write is not taken) */
+            fd = sceIoOpen(tmp, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+            if (fd >= 0) {
+                ok = sceIoWrite(fd, data, n) == (int)n;
+                sceIoClose(fd);
+                ok = ok && sceIoRename(tmp, path) >= 0;
+                if (!ok) {
+                    sceIoRemove(tmp);
+                }
+            }
+            free(data);
+            return ok;
+        }
+    }
+    return 0;
 }

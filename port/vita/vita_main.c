@@ -51,7 +51,8 @@ char gVitaDisc[256] = HOME "/disc";
 static FILE *sLog;
 static int sHeapCdram, sFloatChoice = -1; /* -1: ask */
 static unsigned long long sStart, sBattleStart, sLastDraw;
-static int sTagMenu = 1; /* bt3.txt tagteam=0: no Tag Team entry in the main menu (Vita_TagMenu, below) */
+static int sTagMenu = 1; /* bt3.txt tagteam: 0 no Tag Team entry in the main menu, 1 BT4decomp's own screens, 2 the earlier
+                            text setup (Vita_TagMenu, below) */
 unsigned gVitaVuMax[2], gVitaVuCut; /* gs_vu1.c: the interpreter's most in a list, runs left out */
 unsigned gVitaOtMax, gVitaOtSize, gVitaDmaMax; /* gfx_ot.c Ot_Draw, dma.c Dma_Flush: the most taken since the last report */
 unsigned gVitaChainMax, gVitaChainLoop, gVitaCallFull; /* gs_core.c run_chain: the longest chain of a list since the last report */
@@ -1508,6 +1509,12 @@ void Vita_VBlank(unsigned vblanks) {
                                 memset(gVitaHudBatchN, 0, sizeof(gVitaHudBatchN));
                                 memset(gVitaHudRunN, 0, sizeof(gVitaHudRunN));
                             }
+                            {
+                                extern unsigned gVitaTboN[6];
+                                logf_("vita:   tboui: %u pictures and %u lines made, %u given back; %u textures held, %u KB\n", gVitaTboN[0], gVitaTboN[1],
+                                      gVitaTboN[2], gVitaTboN[3], gVitaTboN[4] / 1024);
+                                gVitaTboN[0] = gVitaTboN[1] = gVitaTboN[2] = 0;
+                            }
                             memset(gVitaFxClampN, 0, sizeof(gVitaFxClampN));
                             Gs_GifShapesLog();
                             logf_("vita:   kept forms without TEXA (dptexa): %u; parts walked whose kept form differed in TEXA alone: %u | texrt: %u pieces from the pools, %u made the old way, %u textures set up by the render thread\n",
@@ -2056,6 +2063,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "hudbatch") == 0) { /* the HUD's plain shapes (the Tag Team radar) in one packet: 0 off, 1 on, 2 soak B */
             extern int gVitaHudBatch;
             gVitaHudBatch = atoi(eq);
+        } else if (strcmp(line, "tboui") == 0) { /* BT4decomp's own screens' pictures and TrueType lines drawn (vita_tbo.c): 0 off, 1 on, 2 soak B */
+            extern int gVitaTboUi;
+            gVitaTboUi = atoi(eq);
         } else if (strcmp(line, "fxclamp") == 0) { /* the animated effects' triangles (with their CLAMP writes) as runs: 0 off, 1 on, 2 soak B */
             extern int gVitaFxClamp;
             gVitaFxClamp = atoi(eq);
@@ -2396,13 +2406,18 @@ static void read_settings(void) {
         } else if (strcmp(line, "startmode") == 0) { /* the menus start on this screen (62 the options) */
             extern int gVitaStartMode;
             gVitaStartMode = atoi(eq);
+        } else if (strcmp(line, "tagscreen") == 0) { /* with startmode=80 (the port's screen mode): 1 the menus start on
+                                                        BT4decomp's own Tag Team screens, as its main menu entry opens them */
+            extern int gPortScreen;
+            gPortScreen = atoi(eq) ? 2 : 0; /* (include/menu/port_screen.h PORT_SCREEN_TAG) */
         } else if (strcmp(line, "hangdump") == 0) {
             gVitaHangDump = atoi(eq);
         } else if (strcmp(line, "zones") == 0) { /* 1: the zones timed by the system's clock when libperf is not there */
             extern int gVitaZoneT;
             gVitaZoneT = atoi(eq) != 0;
-        } else if (strcmp(line, "tagteam") == 0) { /* 0: no Tag Team entry in the main menu (Vita_TagMenu) */
-            sTagMenu = atoi(eq) != 0;
+        } else if (strcmp(line, "tagteam") == 0) { /* 0: no Tag Team entry in the main menu; 1 BT4decomp's own Tag Team
+                                                      screens (the default); 2 the Vita's earlier text setup (Vita_TagMenu) */
+            sTagMenu = atoi(eq) < 0 || atoi(eq) > 2 ? 1 : atoi(eq);
         } else if (strcmp(line, "replay") == 0) {
             setenv("BT3_REPLAY", eq, 1);
         } else if (strncmp(line, "BT3_", 4) == 0 || strncmp(line, "BT4_", 4) == 0) {
@@ -2590,10 +2605,12 @@ static void unlock_in_menus(void) {
 }
 
 /* ---- Tag Team offline: the setup of a local room (one player and CPUs) ----
-   The main menu's Tag Team entry (src/menu/menu_a.c) opens the port's screen mode (src/menu/port_screen.c), which
-   on PC shows the online hub (src/menu/port_tbo.c: pictures and TrueType lines the Vita does not draw). Here this
-   text screen in its place: the mode, the time limit and the CPUs' difficulty, then the room is opened as the PC's
-   offline test does (port_tbo.c Tb_TagUpdate) and the game's own character select follows. docs/vita/tagteam.md */
+   bt3.txt tagteam=1 (the default): the main menu's Tag Team entry is BT4decomp's own (src/menu/menu_a.c item 4) and
+   opens its own Tag Team screens (src/menu/port_tbo.c), drawn by the Vita since its pictures and TrueType lines are
+   (port/vita/vita_tbo.c). tagteam=2, the earlier way, kept as a fallback: the entry after item 3 opens the port's
+   screen mode (src/menu/port_screen.c), and this text screen takes the online hub's place: the mode, the time limit
+   and the CPUs' difficulty, then the room is opened as the PC's offline test does (port_tbo.c Tb_TagUpdate) and the
+   game's own character select follows. docs/vita/tagteam.md */
 int Vita_TagMenu(void) { return sTagMenu; }
 
 int Vita_TagSetup(void) {

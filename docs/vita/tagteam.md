@@ -9,11 +9,12 @@ them. Online Tag Team (between Vitas, or against PCs) comes after, and starts fr
 
 - **Tag Team is BT4decomp's own** (new code in `src/battle/tag_team_*.inc`, `battle_work.c`, `btl_pool.c`,
   `btl_obj.c`, `port/src/tag_team.c`; fighters past the second live in `sTagSides`, `include/battle/tag_team_native.h`).
-- **On the PC it has no offline mode a player can open.** Main menu > Tenkaichi Budokai Online > Tag Team > Create
-  Room goes through the signaling server and the data check (`src/menu/port_tbo.c:1110`: the local room,
-  `Port_TagConnect(NULL)` -> `local_room` in `port/src/gs/tag_team_net.c:552`, is reached only with
-  `BT4_RENDER_TEST`). A room of one player and CPUs is still an online room whose input is scheduled locally
-  (`solo_cpu_fight`, `tag_team_net.c:429`). BT4decomp's issues #24 and #47 ask for an offline mode.
+- **On the PC (since 0.1.39.6) Tag Team has a dedicated entry and an offline mode**: the main menu's Tag Team (item 4)
+  and the Duel menu's Tag type open its own screens (`src/menu/port_tbo.c`, `PortTag_Run` in `src/menu/port_screen.c`):
+  Local Battle (Singleplayer, Two-player, Spectator Mode, Two-player co-op; 1 to 5 fighters a team), Online Battles
+  (rooms, quick match, through its signaling server) and Camera mode. Local Battle opens a local room
+  (`Port_TagStartOffline`, `port/src/gs/tag_team_net.c`) and the simultaneous character select
+  (`TeamSel_TagRun`, `src/menu/tag_team_select.inc`). Before 0.1.39.6 there was no offline mode (issues #24, #47).
 - **The rules**: health 100%, speed 114% (34.2 steps a second, `Port_SpeedMilli` 1140 while a Tag battle runs,
   `port/src/plat_stub.c:151`), time 60 / 90 / 180 / 240 s or none, CPU difficulty Very easy to Very hard (CPU
   levels 0 / 6 / 13 / 21 / 29, `TagBattle_ConfigureLocal`, `battle_work.c:227`), characters chosen in turns, related
@@ -29,6 +30,88 @@ them. Online Tag Team (between Vitas, or against PCs) comes after, and starts fr
 - **Upstream is rewriting Tag Team** (the maintainer on BT4decomp's #10 and #47, with TheMufti: "it will change a
   lot"). Keep our side small and separate, so a merge of the new version costs little.
 - **Open upstream**: #52, frame drops and crashes in full 5 vs 5 with many ki blasts, offline too, on a desktop PC.
+
+## BT4decomp's own Tag Team screens on the Vita (2026-11-17, branch `wip/tagui`)
+
+The Vita now runs BT4decomp's own Tag Team screens, as the PC does, instead of its own text setup. What made them
+undrawable was only the drawing: the screens' code (`src/menu/port_tbo.c`, `port_screen.c`, `tag_team_select.inc`,
+`menu_a.c`, `menu_g_c.c`, `src/battle/tag_team_hud.inc`) was in the Vita build all along; it draws each picture and
+each line of letters as a GS sprite whose TEX0 has the reserved format `TBO_PSM` and the picture's number in CBP
+(`include/menu/tbo_art.h`), and the PC's renderer gives that sprite the picture (`port/src/gs/gs_draw.c`
+`tbo_texture`). So the work is on the renderer's side, not an overlay:
+
+- **The letters are upstream's own code, unchanged**: `port/src/gs/tbo_text.c` (the lines' places, measures and
+  pictures), `port/src/gs/menu_text.c` (stb_truetype, the fonts of `fonts.tsv`) and `port/src/gs/menu_labels.c` (the
+  main menu's "Tag Team" put together from the disc's own letters, `bt4_main_lettering.inc`) are built for the Vita
+  (`port/vita/build.py`). The fonts are in the package (`fonts/`, from `port/third_party/fonts`); the list of the
+  menus' labels made from the disc (the PC's "Menu font" setting, its translated menus) is off: `Vita_GsGetenv`
+  answers `BT3_MENU_FONT` empty. The PC's translations (`menu_translation.c`) are not there: the screens are in
+  English, as written, on both discs.
+- **The pictures and lines as textures: `port/vita/vita_tbo.c`**, the Vita's `tbo_texture`: `tbo/ui/<name>.png`
+  (libpng; `port/tbo/ui`, in the package as `tbo/ui/`) with the PC's touches (the window's teal, the logo's halo, the
+  emblem cut from the logo), a line's picture from `TboText_Pixels` made again when its line changes. The renderer
+  (`port/vita/vita_vgl.c` `state_of_`) asks for it when TEX0's format is `TBO_PSM`. The Vita's renderer has no
+  mipmaps, so each picture is made smaller once (by halves, the alpha-weighted average the PC's smaller copies use):
+  backdrops to 1280 across, other pictures to 640, lines to 128 rows (their capitals 20-24 pixels; they are shown at
+  7-20). A texture not drawn for 600 pictures is given back. Setting `tboui` (`docs/vita/development.md`).
+- **The main menu's entry is upstream's** (item 4, its emblem and lettering; `bt3.txt tagteam=1`, the default), and
+  so is the Duel menu's Tag type (`DuelMenu_TagAvailable`). Online Battles is left out of the screens' sections on
+  the Vita (`Tb_TagShellUpdate`, `PortTag_Run`, under `PORT_VITA`): R1 / L1 / CIRCLE go between Local Battle and
+  Camera mode. `tagteam=2` keeps the Vita's earlier text setup as a fallback; `tagteam=0` hides Tag Team.
+- **In the fight**: the words of the Tag Team HUD (`TagHud_Label`: the timer, "KO", the gauges' figures, the joint
+  attacks' and fusions' labels) are drawn now; the fighters' names over the target come from upstream's
+  `port/src/fight_panels.c` (built for the Vita: `Port_TagActorName`, `Port_TagAllyHudFeed`) and a name cache filled
+  by the character selects (`Port_CacheFighterNames`, a copy of `a11y_game.c`'s in `port/vita/vita_bt4.c`, without
+  the screen reader). The floating allies' gauges over their fighters are drawn by the game's own code in
+  split-screen only (`TagHud_FloatingAllies`, called from the split branch of `TagHud_DevLayout`: the two-player
+  modes, a second controller needed, the game's own split of the screen); `Port_TagAllyHudFeed` only hands them to
+  the PC's side panels. On one screen the PC and the Vita both show the allies' column.
+- **Camera mode**: the special moves' cinematic cameras (on / off, `Port_SpecialMoveCameras`, now as the PC's
+  `mods_game.c`: saved, read by `src/battle/btl_cam.c`), the target selection (below), joint attacks and fusions
+  work; the free camera's rows (camera mode, fighter, speed, zoom, reset) are shown but do nothing: the PC's
+  spectator camera (`port/src/gs/spectator_camera.c`) is not built for the Vita (`PortSpectator_*` in
+  `port/vita/vita_bt4.c` answer as the game's own camera). Spectator Mode (all CPUs) watches with the game's own
+  camera.
+- **Target selection** (Camera mode > Target selection: L3, right stick, D-pad): the PC's pad code
+  (`gs_input.c`) puts the method and the direction in byte 17 of the pad's report, which `BtlInput_Sample` reads; the
+  Vita's pad code does the same (`port/vita/vita_gfx.c` `tag_target`, `PortInput_TagTargetMethod`), saved as the PC
+  saves it (`tag_target_method_p1`).
+- **The options reach the fight as on PC**: offline, the menus write the settings file (`Port_SettingSave`) and the
+  fight reads it (`TagBattle_ConfigureLocal`: `tag_combat<team><slot>`; `Port_TagOption`: joint attacks, fusions,
+  revival; `TagBattle_SetLocalHealth`: per-fighter health). `port/vita/vita_tag.c` answers those calls as
+  `tag_team_net.c`'s local room does.
+- **Not the PC's**: the free / spectator camera (above), the film behind the screens (`tbo/ui/tag_ui_*.pss`, 30 MB; the Vita shows its poster, the
+  picture the PC shows until the film's first frame), the translated screens, the online section, the Lua mods'
+  split-screen presentation (`Mods_SplitScreen`; the two-player modes' own split is the game's and is there), the
+  Lua Modern HUD (BT4decomp's bundled mod: it would need the Lua runtime and the mods' code, `port/src/gs/mods*.c`,
+  `port/third_party/lua`, built for the Vita, and their drawing calls answered by the Vita's renderer), touch in
+  these screens (pad only; the PC's mouse is only for the online hub's community button).
+- **To measure on the console** (memory, speed): the textures held (the report's `tboui` line; the log's `tbo:`
+  lines), the cost of a line of letters made on the drawing thread in a fight (the timer's every second; the
+  gauges' figures when they change), 3 vs 3 to 5 vs 5 and Free for All 10 (the PC's limits: 5 a team, 10 in all; the
+  estimates above), the first opening of the screens (pictures read from the package), the main menu's lettering
+  made at its first showing.
+
+### The console test of these screens (to do)
+
+The pictures and fonts are in the package only: install the `.vpk` (vita-agent-use `app install`), not only
+`eboot.bin`. The settings (`port/build/sets/`, the agent's `sets/bt4/`):
+
+| Run | Settings | What it shows |
+|---|---|---|
+| 1 | `tagui_main.txt` (`mode=play`) | The main menu: the Tag Team entry after Duel, its emblem and "Tag Team" in the disc's lettering (the log's `tbo: main menu lettering` lines; `ux0:data/bt4/gamedata/pzs4us1/00448.bin` and `00449.bin` written once), its description in the box. Screenshots with `--shots` |
+| 2 | `tagui_menu.txt` (`startmode=80`, `tagscreen=1`) | The Tag Team screens straight away. With vita-agent-use's input: R1 to Camera mode and back; each Local Battle row; Health, Recovery, Battle rules pages; START to the character select; a fight; the results. The report's `tboui` line (textures held, KB), the `tbo:` lines, the watchdog |
+| 3 | `tagui_menu_off.txt` (`tboui=0`) | The same screens not drawn (as before): that the setting turns them off |
+| 4 | `tagui_2v2_on.txt` against `tagui_2v2_off.txt` | The 2 vs 2 demo fight with and without the HUD's words: pictures a second (`perfsum.py --ab`), the drawing thread's ms, the lines made (`tboui` line) |
+| 5 | `tagui_5v5.txt` (`BT4_TAG_ACTOR_TEST=10`) | 5 vs 5 with the HUD's words: the newlib heap's peak, vitaGL's free memory, the texture table, the speed (as step 0 below) |
+
+By hand (a person with the console): the screens' look against the PC's (the backdrop, the window's corners, the
+bars' round ends, the letters' outline, sharpness), every option changed and seen in the fight that follows (time,
+CPU level, 5 vs 5, Free for All, per-fighter health and Boss preset, revival, joint attacks, fusions, the referee,
+stage destruction), Two-player and Two-player co-op with a second controller (PS TV or a paired pad: the game's
+split screen, the floating allies' gauges), the target selection's three methods in a fight, the names over the
+target, the results' Rematch / Back to character select / exit, the Duel menu's Tag type, `tagteam=2` (the earlier
+text setup) and `tagteam=0`.
 
 ## Where the Vita stands
 
@@ -336,8 +419,8 @@ Tried, each behind a `bt3.txt` setting, then all together on the console (`BT4_T
 |---|---|---|
 | 0 | `BT4_TAG_ACTOR_TEST=4` and `=10` in a fight on the console against 1 vs 1: the newlib heap's peak, vitaGL's free RAM and VRAM, the texture table's peak and its rebuilds, `FT_VERTS`' peak, the upload store, the game / list reader / drawing thread's ms per frame (`perfsum.py --parts`), the speed %, the loading time | small |
 | 1 | `port/vita/vita_tag.c`: the local room only (the `local_room` branches of `tag_team_net.c`), with `port/src/tag_team.c` (plain C) added to `port_sources`; `Port_TagMenuMillis` from the process clock; the network calls stay answered as none (`Port_TagNetwork` 0). `tag_team_net.c` itself stays out (sockets, WebSocket, libdatachannel, SDL threads), so upstream's file merges untouched | small |
-| 2 | A Vita setup screen for the room (mode, time, CPU difficulty), then `Port_TagCPUOptions`, `Port_TagConnect(NULL)`, `Port_TagModeOptions`, `Port_TagOpen`, `Port_TagTeams`, `Port_TagSlot` per CPU, `Port_TagCommand(3)`; `src/menu/port_screen.c:684` takes it in place of `PortTbo_Run` under `PORT_VITA`, back to the main menu after | small to medium |
-| 3 | The main menu's entry (`menu_a.c:315`) under `PORT_VITA`, its label checked on screen; a `bt3.txt` setting to hide it | small |
+| 2 | (done, then replaced 2026-11-17 by BT4decomp's own screens; kept as `tagteam=2`) A Vita setup screen for the room (mode, time, CPU difficulty), then `Port_TagCPUOptions`, `Port_TagConnect(NULL)`, `Port_TagModeOptions`, `Port_TagOpen`, `Port_TagTeams`, `Port_TagSlot` per CPU, `Port_TagCommand(3)`; `src/menu/port_screen.c:684` takes it in place of `PortTbo_Run` under `PORT_VITA`, back to the main menu after | small to medium |
+| 3 | (done 2026-11-17) The main menu's entry: BT4decomp's own (item 4, its emblem and the disc's lettering), `tagteam=0` hides it | small |
 | 4 | Fixes for more than two fighters: `btl_input.c:511` (`Save_PortKeys` with `chr->pad` when Tag is active, as the PC's line 522), the clash helper's fighter lookup (`port/vita/vita_gfx.c:175-185`, sockets 0 / 1) | trivial |
-| 5 | The HUD's and the selection's words on the Vita (`Ps_Text` through the game's own font, or the TrueType text drawn) | medium |
+| 5 | (done 2026-11-17, not run on the console) The HUD's and the selection's words on the Vita: the TrueType text drawn, as on PC (above) | medium |
 | 6 | On the console: 2 vs 2 whole matches, results, rematch, back to character select, back to the menu; then 3 vs 3 and up as far as the measurements allow (memory: a larger newlib heap, `MAX_TEX`) | unknown |

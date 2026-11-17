@@ -1565,8 +1565,12 @@ static s32 Tb_TagShellUpdate(s32 live){
     Pad *pad=&gPad[0];
     if(sTagConfigRoom||(sTb->mode==TB_TAG_OPTIONS&&Tb_TagCameraFromShared()))return 0;
     if(sTb->mode!=TB_TAG&&sTb->mode!=TB_TAG_OPTIONS)return 0;
+#ifdef PORT_VITA /* (the Vita: no online play; Local Battle and Camera mode only) */
+    Ps_Prompt(4,sTb->tagSection==TAG_LOCAL?"Camera mode":"Local Battle");
+#else
     Ps_Prompt(4,sTb->tagSection==TAG_LOCAL?"Online Battles":
         sTb->tagSection==TAG_ONLINE?"Camera mode":"Local Battle");
+#endif
     if(!live)return 0;
     if(pad->gamePressed&PADG_TRIANGLE){
         sTb->leaving=1;
@@ -1576,9 +1580,13 @@ static s32 Tb_TagShellUpdate(s32 live){
     }
     s32 dir=(pad->gamePressed&(PADG_R1|PADG_CIRCLE))?1:(pad->gamePressed&PADG_L1)?-1:0;
     if(!dir)return 0;
+#ifdef PORT_VITA
+    Tb_TagSection(sTb->tagSection==TAG_LOCAL?TAG_CAMERA:TAG_LOCAL);
+#else
     static const s32 sections[]={TAG_LOCAL,TAG_ONLINE,TAG_CAMERA};
     s32 index=sTb->tagSection==TAG_LOCAL?0:sTb->tagSection==TAG_ONLINE?1:2;
     Tb_TagSection(sections[Ps_Wrap(index+dir,0,2)]);
+#endif
     Snd_PlaySe(1,0);
     return 1;
 }

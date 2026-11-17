@@ -11,6 +11,7 @@
 #include <psp2/display.h>
 #include <psp2/kernel/processmgr.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -214,6 +215,86 @@ static void clash_square(int socket, unsigned *btn, unsigned char *lx, unsigned 
     }
 }
 
+/* ---- Tag Team's target choice (BT4decomp's Camera mode page, "Target selection": src/menu/port_tbo.c), as the PC's
+   gs_input.c: 0 L3 moves to the next enemy (the Vita's L3: the rear touch pad or a front corner, vita_touch.c), 1 the
+   right stick's push (up, down, left, right: the enemy that way; the stick does not turn the camera then), 2 the
+   D-pad's left / right (not while L2, L3 or R3 is held: transformations and techniques). Saved as the PC saves it
+   (tag_target_method_p1 / _p2). The pad report's byte 17 carries it to the game (src/battle/btl_input.c
+   BtlInput_Sample): 0x80 | the direction (1 up, 2 down, 3 left, 4 right) | the method << 4, in a Tag Team fight. ---- */
+static int sTagTargetMethod[2] = {-1, -1}, sTargetLatch[2];
+static unsigned sTagTargetDpadHeld[2];
+int PortInput_TagTargetMethod(int player, int method) {
+    char key[40];
+    if (player < 0 || player > 1) {
+        return 0;
+    }
+    if (sTagTargetMethod[player] < 0) {
+        int previous;
+        snprintf(key, sizeof(key), "target_stick_p%d", player + 1);
+        previous = Port_Setting("tag_target_dpad", 0) ? 2 : Port_Setting(key, 0) ? 1 : 0;
+        snprintf(key, sizeof(key), "tag_target_method_p%d", player + 1);
+        sTagTargetMethod[player] = Port_Setting(key, previous);
+        if (sTagTargetMethod[player] < 0 || sTagTargetMethod[player] > 2) {
+            sTagTargetMethod[player] = 0;
+        }
+    }
+    if (method >= 0 && method <= 2) {
+        sTagTargetMethod[player] = method;
+        snprintf(key, sizeof(key), "tag_target_method_p%d", player + 1);
+        Port_SettingSave(key, method);
+        snprintf(key, sizeof(key), "target_stick_p%d", player + 1);
+        Port_SettingSave(key, method == 1);
+        sTargetLatch[player] = 0;
+        sTagTargetDpadHeld[player] = 0;
+        Port_SettingsWrite();
+    }
+    return sTagTargetMethod[player];
+}
+static float tag_axis(unsigned char raw) { /* (gs_input.c game_axis: the game's dead zone) */
+    float value = (float)raw - 127.5f;
+    if (value > 0.0f) {
+        value = value > 50.0f ? value - 50.0f : 0.0f;
+    } else {
+        value = value < -50.0f ? value + 50.0f : 0.0f;
+    }
+    return value / (127.5f - 50.0f);
+}
+static void tag_target(int socket, unsigned btn, unsigned char *data) {
+    extern int TagBattle_Active(void), Vita_InBattle(void);
+    int method, tag = TagBattle_Active() && Vita_InBattle();
+    if (!tag) {
+        sTargetLatch[socket] = 0;
+        sTagTargetDpadHeld[socket] = 0;
+        return;
+    }
+    method = PortInput_TagTargetMethod(socket, -1);
+    if (method == 1) {
+        float x = tag_axis(data[2]), y = tag_axis(data[3]);
+        int dir;
+        if ((x < 0 ? -x : x) > (y < 0 ? -y : y)) {
+            dir = x > 0.5f ? 4 : x < -0.5f ? 3 : 0;
+        } else {
+            dir = y > 0.5f ? 2 : y < -0.5f ? 1 : 0;
+        }
+        data[17] = (unsigned char)(0x80 | (dir && !sTargetLatch[socket] ? dir : 0));
+        sTargetLatch[socket] = dir != 0;
+        data[2] = data[3] = 0x80;
+    } else {
+        sTargetLatch[socket] = 0;
+    }
+    if (method == 2) {
+        unsigned held = btn & (B_LEFT | B_RIGHT), pressed = held & ~sTagTargetDpadHeld[socket];
+        if (!(data[17] & 7) && !(btn & (B_L2 | B_L3 | B_R3))) {
+            if (held == B_LEFT && pressed == B_LEFT) data[17] = 0x80 | 3;
+            if (held == B_RIGHT && pressed == B_RIGHT) data[17] = 0x80 | 4;
+        }
+        sTagTargetDpadHeld[socket] = held;
+    } else {
+        sTagTargetDpadHeld[socket] = 0;
+    }
+    data[17] |= (unsigned char)(method << 4);
+}
+
 int Port_PadRead(int socket, unsigned char *data) {
     static const struct { unsigned vita, ps2; } map[] = {
         {SCE_CTRL_START, B_START}, {SCE_CTRL_UP, B_UP}, {SCE_CTRL_RIGHT, B_RIGHT}, {SCE_CTRL_DOWN, B_DOWN}, {SCE_CTRL_LEFT, B_LEFT},
@@ -269,6 +350,7 @@ int Port_PadRead(int socket, unsigned char *data) {
     data[0] = (unsigned char)(~btn & 0xFF);
     data[1] = (unsigned char)(~(btn >> 8) & 0xFF);
     data[2] = pad.rx; data[3] = pad.ry; data[4] = pad.lx; data[5] = pad.ly;
+    tag_target(socket, btn, data);
     return 18;
 }
 
@@ -293,6 +375,15 @@ char *Vita_GsGetenv(const char *name) {
     if (name[4] == 'G' && strcmp(name, "BT3_GS_THREAD") == 0) { /* lists on a thread of their own (TRIANGLE: not) */
         extern int gVglSafe;
         return (gVglSafe & 512) ? NULL : "1";
+    }
+    /* BT4decomp's TrueType lines of its own screens (gs/menu_text.c, gs/tbo_text.c; port/vita/vita_tbo.c): the fonts
+       are in the package (fonts/, with fonts.tsv), and the list of the menus' labels made from the disc (the PC's
+       "Menu font", its translated menus) is off: an empty name switches it off there, so no thread reads the disc */
+    if (name[4] == 'F' && strcmp(name, "BT3_FONTS") == 0) {
+        return "app0:fonts";
+    }
+    if (name[4] == 'M' && strcmp(name, "BT3_MENU_FONT") == 0) {
+        return "";
     }
     return strcmp(name, "BT3_GS") == 0 ? "gpu" : NULL;
 }

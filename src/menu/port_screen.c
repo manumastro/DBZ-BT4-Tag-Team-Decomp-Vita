@@ -302,6 +302,14 @@ static void Ps_SpriteScreenFiltered(s32 id, f32 x0, f32 y0, f32 x1, f32 y1, f32 
     if (alpha <= 0 || x1 <= x0 || y1 <= y0) {
         return;
     }
+#ifdef PORT_VITA
+    {   /* (bt3.txt tboui=0: the pictures and lines not drawn, port/vita/vita_tbo.c) */
+        extern int Vita_TboOn(void);
+        if (!Vita_TboOn()) {
+            return;
+        }
+    }
+#endif
     if (alpha > 0x80) {
         alpha = 0x80;
     }
@@ -538,6 +546,14 @@ void Ps_TextExOuterXY(f32 x, f32 y, char *str, f32 scaleX, f32 scaleY, f32 width
     s32 alpha = (s32)((top >> 24) & 0xFF);
     s32 id;
 
+#ifdef PORT_VITA
+    {   /* (bt3.txt tboui=0: no line put together, port/vita/vita_tbo.c) */
+        extern int Vita_TboOn(void);
+        if (!Vita_TboOn()) {
+            return;
+        }
+    }
+#endif
     if (str[0] == 0 || (id = PortTbo_TextId(str, 0)) < 0) {
         return;
     }
@@ -596,6 +612,14 @@ void Ps_Heading(f32 x, f32 y, char *str, f32 scale, f32 width, s32 alpha) {
     f32 y0;
     s32 id;
 
+#ifdef PORT_VITA
+    {
+        extern int Vita_TboOn(void);
+        if (!Vita_TboOn()) {
+            return;
+        }
+    }
+#endif
     if (str[0] == 0 || (id = PortTbo_TextId(str, 2)) < 0) {
         return;
     }
@@ -633,6 +657,14 @@ f32 Ps_MsgWidthLiteral(char *str,f32 scale){
 static void Ps_MsgDraw(f32 x, f32 y, char *str, f32 scale, s32 alpha,s32 literal) {
     s32 id;
 
+#ifdef PORT_VITA
+    {
+        extern int Vita_TboOn(void);
+        if (!Vita_TboOn()) {
+            return;
+        }
+    }
+#endif
     if (str[0] == 0 || (id = literal?PortTbo_TextIdLiteral(str,1):PortTbo_TextId(str, 1)) < 0) {
         return;
     }
@@ -770,7 +802,11 @@ static s32 PortTag_Run(s32 section,s32 origin,s32 reselect){
         if(result==2){
             if(TeamSel_TagRun(2))goto fight;
             s32 mode=Port_TagOfflineMode();
+#ifdef PORT_VITA /* (no online section: back to Local Battle) */
+            section=mode==3?3:1;
+#else
             section=mode==3?3:mode?1:2;
+#endif
         }
     }while(result==2);
     PortTbo_TagEntry(0);

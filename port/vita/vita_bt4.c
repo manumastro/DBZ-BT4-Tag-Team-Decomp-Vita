@@ -13,6 +13,8 @@
  */
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 #include "plat_songs.h"
 #include "plat_stages.h"
 
@@ -20,6 +22,7 @@
 int gPortResim;                    /* gs/state.c: a frame run again after a rollback (never on the Vita) */
 int gPortOverlayOpen;              /* gs/gs_input.c: the F1 window or the quit dialog has the input */
 int gPortTagUiCaptureRequest;      /* gs/tag_team_net.c */
+int gsSkipFrame;                   /* gs/gs_core.c on PC: a blank not drawn (read by fight_panels.c's side bars, not drawn here) */
 volatile int gUiNameIdx, gUiNameReady, gUiSongIdx, gUiSongLit, gUiSongReady; /* gs/gs_draw.c: the PC's name plates */
 volatile int gUiNameX, gUiNameY, gUiNameW, gUiNameH, gUiSongX, gUiSongY, gUiSongW, gUiSongH;
 int gPortSongCount;                /* plat_songs.c: songs added from outside the disc (none) */
@@ -83,7 +86,22 @@ void Port_StateTouch(void *p, unsigned long n) { (void)p; (void)n; }
 /* ---- the F1 window and the PC's presentation (gs/ui.cpp, gs/gs_draw.c) ---- */
 int Port_HudLayout(void) { return 0; }
 int Port_HudSwap(void) { return 0; }
-int Port_SpecialMoveCameras(int change) { (void)change; return 1; } /* the special moves' own cinematic cameras, as the game */
+/* the special moves' own cinematic cameras (on by default, as the game), the Tag Team screens' Camera mode row: as the
+   PC's port/src/mods_game.c, saved as special_move_cameras; src/battle/btl_cam.c reads it */
+int Port_SpecialMoveCameras(int change) {
+    extern int Port_Setting(const char *, int);
+    extern void Port_SettingSave(const char *, int), Port_SettingsWrite(void);
+    static int enabled = -1;
+    if (enabled < 0) {
+        enabled = Port_Setting("special_move_cameras", 1) != 0;
+    }
+    if (change >= 0) {
+        enabled = change != 0;
+        Port_SettingSave("special_move_cameras", enabled);
+        Port_SettingsWrite();
+    }
+    return enabled;
+}
 int Port_TagBattleRenderActive(void) { return 0; }
 int Port_TagNetwork(void) { return 0; }
 void Port_TagMenuSet(int a, int b) { (void)a; (void)b; }
@@ -119,15 +137,108 @@ void PortPcm_Close(void *h) { (void)h; }
 /* (port/src/a11y_game.c) */
 void PortA11y_FontText(int kind, int arg, int flags) {}
 void PortA11y_StreamStart(const char *path) {}
-void Port_CacheFighterNames(void *names, void *forms) {} /* (the fighters' names for the PC's TrueType labels) */
+/* The fighters' names, read once from a character select's own name and form texts (menu_c_e.c, menu_e_b.c), for
+   the Tag Team fight's name over the target (port/src/fight_panels.c Port_TagActorName, src/battle/tag_team_hud.inc).
+   a11y_game.c's cache (its chara_name, text_line, name_cache_fill), without the rest of the screen reader. */
+#define FIGHTER_NAME_CACHE 512
+static char sNameCache[FIGHTER_NAME_CACHE][64];
+/* line n of one of the game's text files as UTF-8 (a table of byte offsets, entry 0 the count, to UTF-16 strings
+   that begin with U+FEFF; the table ends where the first string starts), on one line: line breaks and spaces one
+   space between words (a11y_game.c text_line with gs/a11y.c PortA11y_Utf8, without its translations). Its length;
+   0 when it is not such a line. */
+static int name_line(char *out, int cap, const uint32_t *file, int n) {
+    const uint16_t *str;
+    uint32_t ofs, c;
+    int k = 0, i, space = 0, need;
+    out[0] = '\0';
+    if (file == 0 || n < 0 || n >= 0x1000 || (uint32_t)n + 1 >= file[1] >> 2) {
+        return 0;
+    }
+    ofs = file[n + 1] >> 2 << 2;
+    if (ofs == 0 || ofs >= 0x200000) {
+        return 0;
+    }
+    str = (const uint16_t *)(const void *)((const uint8_t *)file + ofs);
+    if (str[0] != 0xFEFF) {
+        return 0;
+    }
+    for (i = 0; str[i] != 0 && i < 4096; i++) {
+        c = str[i];
+        if (c >= 0xD800 && c < 0xDC00 && str[i + 1] >= 0xDC00 && str[i + 1] < 0xE000) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (str[i + 1] - 0xDC00);
+            i++;
+        } else if (c == 0xFEFF || (c >= 0xD800 && c < 0xE000)) {
+            continue;
+        }
+        if (c <= ' ') {
+            space = k > 0;
+            continue;
+        }
+        need = c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+        if (k + space + need >= cap) {
+            break;
+        }
+        if (space) {
+            out[k++] = ' ';
+            space = 0;
+        }
+        if (need == 1) {
+            out[k++] = (char)c;
+        } else if (need == 2) {
+            out[k++] = (char)(0xC0 | c >> 6);
+            out[k++] = (char)(0x80 | (c & 0x3F));
+        } else if (need == 3) {
+            out[k++] = (char)(0xE0 | c >> 12);
+            out[k++] = (char)(0x80 | (c >> 6 & 0x3F));
+            out[k++] = (char)(0x80 | (c & 0x3F));
+        } else {
+            out[k++] = (char)(0xF0 | c >> 18);
+            out[k++] = (char)(0x80 | (c >> 12 & 0x3F));
+            out[k++] = (char)(0x80 | (c >> 6 & 0x3F));
+            out[k++] = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    out[k] = '\0';
+    return k;
+}
+void Port_CacheFighterNames(void *names, void *forms) {
+    const uint32_t *nameText = (const uint32_t *)names, *formText = (const uint32_t *)forms;
+    int chara, lines = FIGHTER_NAME_CACHE;
+    memset(sNameCache, 0, sizeof(sNameCache));
+    if (nameText == 0) {
+        return;
+    }
+    if (nameText[1] >> 2 != 0 && (int)(nameText[1] >> 2) - 1 < lines) {
+        lines = (int)(nameText[1] >> 2) - 1;
+    }
+    for (chara = 0; chara < lines; chara++) {
+        char name[64], form[64];
+        size_t len;
+        if (name_line(name, sizeof(name), nameText, chara) == 0) {
+            continue;
+        }
+        if (name_line(form, sizeof(form), formText, chara) > 0 && strcmp(form, name) != 0) {
+            len = strlen(name);
+            snprintf(name + len, sizeof(name) - len, ", %s", form);
+        }
+        snprintf(sNameCache[chara], sizeof(sNameCache[chara]), "%s", name);
+    }
+}
+int Port_CachedFighterName(int chara, char *out, int cap) {
+    if (cap <= 0) {
+        return 0;
+    }
+    out[0] = 0;
+    if (chara < 0 || chara >= FIGHTER_NAME_CACHE || !sNameCache[chara][0]) {
+        return 0;
+    }
+    snprintf(out, (size_t)cap, "%s", sNameCache[chara]);
+    return 1;
+}
 
-/* (port/src/fight_panels.c) */
-void Port_HudFeed(int kind, int side, int a, int b) {}
-/* (BT4decomp 0.1.39.6: the Tag Team HUD's allies over their fighters, and the fighters' names over the target) */
-void PortPanels_SetBattleActive(int active) {}
-void Port_TagAllyHudFeed(int pane,int viewer,int actor,int x,int y) {}
-void Port_TagAllyHudReset(void) {}
-int Port_TagActorName(int actor,char *out,int cap) { return 0; } /* (no name: the PC writes it in TrueType) */
+/* (port/src/fight_panels.c is the PC's own now: the Tag Team fight's names and its allies' places, read by the HUD. Its
+   side bars of a wide window are not drawn on the Vita; what they read is answered here) */
+int PortMods_ViewActor(int side) { return side; } /* (port/src/mods_game.c: no script mods) */
 
 /* (port/src/gs/a11y.c) */
 float PortA11y_StreamGain(const void *player) { (void)player; return 1.0f; } /* the game's own volume (no accessibility options on the Vita) */
@@ -159,7 +270,7 @@ void Port_TagHudTrace(int actor,int front,int kind,const float *basis,const floa
 void Port_TagHudView(const float *v,const float *p,const float *nearZ) {}
 void Port_WallMesh(const void *key, int second, int culled, const float *screen, const float *cam, const float *vtx, int quadCount, const void *quads, unsigned long long tex0) {}
 
-/* (port/src/gs/gs_input.c) */
+/* (port/src/gs/gs_input.c; PortInput_TagTargetMethod is the Vita's own: vita_gfx.c) */
 int PortTbo_CommunityTake(void) { return 0; }
 int PortTbo_TextRead(void) { return 0; }
 int Port_RumbleTest(void) { return 0; }
@@ -170,17 +281,32 @@ void PortTbo_OpenCommunity(void) {}
 void PortTbo_Paste(void) {}
 void PortTbo_PasteText(void) {}
 void PortTbo_TextMode(int on) {}
-int PortInput_TagTargetMethod(int player, int method) { return 0; } /* (the PC's choice of L3, right stick or D-pad: the Vita's is L3) */
 void Port_ClashLog(int player, const char *what, int fromInput, int total, int frame) {}
 void Port_PadVibrate(int socket, int small, int large) {}
 
-/* (port/src/gs/menu_text.c) */
-void MenuText_BootLanguageChosen(void) {}
-void MenuText_RegisterGlyphs(int tbp, int cbp, const void *glyphs, int count, int lineHeight) {}
-
-/* (port/src/gs/menu_translation.c) */
+/* (port/src/gs/menu_text.c, menu_labels.c and tbo_text.c are the PC's own: BT4decomp's own screens' TrueType lines,
+   port/vita/vita_tbo.c. The list of the menus' labels made from the disc is off, vita_gfx.c Vita_GsGetenv) */
+/* (port/src/gs/menu_translation.c: the PC's menus in another language, from its translations folder; the Vita's are
+   in English, as written) */
 void MenuTranslation_SaveChoice(const char *locale) {}
-int MenuTranslation_Ensure(void) { return 0; } /* (no translated menus' TrueType lines on the Vita) */
+int MenuTranslation_Ensure(void) { return 0; }
+int MenuTranslation_BootPending(void) { return 0; }
+int MenuTranslation_Load(const char *outDir, char *why, size_t whyLen) { (void)outDir; if (whyLen) why[0] = 0; return 1; }
+const char *MenuTranslation_Locale(void) { return 0; }
+int MenuTranslation_NativeLabelsPath(char *out, size_t size) { (void)out; (void)size; return 0; }
+const char *MenuTranslation_Text(const char *id) { (void)id; return 0; }
+const char *MenuTranslation_Line(const char *original) { (void)original; return 0; }
+const char *MenuTranslation_Original(const char *id) { (void)id; return 0; }
+const char *MenuTranslation_Group(const char *id) { (void)id; return 0; }
+const char *MenuTranslation_MainOriginal(void) { return 0; }
+const char *MenuTranslation_ItemOriginal(void) { return 0; }
+const char *const *MenuTranslation_StageNames(void) { return 0; }
+const char *const *MenuTranslation_SongNames(void) { return 0; }
+/* (port/src/gs/ui_text_extract.c: the European disc's languages, a PC setup's) */
+int UiText_EuropeanOnStartup(const char *gameTextDir, char *why, size_t whyLen) { (void)gameTextDir; if (whyLen) why[0] = 0; return 0; }
+/* (the PC's program folder, when its fonts are not found: the Vita's are app0:fonts) */
+#include <sys/types.h>
+ssize_t readlink(const char *path, char *buf, size_t size) { (void)path; (void)buf; (void)size; return -1; }
 
 /* (port/src/gs/namefont.c) */
 void Port_NameFontSheets(int stage, int song, int songLit) {}
@@ -258,13 +384,6 @@ void Port_StateLog(unsigned vblank, const void *fight, unsigned fightSize) {}
 /* (port/src/gs/tag_team_sync_client.inc) */
 void Port_TagHashActor(int actor,unsigned x,unsigned y,unsigned z,unsigned hp,unsigned ki,unsigned action,unsigned target,unsigned team,unsigned chara,unsigned costume) {}
 
-/* (port/src/gs/tbo_text.c) */
-int PortTbo_TextId(const char *text,int kind) { return 0; }
-int PortTbo_TextIdLiteral(const char *text,int kind) { return 0; }
-int PortTbo_TextInfo(int id, int what) { return 0; }
-int PortTbo_TextMeasure(const char *text,int kind) { return 0; }
-int PortTbo_TextMeasureLiteral(const char *text,int kind) { return 0; }
-unsigned PortTbo_TextGeneration(void) { return 0; }
 
 /* (port/src/gs/ui.cpp) */
 int Ui_QuitAsk(void) { return 0; }
