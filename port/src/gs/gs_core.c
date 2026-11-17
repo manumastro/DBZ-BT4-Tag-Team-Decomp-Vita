@@ -4442,47 +4442,87 @@ static uint8_t sCcK0[512]; /* VU memory 0..31 when the call being recorded began
    fighter's strip, slot and indices' place, and its indices. Not the bookkeeping: the header fields a record does not
    set (gr_alloc does not clear the ring: GR_REG's b, c, e, GR_GIFC's a, c, e, d hold what was there before), the
    padding up to 32 bytes after a record's payload (the ring's old bytes, or malloc's in the copy), the plan's 8th word
-   (ChipPlan has 7) and slot / ioff of a stage's strip (not set), and the plan's uh (a hash of the constants, the bones
-   of that frame: put back when sent). bindrange's line found every read differing with memcmp (1,889 of 1,889 kept
+   (ChipPlan has 7) and slot / ioff of a stage's strip (not set), the 2 bytes after a fighter strip's odd number of
+   16-bit indices (not written), and the plan's uh (a hash of the constants, the bones of that frame: put back when
+   sent; 0 with the strips drawn directly). bindrange's line found every read differing with memcmp (1,889 of 1,889 kept
    calls read again now and then, batch 22). 1 the same; 0 not, *at: the first record that differs (its offset). */
+static const char *sCcSameWhy; /* (the log) the field cc_same found differing, and its byte in the record */
+static uint32_t sCcSameOff;
+#define CC_DIFF(why, off) do { sCcSameWhy = (why); sCcSameOff = (off); return 0; } while (0)
+/* a strip's indices' bytes: a fighter's (plan mode 1) 16-bit, a stage's 32-bit; (count - 2) * 3 of them. A fighter's
+   take a multiple of 4 bytes in the record, and the 2 after an odd number of them are not written (Vita_ChipFill):
+   the ring's old bytes, not compared (batch 22's br3b: all the "draw something else" seen were strips of an odd count) */
+static uint32_t cc_ix_bytes(const uint32_t *plan) {
+    return plan[2] < 3 ? 0 : (plan[2] - 2) * 3 * (plan[0] == 1 ? 2u : 4u);
+}
 static int cc_same(const uint8_t *x, uint32_t xn, const uint8_t *y, uint32_t yn, uint32_t *at) {
     uint32_t o = 0;
     *at = 0;
+    sCcSameWhy = "";
+    sCcSameOff = 0;
     if (x == NULL) {
-        return 0;
+        CC_DIFF("no copy", 0);
     }
     while (o < xn && o < yn) {
         const GRec *p = (const GRec *)(const void *)(x + o), *q = (const GRec *)(const void *)(y + o);
         *at = o;
-        if (p->type != q->type || p->size != q->size || p->size < 32 || o + p->size > xn || o + p->size > yn) {
-            return 0;
+        if (p->type != q->type) {
+            CC_DIFF("type", 0);
+        }
+        if (p->size != q->size || p->size < 32 || o + p->size > xn || o + p->size > yn) {
+            CC_DIFF("size", 4);
         }
         if (p->type == GR_REG) {
-            if (p->a != q->a || p->d != q->d) {
-                return 0;
+            if (p->a != q->a) {
+                CC_DIFF("GR_REG register (a)", 8);
+            }
+            if (p->d != q->d) {
+                CC_DIFF("GR_REG value (d)", 24);
             }
         } else if (p->type == GR_GIFC) {
-            if (p->b != q->b || 32 + p->b * 16 > p->size || memcmp(p + 1, q + 1, p->b * 16) != 0) {
-                return 0;
+            uint32_t k;
+            if (p->b != q->b || 32 + p->b * 16 > p->size) {
+                CC_DIFF("GR_GIFC quadwords (b)", 12);
+            }
+            for (k = 0; k < p->b * 16; k += 4) {
+                if (memcmp((const uint8_t *)(p + 1) + k, (const uint8_t *)(q + 1) + k, 4) != 0) {
+                    CC_DIFF("GR_GIFC data", 32 + k);
+                }
             }
         } else if (p->type == GR_VU) {
             const uint32_t *u = (const uint32_t *)(const void *)(p + 1), *v = (const uint32_t *)(const void *)(q + 1);
-            uint32_t ib;
-            if (p->flags != q->flags || p->a != q->a || p->b != q->b || p->c != q->c || p->e != q->e || p->d != q->d ||
-                u[0] != v[0] || u[1] != v[1] || u[2] != v[2] || u[4] != v[4] || (u[0] == 1 && (u[5] != v[5] || u[6] != v[6]))) {
-                return 0;
+            uint32_t ib, k;
+            if (p->flags != q->flags) { CC_DIFF("GR_VU flags", 2); }
+            if (p->a != q->a) { CC_DIFF("GR_VU program (a)", 8); }
+            if (p->b != q->b) { CC_DIFF("GR_VU layer (b)", 12); }
+            if (p->c != q->c) { CC_DIFF("GR_VU context (c)", 16); }
+            if (p->e != q->e) { CC_DIFF("GR_VU count (e)", 20); }
+            if (p->d != q->d) { CC_DIFF("GR_VU vertices (d)", 24); }
+            if (u[0] != v[0]) { CC_DIFF("plan mode", 32); }
+            if (u[1] != v[1]) { CC_DIFF("plan at", 36); }
+            if (u[2] != v[2]) { CC_DIFF("plan count", 40); }
+            if (u[4] != v[4]) { CC_DIFF("plan upload", 48); }
+            if (u[0] == 1 && u[5] != v[5]) { CC_DIFF("plan slot", 52); }
+            if (u[0] == 1 && u[6] != v[6]) { CC_DIFF("plan ioff", 56); }
+            ib = cc_ix_bytes(u);
+            if (64 + ib > p->size) {
+                CC_DIFF("indices past the record", 64);
             }
-            ib = u[2] < 3 ? 0 : u[0] == 1 ? (((u[2] - 2) * 3 * 2 + 3) & ~3u) : (u[2] - 2) * 3 * 4;
-            if (64 + ib > p->size || memcmp(u + 8, v + 8, ib) != 0) {
-                return 0;
+            for (k = 0; k < ib; k += 2) {
+                if (memcmp((const uint8_t *)(u + 8) + k, (const uint8_t *)(v + 8) + k, 2) != 0) {
+                    CC_DIFF("indices", 64 + k);
+                }
             }
         } else if (memcmp(p, q, p->size) != 0) {
-            return 0;
+            CC_DIFF("another record, its bytes", 0);
         }
         o += p->size;
     }
     *at = o;
-    return xn == yn;
+    if (xn != yn) {
+        CC_DIFF("length", 0);
+    }
+    return 1;
 }
 /* (the log) the first record two copies differ in: its offset, type, size and fields, the copy kept first */
 static void cc_diff_log(const char *who, const CallCache *e, const uint8_t *buf, uint32_t n, uint32_t at) {
@@ -4491,7 +4531,7 @@ static void cc_diff_log(const char *who, const CallCache *e, const uint8_t *buf,
     uint32_t cn[2];
     int i;
     cp[0] = e->data; cn[0] = e->bytes; cp[1] = buf; cn[1] = n;
-    Vita_Log("gs: %s: the call at %08x: %u bytes kept, %u now; the first record differing at %u:\n", who, e->addr, e->bytes, n, at);
+    Vita_Log("gs: %s: the call at %08x: %u bytes kept, %u now; the first record differing at %u, in it %s at byte %u:\n", who, e->addr, e->bytes, n, at, sCcSameWhy, sCcSameOff);
     for (i = 0; i < 2; i++) {
         const GRec *p = cp[i] != NULL && at + 32 <= cn[i] ? (const GRec *)(const void *)(cp[i] + at) : NULL;
         if (p == NULL) {
@@ -4540,8 +4580,9 @@ static void cc_bytes_why(const CallCache *e, const uint8_t *buf, uint32_t n) {
                 k = w >= 32 + p->b * 16 ? 1 : 4;
             } else if (p->type == GR_VU) {
                 const uint32_t *u = (const uint32_t *)(const void *)(p + 1);
-                uint32_t ib = u[2] < 3 ? 0 : u[0] == 1 ? (((u[2] - 2) * 3 * 2 + 3) & ~3u) : (u[2] - 2) * 3 * 4;
-                k = w == 32 + 12 ? 2 : w == 32 + 28 || (u[0] != 1 && (w == 32 + 20 || w == 32 + 24)) ? 3 : w >= 64 + ib ? 1 : 4;
+                uint32_t ib = cc_ix_bytes(u);
+                k = w == 32 + 12 ? 2 : w == 32 + 28 || (u[0] != 1 && (w == 32 + 20 || w == 32 + 24)) ? 3 :
+                    w >= 64 + ib ? 1 : w + 4 > 64 + ib && memcmp(x + o + w, buf + o + w, 64 + ib - w) == 0 ? 1 : 4; /* (the 2 bytes after a fighter strip's odd number of indices: padding) */
             } else {
                 k = 4;
             }
