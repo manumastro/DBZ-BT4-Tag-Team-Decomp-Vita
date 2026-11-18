@@ -2302,6 +2302,15 @@ static void read_settings(void) {
         } else if (strcmp(line, "tbotextpct") == 0) { /* the Tag Team screens' and HUD's letters this many hundredths of the PC's size (port_screen.c, vita_tbo.c): 100 (default) the PC's */
             extern int gVitaTboTextPct;
             gVitaTboTextPct = atoi(eq);
+        } else if (strcmp(line, "tagtarget") == 0) { /* Tag Team's target choice until the player picks one (vita_gfx.c): 0 L3, 1 (default) the right stick, 2 the D-pad */
+            extern int gVitaTagTargetDefault;
+            gVitaTagTargetDefault = atoi(eq);
+        } else if (strcmp(line, "tagui_scale") == 0) { /* the Tag Team screens' letters, percent of the PC's (vita_tbo.c): 130 (default), 100 the PC's */
+            extern int gVitaTagUiScale;
+            gVitaTagUiScale = atoi(eq);
+        } else if (strcmp(line, "taghud_scale") == 0) { /* the Tag Team fight's HUD (letters, gauges, target marks), percent of the PC's: 135 (default), 100 the PC's */
+            extern int gVitaTagHudScale;
+            gVitaTagHudScale = atoi(eq);
         } else if (strcmp(line, "tbotextsize") == 0) { /* BT4decomp's screens' lines written at the Vita's size (capitals 40 / 24, tbo_text.c): 1 (default), 0 the PC's 80 / 48 then halved */
             extern int gVitaTboTextSize;
             gVitaTboTextSize = atoi(eq) != 0;

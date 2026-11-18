@@ -156,6 +156,18 @@ split screen, the floating allies' gauges), the target selection's three methods
 target, the results' Rematch / Back to character select / exit, the Duel menu's Tag type, `tagteam=2` (the earlier
 text setup) and `tagteam=0`.
 
+### Tag Team readable on the 5-inch screen (2026-11-18, branch `wip/v14rel`, after v1.4.1)
+
+The developer played Tag Team on v1.4.1: the HUD very small and unclear, the menus very small, and no way found to
+pick one enemy over the other. Measured on the console's shots (960 x 544): the main menu's rows have capitals of
+18-20 pixels, the talk box 16; the Tag Team setup's rows and its talk box 12-13. So: `tagui_scale=130` (the rows'
+capitals about 16-17) and `taghud_scale=135` (the fight's letters, the HUD's gauge, the allies' column, the target's
+rings and bar). The layout is upstream's: only the letters and the HUD's pieces grow, each around where it was; the
+allies' column is laid out from the screen's foot so it stays on it. Targeting: the Vita's default is now the right
+stick (`tagtarget=1`; the PC's L3 is a rear touch corner here); the Select Fighters row's help says the fight's
+controls and where L2 / R2 / L3 / R3 are (English, Spanish, Portuguese: `online_language.c`, PORT_VITA). Console
+check: `psvita-agent/sets/bt4/tagscale_menu_{on,off}.txt` (with `.inputs.json`) and `tagscale_2v2_{on,off}.txt`.
+
 ### Entering Tag Team and the English disc's entry (2026-11-18, branch `wip/v14rel`)
 
 The developer's run on the English B14 Rev2 (extracted folder) after v1.4:

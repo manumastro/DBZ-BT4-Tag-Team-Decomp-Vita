@@ -25,6 +25,14 @@ extern void TagBattle_HudRear(f32 *head,f32 *out);
 extern s32 BtlSeq_IsFighting(void),BtlSeq_GetTimeLeft(void),Port_TagOfflineBeans(void);
 extern f32 sqrtf(f32 x);
 static u32 TagHud_Color(s32 r,s32 g,s32 b) { return Ps_Rgba(r,g,b,0x80); }
+/* (the Vita, bt3.txt taghud_scale: port/vita/vita_tbo.c) the HUD's gauges and target marks this much larger on the
+   5-inch screen; its letters grow by it in port_screen.c. 1 elsewhere. */
+#ifdef PORT_VITA
+extern float Vita_TagHudScale(void);
+#define TAGHUD_K() ((f32)Vita_TagHudScale())
+#else
+#define TAGHUD_K() 1.0f
+#endif
 static void TagHud_Stroke(f32 x0,f32 y0,f32 x1,f32 y1,f32 width,u32 c) {
     f32 dx=x1-x0,dy=y1-y0,n=sqrtf(dx*dx+dy*dy),px,py;
     if(n<0.001f)return;
@@ -251,21 +259,21 @@ static void TagHud_Target(s32 viewer,s32 target){
         if(!front){f32 rear[2];TagBattle_HudRear(head,rear);dx=rear[0]*PS_UNIT_X;dy=rear[1];}
         ax=dx<0?-dx:dx;ay=dy<0?-dy:dy;
         k=ax/(right-270);if(ay/154>k)k=ay/154;
-        if(k>0.001f)TagHud_Arrow(256+dx/k,224+dy/k,dx,dy,6,gold);
+        if(k>0.001f)TagHud_Arrow(256+dx/k,224+dy/k,dx,dy,6*TAGHUD_K(),gold);
         return;
     }
     radius=TagBattle_HudProject(head,tip)?y-tip[1]+6:16;
-    if(radius<10)radius=10;
-    if(radius>32)radius=32;
+    if(radius<10*TAGHUD_K())radius=10*TAGHUD_K();
+    if(radius>32*TAGHUD_K())radius=32*TAGHUD_K();
 #ifdef PORT_VITA
     Ps_BatchBegin(); /* (hudbatch: the target's two rings, plain shapes only, one packet) */
 #endif
     for(i=0;i<32;++i){
         s32 next=(i+1)%32;
         TagHud_Stroke(x+ring[i][0]*radius*PS_UNIT_X,y+ring[i][1]*radius,
-            x+ring[next][0]*radius*PS_UNIT_X,y+ring[next][1]*radius,1.45f,gold);
+            x+ring[next][0]*radius*PS_UNIT_X,y+ring[next][1]*radius,1.45f*TAGHUD_K(),gold);
         TagHud_Stroke(x+ring[i][0]*(radius+3)*PS_UNIT_X,y+ring[i][1]*(radius+3),
-            x+ring[next][0]*(radius+3)*PS_UNIT_X,y+ring[next][1]*(radius+3),.55f,gold);
+            x+ring[next][0]*(radius+3)*PS_UNIT_X,y+ring[next][1]*(radius+3),.55f*TAGHUD_K(),gold);
     }
 #ifdef PORT_VITA
     Ps_BatchEnd();
@@ -287,8 +295,12 @@ static void TagHud_Target(s32 viewer,s32 target){
         if(x<left+65)x=left+65;
         if(x>right-65)x=right-65;
     }
-    Ps_Rect(x-30,y-1,x+30,y+5,shadow,shadow);
-    TagHud_Fill(x-29,y,58,3,TagHud_Hp(target),TagHud_Color(116,235,83));
+    {   /* (the Vita: taghud_scale) the target's health bar as much larger, its name above it */
+        f32 k=TAGHUD_K();
+        Ps_Rect(x-30*k,y-1*k,x+30*k,y+5*k,shadow,shadow);
+        TagHud_Fill(x-29*k,y,58*k,3*k,TagHud_Hp(target),TagHud_Color(116,235,83));
+        y-=(k-1)*15;
+    }
 #ifdef BT4_TAG_TEAM_EXPANDED
     {
         extern s32 Port_TagActorName(s32,char *,s32);
@@ -322,7 +334,8 @@ static void TagHud_NativeAllies(s32 view,s32 count,f32 left,s32 mirror){
     s32 actor,n=0,index=0;
     for(actor=0;actor<count;++actor)if(actor!=view&&!TagFusion_Absent(actor)&&TagBattle_Allied(actor,view))++n;
     for(actor=0;actor<count;++actor)if(actor!=view&&!TagFusion_Absent(actor)&&TagBattle_Allied(actor,view)){
-        TagHud_NativeGauge(actor,mirror?512-Ps_Left()-8:left+8,400-(n-1-index++)*39,.48f,1,mirror);
+        /* (taghud_scale: larger, the column kept on the screen from its foot) */
+        TagHud_NativeGauge(actor,mirror?512-Ps_Left()-8:left+8,448-(48+(n-1-index++)*39)*TAGHUD_K(),.48f*TAGHUD_K(),1,mirror);
     }
 }
 static void TagHud_FloatingAllies(s32 pane,s32 cameraActor,s32 count){
@@ -343,7 +356,7 @@ static void TagHud_FloatingAllies(s32 pane,s32 cameraActor,s32 count){
         Port_TagAllyHudFeed(pane,cameraActor,actor,(s32)((point[0]-left)*100000/(512-2*left)),(s32)(point[1]*100000/448));
         Port_GsMarker(0x50000000u|((u32)actor<<24)|((u32)pane<<23)|
             ((u32)((point[0]-left)*4095/(512-2*left))<<11)|(u32)(point[1]*2047/448));
-        TagHud_NativeGauge(actor,point[0]-28,point[1],.28f,1,0);
+        TagHud_NativeGauge(actor,point[0]-28*TAGHUD_K(),point[1],.28f*TAGHUD_K(),1,0);
     }
 }
 static void TagHud_Radar(s32 view,s32 count,f32 right){
@@ -430,7 +443,7 @@ static void TagHud_DevLayout(s32 view,s32 target,s32 count,s32 split){
         }
         return;
     }
-    TagHud_NativeGauge(view,left+8,8,.86f,0,0);
+    TagHud_NativeGauge(view,left+8,8,.86f*TAGHUD_K(),0,0);
     TagHud_NativeAllies(view,count,left,0);
     TagHud_Radar(view,count,right);
     if(gHud->flags&HUD_SHOW_TIMER){

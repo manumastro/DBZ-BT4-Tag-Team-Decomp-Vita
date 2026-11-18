@@ -969,6 +969,14 @@ static const char *const kTagDevText[][3]={
     {"Watch two local CPU teams fight and switch between fighters.","Observa a dos equipos CPU y alterna entre sus luchadores.","Assista a duas equipes da CPU e alterne entre os lutadores."}
 };
 
+#ifdef PORT_VITA
+/* (the Vita's own lines: src/menu/port_tbo.c, the Tag Team setup's Select Fighters row) */
+static const char *const kVitaText[][3]={
+{"In battle: right stick picks the target. Stay near a downed ally to revive. Senzu: L2 + SELECT. Fusion: R3 + direction. L2 / R2 / L3 / R3: rear touch corners.",
+ "En combate: stick derecho elige el objetivo. Quédate cerca de un aliado caído para reanimarlo. Senzu: L2 + SELECT. Fusión: R3 + dirección. L2 / R2 / L3 / R3: esquinas del panel trasero.",
+ "Em combate: analógico direito escolhe o alvo. Fique perto de um aliado caído para reanimá-lo. Senzu: L2 + SELECT. Fusão: R3 + direção. L2 / R2 / L3 / R3: cantos do painel traseiro."},
+};
+#endif
 const char *PortOnline_Text(const char *text){
     unsigned i;int english=Port_GameProfileEnglish(),portuguese=Port_GameProfilePortuguese();
     /* Isolated render checks can exercise both UI catalogs with one test disc.
@@ -978,6 +986,10 @@ const char *PortOnline_Text(const char *text){
         portuguese=!strcmp(getenv("BT4_UI_LANGUAGE_TEST"),"pt");
     }
     if(!text||sRaw||english)return text;
+#ifdef PORT_VITA
+    for(i=0;i<sizeof(kVitaText)/sizeof(kVitaText[0]);i++)
+        if(!strcmp(text,kVitaText[i][0]))return kVitaText[i][portuguese?2:1];
+#endif
     for(i=0;i<sizeof(kRankedText)/sizeof(kRankedText[0]);i++)
         if(!strcmp(text,kRankedText[i][0]))return kRankedText[i][portuguese?2:1];
     for(i=0;i<sizeof(kTagDevText)/sizeof(kTagDevText[0]);i++)

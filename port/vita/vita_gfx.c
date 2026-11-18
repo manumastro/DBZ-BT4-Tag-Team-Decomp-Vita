@@ -311,6 +311,12 @@ static void stick_shape(unsigned char *bx, unsigned char *by) {
    BtlInput_Sample): 0x80 | the direction (1 up, 2 down, 3 left, 4 right) | the method << 4, in a Tag Team fight. ---- */
 static int sTagTargetMethod[2] = {-1, -1}, sTargetLatch[2];
 static unsigned sTagTargetDpadHeld[2];
+/* The method a player has not chosen yet (bt3.txt tagtarget, default 1 since wip/v14rel after v1.4.1; the PC's is 0):
+   the right stick. The Vita's L3 is a corner of the rear touch pad (vita_touch.c), which players did not find (the
+   developer: "could not work out how to pick one enemy over the other"); its right stick is free in a Tag Team fight
+   (the camera is the game's, the free camera of Camera mode takes the pad whole: spec_consumes). A choice made on the
+   Camera mode page is saved and kept as on PC. */
+int gVitaTagTargetDefault = 1;
 int PortInput_TagTargetMethod(int player, int method) {
     char key[40];
     if (player < 0 || player > 1) {
@@ -319,7 +325,10 @@ int PortInput_TagTargetMethod(int player, int method) {
     if (sTagTargetMethod[player] < 0) {
         int previous;
         snprintf(key, sizeof(key), "target_stick_p%d", player + 1);
-        previous = Port_Setting("tag_target_dpad", 0) ? 2 : Port_Setting(key, 0) ? 1 : 0;
+        previous = Port_Setting("tag_target_dpad", 0) ? 2 : Port_Setting(key, gVitaTagTargetDefault == 1) ? 1 : 0;
+        if (gVitaTagTargetDefault == 2 && !Port_Setting("tag_target_dpad", 0) && !Port_Setting(key, 0)) {
+            previous = 2;
+        }
         snprintf(key, sizeof(key), "tag_target_method_p%d", player + 1);
         sTagTargetMethod[player] = Port_Setting(key, previous);
         if (sTagTargetMethod[player] < 0 || sTagTargetMethod[player] > 2) {

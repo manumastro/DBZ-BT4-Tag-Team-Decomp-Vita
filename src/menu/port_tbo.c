@@ -5099,6 +5099,13 @@ static char *Tb_Help(void) {
             "Set health rules for each fighter in this local battle.",
             "Choose the referee, stage destruction and CPU transformations for this local battle.",
             "Choose the fighters and the stage."};
+#ifdef PORT_VITA
+        /* (the Vita) the Select Fighters row says the fight's controls and where the Vita's L2 / R2 / L3 / R3 are
+           (vita_touch.c): players did not find how to pick the other enemy (port/src/gs/online_language.c has it in
+           Spanish and Portuguese) */
+        if(Tb_TagOffline()&&sTb->tagCur==TAG_OFF_ROWS-1)
+            return "In battle: right stick picks the target. Stay near a downed ally to revive. Senzu: L2 + SELECT. Fusion: R3 + direction. L2 / R2 / L3 / R3: rear touch corners.";
+#endif
         if(Tb_TagOffline())return offlineHelp[sTb->tagCur];
         if(sTb->tagCur==TAG_NET_BATTLE_RULES)return "Set shared battle rules. The host's settings apply to everyone in this room.";
         if(!sTb->tagSetup)return sTb->tagCur==0?"Search for a simultaneous 2 vs 2 battle.":sTb->tagCur==1?"Create a team battle or Free for All room for up to ten fighters.":"Join a room with its code.";

@@ -93,8 +93,23 @@ unsigned gVitaTboGated; /* (the report) pictures' draws held back while a screen
    not the headings) drawn this many hundredths of their size, their capitals' middle kept (src/menu/port_screen.c
    Ps_TextExOuterXY, Ps_TextWidth, under PORT_VITA): to try on the console whether they read as the game's own text */
 int gVitaTboTextPct = 100;
+/* bt3.txt tagui_scale / taghud_scale (percent; defaults 130 / 135 since wip/v14rel after v1.4.1; 100 the PC's sizes):
+   on the Vita's 5-inch screen the Tag Team screens' rows had capitals of 12-13 pixels against the main menu's 18-20, and
+   the fight's HUD was smaller still (the developer: "very small, unclear"). The screens' letters (Ps_TextEx*, the talk
+   box's Ps_Msg*: src/menu/port_screen.c) are drawn this much larger, measured as much (a row's value squeezed to its
+   room, the talk box's lines broken again), their capitals' middle where it was; in a fight taghud_scale is used, and
+   the HUD's gauges, the target's marks and the allies' column grow by it too (src/battle/tag_team_hud.inc, PORT_VITA).
+   tbotextpct (earlier) multiplies both. */
+int gVitaTagUiScale = 130, gVitaTagHudScale = 135;
+static float pct_scale(int pct) {
+    return pct >= 50 && pct <= 200 ? (float)pct / 100.0f : 1.0f;
+}
+float Vita_TagHudScale(void) {
+    return pct_scale(gVitaTagHudScale);
+}
 float Vita_TboTextScale(void) {
-    return gVitaTboTextPct >= 50 && gVitaTboTextPct <= 200 ? (float)gVitaTboTextPct / 100.0f : 1.0f;
+    extern int Vita_InBattle(void);
+    return pct_scale(gVitaTboTextPct) * pct_scale(Vita_InBattle() ? gVitaTagHudScale : gVitaTagUiScale);
 } /* (the report) lines made when asked, their ms, lines that had to wait for a picture */
 static int tbo_ab(int v) { /* (2: the soak's B battles only) */
     extern int gVitaAbSide;

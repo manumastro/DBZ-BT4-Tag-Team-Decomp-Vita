@@ -620,6 +620,13 @@ void Ps_TextEx(f32 x, f32 y, char *str, f32 scale, f32 width, u32 top, u32 botto
 /* A heading in the main menu's heading style (gold to red, a brown bevelled outline, a light rim: one picture in
    its own colours), its capitals as Ps_TextEx's of that scale; squeezed to `width` if it is wider (0: no limit). */
 void Ps_Heading(f32 x, f32 y, char *str, f32 scale, f32 width, s32 alpha) {
+#ifdef PORT_VITA
+    {   /* (tagui_scale) larger, its capitals' middle where it was */
+        f32 k = Vita_TboTextScale();
+        y -= PS_CELL_UNITS * scale * (k - 1.0f) * (PS_BASE_OF_CELL - PS_CAP_OF_CELL * 0.5f);
+        scale *= k;
+    }
+#endif
     f32 cell = PS_CELL_UNITS * scale;
     f32 cap = cell * PS_CAP_OF_CELL;
     f32 ky = cap / 1000.0f;
@@ -665,15 +672,28 @@ void Ps_Heading(f32 x, f32 y, char *str, f32 scale, f32 width, s32 alpha) {
    menu's own), white with a thin dark edge ---- */
 
 f32 Ps_MsgWidth(char *str, f32 scale) {
+#ifdef PORT_VITA
+    scale *= Vita_TboTextScale();
+#endif
     return (f32)PortTbo_TextMeasure(str, 1) / 1000.0f * PS_MSG_CAP * scale * PS_UNIT_X * Port_MenuTextNarrow();
 }
 
 extern int PortTbo_TextIdLiteral(const char *,int),PortTbo_TextMeasureLiteral(const char *,int);
 f32 Ps_MsgWidthLiteral(char *str,f32 scale){
+#ifdef PORT_VITA
+    scale*=Vita_TboTextScale();
+#endif
     return (f32)PortTbo_TextMeasureLiteral(str,1)/1000.0f*PS_MSG_CAP*scale*PS_UNIT_X*Port_MenuTextNarrow();
 }
 static void Ps_MsgDraw(f32 x, f32 y, char *str, f32 scale, s32 alpha,s32 literal) {
     s32 id;
+#ifdef PORT_VITA
+    {   /* (tagui_scale / taghud_scale) larger, its capitals' middle where it was */
+        f32 k = Vita_TboTextScale();
+        y -= (k - 1.0f) * scale * (PS_MSG_BASE - PS_MSG_CAP * 0.5f);
+        scale *= k;
+    }
+#endif
 
 #ifdef PORT_VITA
     {
