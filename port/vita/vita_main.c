@@ -1532,6 +1532,15 @@ void Vita_VBlank(unsigned vblanks) {
                                         gVitaTboMs[0] = gVitaTboMs[1] = gVitaTboMs[2] = gVitaTboMs[3] = 0;
                                     }
                                 }
+                                {
+                                    extern unsigned gVitaTboLines[3];
+                                    extern int gVitaTboText, gVitaTboMip;
+                                    if (gVitaTboLines[0] != 0 || gVitaTboLines[2] != 0) {
+                                        logf_("vita:   tbotext=%d tbomip=%d: %u lines made when asked for, in %u ms; %u made by the drawing thread\n",
+                                              gVitaTboText, gVitaTboMip, gVitaTboLines[0], gVitaTboLines[1], gVitaTboLines[2]);
+                                        gVitaTboLines[0] = gVitaTboLines[1] = gVitaTboLines[2] = 0;
+                                    }
+                                }
                             }
                             memset(gVitaFxClampN, 0, sizeof(gVitaFxClampN));
                             Gs_GifShapesLog();
@@ -2277,6 +2286,18 @@ static void read_settings(void) {
             extern int gVitaTboPre, gTboFastOutline;
             gVitaTboPre = atoi(eq) != 0;
             gTboFastOutline = gVitaTboPre;
+        } else if (strcmp(line, "tbotext") == 0) { /* BT4decomp's screens' lines (Tag Team screens and HUD) made when asked for, there from the first picture that shows them (vita_tbo.c): 0 v1.4's way (tbopre), 1 (default) on, 2 the soak's B battles */
+            extern int gVitaTboText, gTboFastOutline;
+            gVitaTboText = atoi(eq);
+            if (gVitaTboText) {
+                gTboFastOutline = 1;
+            }
+        } else if (strcmp(line, "tbotextpct") == 0) { /* the Tag Team screens' and HUD's letters this many hundredths of the PC's size (port_screen.c, vita_tbo.c): 100 (default) the PC's */
+            extern int gVitaTboTextPct;
+            gVitaTboTextPct = atoi(eq);
+        } else if (strcmp(line, "tbomip") == 0) { /* BT4decomp's screens' lines and pictures with their smaller copies, sampled trilinearly as on PC (vita_tbo.c, vita_vgl.c): 0 v1.4's way, 1 (default) on, 2 the soak's B battles */
+            extern int gVitaTboMip;
+            gVitaTboMip = atoi(eq);
         } else if (strcmp(line, "tagcam") == 0) { /* BT4decomp's free / spectator camera (vita_spectator.c): 0 the game's camera, 1 as on PC */
             extern int gVitaTagCam;
             gVitaTagCam = atoi(eq) != 0;

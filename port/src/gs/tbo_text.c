@@ -41,6 +41,7 @@ static TboLine sLines[TBO_TEXT_SLOTS];
 static uint32_t sVersion;
 static pthread_mutex_t sLock = PTHREAD_MUTEX_INITIALIZER;
 unsigned PortTbo_TextGeneration(void){return MenuText_LineGeneration();}
+uint32_t TboText_Version(uint32_t id);
 
 /* The size the letters are drawn at, by kind (capitals, in pixels: the screens show them smaller, from smaller
    copies), and the outline's thickness: as the letter sheet had it, about a 16th of the capitals. */
@@ -110,6 +111,14 @@ static int text_id(const char *text, int kind, int translate) {
         }
     }
     pthread_mutex_unlock(&sLock);
+#ifdef PORT_VITA
+    if (id >= 0) {
+        /* (bt3.txt tbotext=1: the line's picture made now, on the thread that asks for it, unless it is made already:
+           ready before the picture that shows it is drawn, never a line coming in pictures later; port/vita/vita_tbo.c) */
+        extern void Vita_TboLineAsked(uint32_t id, uint32_t version);
+        Vita_TboLineAsked((uint32_t)id, TboText_Version((uint32_t)id));
+    }
+#endif
     return id;
 }
 int PortTbo_TextId(const char *text,int kind){return text_id(text,kind,1);}
