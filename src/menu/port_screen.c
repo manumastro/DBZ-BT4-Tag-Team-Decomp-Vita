@@ -473,7 +473,15 @@ void Ps_Align(s32 align) {
    "Widescreen" in a wider picture the letters are narrowed by as much, and keep their shape (plat_stub.c) */
 extern float Port_MenuTextNarrow(void);
 
+#ifdef PORT_VITA
+/* (bt3.txt tbotextpct, port/vita/vita_tbo.c: the Tag Team screens' and HUD's letters this many hundredths of the PC's
+   size, their capitals' middle where it was; 100, the default, the PC's) */
+extern float Vita_TboTextScale(void);
+#endif
 f32 Ps_TextWidth(char *str, f32 scale) {
+#ifdef PORT_VITA
+    scale *= Vita_TboTextScale();
+#endif
     return (f32)PortTbo_TextMeasure(str, 0) / 1000.0f * PS_CELL_UNITS * scale * PS_CAP_OF_CELL * PS_UNIT_X * Port_MenuTextNarrow();
 }
 
@@ -538,6 +546,16 @@ void Ps_TextExOuterXY(f32 x, f32 y, char *str, f32 scaleX, f32 scaleY, f32 width
     if(gPortMenuMode&&Port_MenusWide()&&Port_PageAspectMilli()>=2000){
         y-=PS_CELL_UNITS*scaleY*.08f;scaleX*=1.20f;scaleY*=1.20f;
     }
+#ifdef PORT_VITA
+    {
+        f32 k = Vita_TboTextScale();
+        if (k != 1.0f) {
+            y -= PS_CELL_UNITS * scaleY * (k - 1.0f) * (PS_BASE_OF_CELL - PS_CAP_OF_CELL * 0.5f);
+            scaleX *= k;
+            scaleY *= k;
+        }
+    }
+#endif
     f32 cell = PS_CELL_UNITS * scaleY;
     f32 cap = cell * PS_CAP_OF_CELL;
     f32 fit = 1.0f;

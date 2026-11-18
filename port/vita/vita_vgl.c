@@ -1313,7 +1313,7 @@ static void flush_vu(void) {
     glUseProgram(sProgVu);
     if (s->tme && s->tex != 0) {
         glBindTexture(GL_TEXTURE_2D, s->tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s->linear ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s->linear == 2 ? GL_LINEAR_MIPMAP_LINEAR : s->linear ? GL_LINEAR : GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, s->linear ? GL_LINEAR : GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, s->wrapS ? GL_CLAMP_TO_EDGE : GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, s->wrapT ? GL_CLAMP_TO_EDGE : GL_REPEAT);
@@ -2377,6 +2377,17 @@ unsigned Vita_VglTexRgba(const void *px, int w, int h) {
     sGlc.tex = 0; /* (the binding changes here) */
     glBindTexture(GL_TEXTURE_2D, t);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)w, (GLsizei)h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    return t;
+}
+/* The same with its smaller copies, each half the one before, made by the chip (vitaGL's glGenerateMipmap: the transfer
+   unit's downscale), sides powers of two; sampled trilinearly when a batch's state says so (linear 2: vita_tbo.c, tbomip) */
+unsigned Vita_VglTexRgbaMip(const void *px, int w, int h) {
+    GLuint t = Vita_VglTexRgba(px, w, h);
+    if (t != 0) {
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    }
     return t;
 }
 /* the film's picture (vita_tagmovie.c): a texture whose data is the hardware player's frame itself (NV12-like planes in
@@ -3830,14 +3841,14 @@ static void flush_impl(const FlushIn *in) {
                 sGlc.prog = var->prog;
             }
             if (fm) {
-                int tp = lin | s->wrapS << 1 | s->wrapT << 2;
+                int tp = lin | s->wrapS << 2 | s->wrapT << 3; /* (lin 2: trilinear, a picture of BT4decomp's screens with its smaller copies) */
                 if (!sGlc.valid || sGlc.tex != s->tex) {
                     glBindTexture(GL_TEXTURE_2D, s->tex);
                     sGlc.tex = s->tex;
                     sGlc.texp = -1;
                 }
                 if (sGlc.texp != tp) {
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, lin ? GL_LINEAR : GL_NEAREST);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, lin == 2 ? GL_LINEAR_MIPMAP_LINEAR : lin ? GL_LINEAR : GL_NEAREST);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, lin ? GL_LINEAR : GL_NEAREST);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, s->wrapS ? GL_CLAMP_TO_EDGE : GL_REPEAT);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, s->wrapT ? GL_CLAMP_TO_EDGE : GL_REPEAT);
@@ -3863,7 +3874,7 @@ static void flush_impl(const FlushIn *in) {
         glUseProgram(useProg);
         if (s->tme && s->tex != 0) {
             glBindTexture(GL_TEXTURE_2D, s->tex);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s->linear ? GL_LINEAR : GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s->linear == 2 ? GL_LINEAR_MIPMAP_LINEAR : s->linear ? GL_LINEAR : GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, s->linear ? GL_LINEAR : GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, s->wrapS ? GL_CLAMP_TO_EDGE : GL_REPEAT);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, s->wrapT ? GL_CLAMP_TO_EDGE : GL_REPEAT);
@@ -3879,7 +3890,7 @@ static void flush_impl(const FlushIn *in) {
     } else if (s->tme && s->tex != 0) {
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, s->tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s->linear ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s->linear == 2 ? GL_LINEAR_MIPMAP_LINEAR : s->linear ? GL_LINEAR : GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, s->linear ? GL_LINEAR : GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, s->wrapS ? GL_CLAMP_TO_EDGE : GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, s->wrapT ? GL_CLAMP_TO_EDGE : GL_REPEAT);
@@ -4514,8 +4525,9 @@ static int state_of_(int ctx, int type, State *d) {
         /* BT4decomp's own screens (src/menu/port_screen.c Ps_Sprite: TEX0's reserved format TBO_PSM, the picture's
            number in CBP, include/menu/tbo_art.h): a picture of port/tbo/ui or a TrueType line, as the PC's renderer
            takes it (gs_draw.c tbo_texture), from port/vita/vita_tbo.c. bt3.txt tboui=0: not drawn, as before */
-        extern unsigned Vita_TboTexture(uint32_t id);
-        GLuint tx = Vita_TboTexture((uint32_t)((t0 >> 37) & 0x3FFF));
+        extern unsigned Vita_TboTextureMip(uint32_t id, int *mip);
+        int tmip = 0;
+        GLuint tx = Vita_TboTextureMip((uint32_t)((t0 >> 37) & 0x3FFF), &tmip);
         if (tx == 0) {
             sRejWhy = 3;
             return 0;
@@ -4526,6 +4538,9 @@ static int state_of_(int ctx, int type, State *d) {
         d->tme = 1;
         d->env = ((t0 >> 35) & 3) == 1 ? (((t0 >> 34) & 1) ? 1 : 2) : 0;
         d->linear = (uint8_t)((gGs.tex1[ctx] >> 5) & 1);
+        if (d->linear && tmip && !(gGs.tex1[ctx] & 1)) {
+            d->linear = 2; /* (bt3.txt tbomip=1: with its smaller copies, trilinear, as the PC; TEX1's fixed base LOD keeps the full one) */
+        }
         d->wrapS = (cl & 3) != 0;
         d->wrapT = ((cl >> 2) & 3) != 0;
     } else if (tme) {
@@ -11036,14 +11051,14 @@ static void dp_draw_items(DpItem *items, int n, int prof, unsigned frame) {
                 sGlc.prog = var->prog;
             }
             if (fm) {
-                int tp = s->linear | s->wrapS << 1 | s->wrapT << 2;
+                int tp = s->linear | s->wrapS << 2 | s->wrapT << 3; /* (linear 2: trilinear) */
                 if (!sGlc.valid || sGlc.tex != s->tex) {
                     glBindTexture(GL_TEXTURE_2D, s->tex);
                     sGlc.tex = s->tex;
                     sGlc.texp = -1;
                 }
                 if (sGlc.texp != tp) {
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s->linear ? GL_LINEAR : GL_NEAREST);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s->linear == 2 ? GL_LINEAR_MIPMAP_LINEAR : s->linear ? GL_LINEAR : GL_NEAREST);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, s->linear ? GL_LINEAR : GL_NEAREST);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, s->wrapS ? GL_CLAMP_TO_EDGE : GL_REPEAT);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, s->wrapT ? GL_CLAMP_TO_EDGE : GL_REPEAT);

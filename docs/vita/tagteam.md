@@ -156,6 +156,31 @@ split screen, the floating allies' gauges), the target selection's three methods
 target, the results' Rematch / Back to character select / exit, the Duel menu's Tag type, `tagteam=2` (the earlier
 text setup) and `tagteam=0`.
 
+### The Tag Team text after v1.4 (2026-11-18, branch `wip/tagtext`)
+
+The developer, playing v1.4 with its fixes on the Spanish disc: the Tag Team strings are "strange" (too small,
+grainy) and "loaded little by little, also inside the fights". What the code did:
+
+- **Grainy**: a line is written with capitals of 80 (talk box 48) pixels, halved to fit 128 rows (capitals ~40 / 24
+  pixels) and drawn with capitals of 7-20 pixels, sampled bilinearly from that one size: 2-6 texels a pixel, letters
+  broken and shimmering. The PC samples them with mipmaps (`gs_draw.c` `tbo_upload`). Now `tbomip=1`: the lines and the
+  power-of-two pictures with mipmaps made by the chip, sampled trilinearly. (In a fight the whole picture, HUD included,
+  is drawn at 640 x 368 and stretched to 960 x 544, as the game's own HUD; `fightres=960` is the existing way out.)
+- **Little by little**: with `tbopre=1` the maker thread wrote the lines one at a time (1.5 ms pause between two, at a
+  priority below the game's) after the drawing thread first asked for them, and a line was not drawn until made; a
+  place reused by a new line (the timer's figures every second) showed the old line's letters until then. Now
+  `tbotext=1`: a line's picture is made when the screen's code asks for it (the game's thread, before the picture is
+  handed over) and uploaded in the picture that first draws it.
+- **Small**: the layout and sizes are the PC's (fork rule); `tbotextpct` (default 100) draws the lines larger for a
+  comparison on the console (`tagtext_*_big.txt` at 120).
+- The strings themselves (Spanish, accents) come from upstream's catalogs (`PortOnline_Text`, `menu_translation.c`)
+  and the TrueType fonts of `fonts.tsv`, which have every Latin-1 letter: nothing was found missing in the code; the
+  console screenshots should confirm it.
+
+Console check (settings in `psvita-agent/sets/bt4/`): `tagtext_menu_{new,old,big}.txt` (the Tag Team screens,
+`startmode=80`, `tagscreen=1`) and `tagtext_2v2_{new,old,big}.txt` (the 2 vs 2 demo fight with the HUD,
+`BT4_TAG_ACTOR_TEST=4`).
+
 ## Where the Vita stands
 
 - The battle side is **already in the Vita build** (`tag_team_*.inc` are included by `battle.c`, `battle_work.c`,

@@ -53,6 +53,7 @@
 extern void Vita_Log(const char *fmt, ...);
 extern unsigned gGsFrame;
 extern unsigned Vita_VglTexRgba(const void *px, int w, int h);
+extern unsigned Vita_VglTexRgbaMip(const void *px, int w, int h); /* the same with its smaller copies (tbomip=1) */
 extern void Vita_VglTexFree(unsigned t);
 extern uint32_t TboText_Version(uint32_t id);                                       /* port/src/gs/tbo_text.c */
 extern uint32_t *TboText_Pixels(uint32_t id, uint32_t *version, uint32_t *w, uint32_t *h);
@@ -69,12 +70,48 @@ unsigned gVitaTboN[6]; /* (the report) pictures made, lines made, textures given
 
 #define KEEP_FRAMES 600 /* not drawn for that long: given back */
 
+/* bt3.txt tbotext (default 1 since wip/tagtext; 0 v1.4's way with tbopre): a line's picture is made when the screen's
+   code asks for the line (PortTbo_TextId, tbo_text.c: on the game's thread, before the picture that shows it is put
+   together) instead of by the maker or the drawing thread at its first draw, and the drawing thread uploads it in that
+   picture whatever the upload budget: every line of a screen or of the fight's HUD is there from the first picture
+   that shows it (the developer, v1.4: "the strings are loaded little by little, also inside the fights"), and a line's
+   place taken by another line never shows the old line's letters meanwhile (it showed them until the maker came to it).
+   The cost: the lines of a page that comes in are written together, on the game's thread, once (the screen comes a few
+   pictures later, whole, as the game's own screens after a load).
+   bt3.txt tbomip (default 1 since wip/tagtext; 0 as v1.4): the lines' and the pictures' textures with their smaller
+   copies (mipmaps, made by the chip: glGenerateMipmap), sampled trilinearly, as the PC samples them (gs_draw.c
+   tbo_upload: "one sample of the full picture per pixel shimmers"). v1.4 sampled a line written with capitals of 40
+   pixels where it shows them at 7-20 with no smaller copy: grainy, broken letters (the developer: "too small, grainy").
+   Only for textures whose sides are powers of two (the lines always; the buttons; not the backdrop); the pictures'
+   see-through pixels take the colour of the nearest seen one first (tbo_bleed), so their edges do not darken. */
+int gVitaTboText = 1;
+int gVitaTboMip = 1;
+unsigned gVitaTboLines[3];
+/* bt3.txt tbotextpct (default 100, the PC's size): the Tag Team screens' and HUD's lines of letters (not the talk box's,
+   not the headings) drawn this many hundredths of their size, their capitals' middle kept (src/menu/port_screen.c
+   Ps_TextExOuterXY, Ps_TextWidth, under PORT_VITA): to try on the console whether they read as the game's own text */
+int gVitaTboTextPct = 100;
+float Vita_TboTextScale(void) {
+    return gVitaTboTextPct >= 50 && gVitaTboTextPct <= 200 ? (float)gVitaTboTextPct / 100.0f : 1.0f;
+} /* (the report) lines made when asked, their ms, lines that had to wait for a picture */
+static int tbo_ab(int v) { /* (2: the soak's B battles only) */
+    extern int gVitaAbSide;
+    return v == 2 ? gVitaAbSide == 1 : v != 0;
+}
+#define TEXT_ON() tbo_ab(gVitaTboText)
+#define MIP_ON() tbo_ab(gVitaTboMip)
+static int tbo_pot(uint32_t v) {
+    return v != 0 && (v & (v - 1)) == 0;
+}
+
 typedef struct {
     unsigned tex, bytes, version, frame;
     unsigned char missing; /* not found or not readable: not looked for again */
     /* (tbopre=1, the maker below: 0 nothing asked, 1 asked or being made, 2 made and waiting in px, 3 nothing came of it) */
     unsigned char state;
     uint32_t *px, w, h, pxVersion, failVersion, retry, readyFrame;
+    uint32_t madeVersion; /* (tbotext=1, a line: the version whose picture was made by Vita_TboLineAsked; 0 none) */
+    unsigned char mip;    /* the texture has its smaller copies (tbomip=1): sampled with them */
 } TboTex;
 
 #define TBO_NAME(id, name) name,
@@ -140,16 +177,76 @@ static uint32_t *tbo_fit(uint32_t *px, uint32_t *w, uint32_t *h, uint32_t maxW, 
     return px;
 }
 
+/* A picture's see-through pixels (alpha 0) given the colour of the seen ones nearest (pull-push: the colour averaged
+   by halves, weighted by the alpha, then given back down to the pixels that had none), so that the chip's smaller copies
+   (a plain average of four, glGenerateMipmap) do not darken the edges with the black of the see-through. Only the
+   colour of pixels nobody sees changes. (tbomip=1, the maker's thread) */
+static void tbo_bleed(uint32_t *px, uint32_t w, uint32_t h) {
+    uint32_t *lv[14], lw[14], lh[14], x, y, k;
+    int n = 1, i;
+    lv[0] = px;
+    lw[0] = w;
+    lh[0] = h;
+    while (n < 14 && (lw[n - 1] > 1 || lh[n - 1] > 1)) {
+        uint32_t pw = lw[n - 1], ph = lh[n - 1], nw = pw > 1 ? pw / 2 : 1, nh = ph > 1 ? ph / 2 : 1;
+        uint32_t *src = lv[n - 1], *dst = malloc((size_t)nw * nh * 4);
+        if (dst == NULL) {
+            break;
+        }
+        for (y = 0; y < nh; y++) {
+            for (x = 0; x < nw; x++) {
+                uint32_t xs[2] = {x * 2 < pw ? x * 2 : pw - 1, x * 2 + 1 < pw ? x * 2 + 1 : pw - 1};
+                uint32_t ys[2] = {y * 2 < ph ? y * 2 : ph - 1, y * 2 + 1 < ph ? y * 2 + 1 : ph - 1};
+                uint32_t sum[3] = {0, 0, 0}, aw = 0, out = 0, ch;
+                for (k = 0; k < 4; k++) {
+                    uint32_t c = src[ys[k >> 1] * pw + xs[k & 1]], a = c >> 24;
+                    aw += a;
+                    for (ch = 0; ch < 3; ch++) {
+                        sum[ch] += ((c >> (ch * 8)) & 0xFF) * a;
+                    }
+                }
+                for (ch = 0; ch < 3 && aw != 0; ch++) {
+                    out |= (sum[ch] / aw) << (ch * 8);
+                }
+                dst[y * nw + x] = out | (aw != 0 ? 0x01000000u : 0); /* (alpha here: has a colour or not) */
+            }
+        }
+        lv[n] = dst;
+        lw[n] = nw;
+        lh[n] = nh;
+        n++;
+    }
+    for (i = n - 2; i >= 0; i--) { /* from the smallest up: a pixel with no colour takes the one below it */
+        uint32_t *up = lv[i + 1], uw = lw[i + 1], uh = lh[i + 1];
+        for (y = 0; y < lh[i]; y++) {
+            for (x = 0; x < lw[i]; x++) {
+                uint32_t *c = &lv[i][y * lw[i] + x];
+                if ((*c >> 24) == 0) {
+                    uint32_t ux = x / 2 < uw ? x / 2 : uw - 1, uy = y / 2 < uh ? y / 2 : uh - 1;
+                    *c = (up[uy * uw + ux] & 0xFFFFFFu) | (i == 0 ? 0 : (up[uy * uw + ux] & 0xFF000000u));
+                }
+            }
+        }
+    }
+    for (i = 1; i < n; i++) {
+        free(lv[i]);
+    }
+}
+
 static unsigned tbo_make(TboTex *t, uint32_t *px, uint32_t w, uint32_t h, const char *what, int line) {
     unsigned tex;
 
     if (px == NULL) {
         return 0;
     }
-    tex = Vita_VglTexRgba(px, (int)w, (int)h);
-    free(px);
-    if (tex == 0) {
-        return 0;
+    {
+        int mip = MIP_ON() && tbo_pot(w) && tbo_pot(h) && w >= 8 && h >= 8;
+        tex = mip ? Vita_VglTexRgbaMip(px, (int)w, (int)h) : Vita_VglTexRgba(px, (int)w, (int)h);
+        free(px);
+        if (tex == 0) {
+            return 0;
+        }
+        t->mip = (unsigned char)mip;
     }
     if (t->tex != 0) {
         if (sLateN < 64) {
@@ -343,6 +440,9 @@ static uint32_t *tbo_decode(uint32_t id, uint32_t *pw, uint32_t *ph, char *path,
     limit = id == TBO_BG || id == TBO_TAG_ART ? 1280 : 640;
     {
         uint32_t *px = tbo_fit(tbo_gs(rgba, w, h, id), &w, &h, limit, limit);
+        if (px != NULL && MIP_ON() && tbo_pot(w) && tbo_pot(h) && w >= 8 && h >= 8) {
+            tbo_bleed(px, w, h); /* (its smaller copies made by the chip: tbo_make) */
+        }
         *pw = w;
         *ph = h;
         return px;
@@ -589,6 +689,92 @@ static unsigned tbo_picture(uint32_t id) {
    at once, so at most LINES_A_PICTURE are made in a picture; the others are drawn as they were (or not yet) and made
    in the pictures after. */
 #define LINES_A_PICTURE 4
+
+/* A picture stretched to the next powers of two (bilinear, the colour weighted by the alpha), so that it can have its
+   smaller copies; drawn over the same box (its coordinates go 0..1 across the texture). Takes px. */
+static uint32_t *tbo_pot_stretch(uint32_t *px, uint32_t *pw, uint32_t *ph) {
+    uint32_t w = *pw, h = *ph, nw = 8, nh = 8, x, y, k, ch;
+    uint32_t *dst;
+    while (nw < w) nw *= 2;
+    while (nh < h) nh *= 2;
+    if (nw > 2048 || nh > 1024 || (dst = malloc((size_t)nw * nh * 4)) == NULL) {
+        return px;
+    }
+    for (y = 0; y < nh; y++) {
+        float fy = ((float)y + 0.5f) * (float)h / (float)nh - 0.5f;
+        int y0 = fy < 0 ? 0 : (int)fy, y1 = y0 + 1 < (int)h ? y0 + 1 : (int)h - 1;
+        float ty = fy < 0 ? 0 : fy - (float)y0;
+        for (x = 0; x < nw; x++) {
+            float fx = ((float)x + 0.5f) * (float)w / (float)nw - 0.5f;
+            int x0 = fx < 0 ? 0 : (int)fx, x1 = x0 + 1 < (int)w ? x0 + 1 : (int)w - 1;
+            float tx = fx < 0 ? 0 : fx - (float)x0;
+            uint32_t c[4] = {px[y0 * w + x0], px[y0 * w + x1], px[y1 * w + x0], px[y1 * w + x1]}, out = 0;
+            float wt[4] = {(1 - tx) * (1 - ty), tx * (1 - ty), (1 - tx) * ty, tx * ty}, a = 0, sw = 0;
+            for (k = 0; k < 4; k++) {
+                a += (float)(c[k] >> 24) * wt[k];
+                sw += wt[k];
+            }
+            for (ch = 0; ch < 24; ch += 8) {
+                float sum = 0, aw = 0;
+                for (k = 0; k < 4; k++) {
+                    float f = wt[k] * ((float)(c[k] >> 24) + 0.001f);
+                    sum += (float)((c[k] >> ch) & 0xFF) * f;
+                    aw += f;
+                }
+                out |= ((uint32_t)(sum / aw + 0.5f) & 0xFF) << ch;
+            }
+            dst[y * nw + x] = out | ((uint32_t)(a / sw + 0.5f) << 24);
+        }
+    }
+    free(px);
+    *pw = nw;
+    *ph = nh;
+    return dst;
+}
+
+/* (tbotext=1) A line asked for by the screens' code (tbo_text.c text_id, the game's thread; or the drawing thread when
+   it was not): its picture made now unless the texture or a picture of this version is there already. */
+void Vita_TboLineAsked(uint32_t id, uint32_t version) {
+    TboTex *t;
+    uint32_t w = 0, h = 0, made = 0, *px;
+    int need;
+    unsigned long long t0;
+
+    if (!TEXT_ON() || !tbo_on() || id < TBO_TEXT_BASE || id >= TBO_TEXT_BASE + TBO_TEXT_SLOTS || version == 0) {
+        return;
+    }
+    t = &sText[id - TBO_TEXT_BASE];
+    pthread_mutex_lock(&sMaker);
+    /* madeVersion: the version made here and either waiting (state 2) or uploaded since; set back to 0 when the
+       texture or the waiting picture is given back (Vita_TboFrameEnd, tbo_drop) */
+    need = t->state != 1 && t->madeVersion != version; /* (state 1: the maker has it, queued before tbotext was on) */
+    pthread_mutex_unlock(&sMaker);
+    if (!need) {
+        return;
+    }
+    t0 = sceKernelGetProcessTimeWide();
+    px = TboText_Pixels(id, &made, &w, &h);
+    if (px != NULL) {
+        px = tbo_fit(px, &w, &h, 1024, 128);
+    }
+    if (px != NULL && MIP_ON() && (!tbo_pot(w) || !tbo_pot(h))) {
+        px = tbo_pot_stretch(px, &w, &h); /* (a heading: any size; its smaller copies need powers of two) */
+    }
+    pthread_mutex_lock(&sMaker);
+    free(t->px);
+    t->px = px;
+    t->w = w;
+    t->h = h;
+    t->pxVersion = made;
+    t->madeVersion = made;
+    t->state = px != NULL ? 2 : 3;
+    t->failVersion = made;
+    t->readyFrame = gGsFrame;
+    pthread_mutex_unlock(&sMaker);
+    gVitaTboLines[0]++;
+    gVitaTboLines[1] += (unsigned)((sceKernelGetProcessTimeWide() - t0 + 500) / 1000);
+}
+
 static unsigned tbo_line(uint32_t id) {
     static unsigned frame, made;
     TboTex *t = &sText[id - TBO_TEXT_BASE];
@@ -597,6 +783,48 @@ static unsigned tbo_line(uint32_t id) {
     if (t->tex != 0 && (t->version == version || t->frame == gGsFrame)) { /* (changed in this picture: the old one once more) */
         t->frame = gGsFrame;
         return t->tex;
+    }
+    if (TEXT_ON()) {
+        /* (tbotext=1) its picture was made when the line was asked for (Vita_TboLineAsked): uploaded now, whatever the
+           budget; another line's picture of the same place is never shown for it */
+        uint32_t *lpx = NULL, lw = 0, lh = 0, ready = 0;
+        pthread_mutex_lock(&sMaker);
+        if (t->state == 2 && t->pxVersion == version) {
+            lpx = t->px;
+            lw = t->w;
+            lh = t->h;
+            ready = t->pxVersion;
+            t->px = NULL;
+            t->state = 0;
+        }
+        pthread_mutex_unlock(&sMaker);
+        if (lpx == NULL) {
+            gVitaTboLines[2]++; /* (not expected: asked for on another way, or no memory) */
+            Vita_TboLineAsked(id, version); /* (made here then, at once, not in a later picture) */
+            pthread_mutex_lock(&sMaker);
+            if (t->state == 2 && t->pxVersion == version) {
+                lpx = t->px;
+                lw = t->w;
+                lh = t->h;
+                ready = t->pxVersion;
+                t->px = NULL;
+                t->state = 0;
+            }
+            pthread_mutex_unlock(&sMaker);
+        }
+        if (lpx != NULL) {
+            unsigned long long t0 = sceKernelGetProcessTimeWide();
+            gVitaTboMs[3] += lw * lh * 4;
+            if (tbo_make(t, lpx, lw, lh, "line", 1) != 0) {
+                t->version = ready;
+            }
+            gVitaTboMs[0] += (unsigned)((sceKernelGetProcessTimeWide() - t0 + 500) / 1000);
+        }
+        if (t->tex != 0 && t->version == version) {
+            t->frame = gGsFrame;
+            return t->tex;
+        }
+        return 0;
     }
     if (gVitaTboPre && maker_start()) { /* the maker writes it; the old picture of the place shows meanwhile, or none */
         int state;
@@ -720,21 +948,31 @@ static unsigned tbo_letters(int lit) {
         const uint8_t *c = sLetterPic[lit] + i * 4;
         px[i] = (uint32_t)c[0] | ((uint32_t)c[1] << 8) | ((uint32_t)c[2] << 16) | ((((uint32_t)c[3] * 128 + 127) / 255) << 24);
     }
+    if (MIP_ON()) {
+        tbo_bleed(px, w, h);
+    }
     return tbo_make(t, px, w, h, lit ? "main menu lettering, chosen" : "main menu lettering", 0);
 }
 
-/* The renderer (vita_vgl.c state_of_, the drawing thread): the texture of picture `id`, 0 for none (not drawn). */
-unsigned Vita_TboTexture(uint32_t id) {
+/* The renderer (vita_vgl.c state_of_, the drawing thread): the texture of picture `id`, 0 for none (not drawn).
+   *mip: it has its smaller copies (tbomip=1): to be sampled with them. */
+static unsigned tbo_texture(uint32_t id, int *mip) {
+    *mip = 0;
     if (!tbo_on()) {
         return 0;
     }
     if (id >= TBO_TEXT_BASE && id < TBO_TEXT_BASE + TBO_TEXT_SLOTS) {
-        return tbo_line(id);
+        unsigned tex = tbo_line(id);
+        *mip = tex != 0 && sText[id - TBO_TEXT_BASE].mip;
+        return tex;
     }
     if (id == TBO_MAIN_TAG_OFF || id == TBO_MAIN_TAG_ON) {
+        unsigned tex;
         sPreAsked = gGsFrame; /* (the main menu, or the Duel menu's Tag type, is shown: the Tag Team screens' pictures are made ahead) */
         tbo_prefetch();
-        return tbo_letters(id == TBO_MAIN_TAG_ON);
+        tex = tbo_letters(id == TBO_MAIN_TAG_ON);
+        *mip = tex != 0 && sLetters[id == TBO_MAIN_TAG_ON].mip;
+        return tex;
     }
     if (id == TBO_TAG_MOVIE) {
         /* the film behind the Tag Team screens (vita_tagmovie.c) when tbomovie is on and a picture is ready; else its poster */
@@ -745,9 +983,18 @@ unsigned Vita_TboTexture(uint32_t id) {
         id = TBO_TAG_ART;
     }
     if (id == TBO_MAIN_TAG_EMBLEM || (id < TBO_ART_COUNT && id != TBO_RADAR)) {
-        return tbo_picture(id);
+        unsigned tex = tbo_picture(id);
+        *mip = tex != 0 && (id == TBO_MAIN_TAG_EMBLEM ? sEmblem.mip : sPic[id].mip);
+        return tex;
     }
     return 0; /* (the online hub's and the European disc's art, the ranked Dragon Balls: not offline) */
+}
+unsigned Vita_TboTexture(uint32_t id) {
+    int mip;
+    return tbo_texture(id, &mip);
+}
+unsigned Vita_TboTextureMip(uint32_t id, int *mip) {
+    return tbo_texture(id, mip);
 }
 
 static void tbo_drop(TboTex *t, unsigned n) {
@@ -755,8 +1002,11 @@ static void tbo_drop(TboTex *t, unsigned n) {
     for (i = 0; i < n; i++) {
         if (t[i].tex != 0 && gGsFrame - t[i].frame > KEEP_FRAMES) {
             Vita_VglTexFree(t[i].tex);
+            pthread_mutex_lock(&sMaker);
             t[i].tex = 0;
             t[i].version = 0;
+            t[i].madeVersion = 0; /* (a line asked for again is made again) */
+            pthread_mutex_unlock(&sMaker);
             gVitaTboN[2]++;
             gVitaTboN[3]--;
             gVitaTboN[4] -= t[i].bytes;
@@ -802,6 +1052,7 @@ void Vita_TboFrameEnd(void) {
                 free(sText[i].px);
                 sText[i].px = NULL;
                 sText[i].state = 0;
+                sText[i].madeVersion = 0;
             }
         }
         pthread_mutex_unlock(&sMaker);
