@@ -307,7 +307,7 @@ speed-ups. The two can be installed side by side: they are different apps with d
 | Game files and saves | `ux0:data/bt4/` (the image is also found in `ux0:data/bt3/bt4/`) | `ux0:data/bt3/bt4/` |
 | Speed-ups | The BT3 fork's renderer work and arielxflores's 1.2 speed-ups, all but his dynamic fight resolution; every stage 28.8 to 29.5 fps on a PS Vita 1000 with CapUnlocker | See its page |
 | Unlock All | Yes, SELECT at the start or held in the menus ([Unlock All](#unlock-all)) | Yes, see its page |
-| Tag Team offline (you and CPUs, 2 vs 2) | From the next version after v1.3 | See its page |
+| Tag Team offline (you and CPUs, 2 vs 2) | From v1.4 | See its page |
 | Online play | No | See its page |
 
 **Should I install this instead of BT3?** No need to choose: BT3 and BT4 are different games, and this app does not

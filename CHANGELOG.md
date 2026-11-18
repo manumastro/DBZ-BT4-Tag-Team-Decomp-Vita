@@ -2,7 +2,7 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
-## Unreleased
+## v1.4 (2026-11-18)
 
 - **Faster fights, above all 2 vs 2 and the big specials**: the 2 vs 2 demo fight averages 29.2 pictures a second
   (22.7 when this work began, with 10 of 39 stretches under 20; now none), the heavy 1 vs 1 (Super
