@@ -22,6 +22,112 @@ does differently.
   the render tests. The plan for an offline Tag Team on the Vita: [tagteam.md](tagteam.md).
 - Code size of the online part: `net*.c` about 11,200 lines (C), signaling about 1,400 (C++), Tag Team about 2,800,
   voice about 1,000.
+- 2026-11-18 (branch `wip/online-m1`): the network's bring-up is built (next section). The game's online entries are
+  still `vita_bt4.c`'s stand-ins. The plan from here, the determinism study and the questions for NauTaro:
+  `psvita-agent/notes/online/vita-online-study.md` (sections 4, 7 and 8).
+
+## The network on the Vita (milestone M1, 2026-11-18)
+
+Built on `wip/online-m1` (from `tagteam` `5ebd70d`), development build; **not run on the console yet**. Nothing of it
+runs unless `bt3.txt` asks for it (`online=1` or `online_test=1/2`, [development.md](development.md)); off, no module is
+loaded, nothing is allocated, no thread is started and the log has no `net:` line.
+
+What is in the program (only with `BT4_VITA_ONLINE=1`, the development build's default; the release build leaves all of
+it out, `build.py`):
+
+| Part | Where | What |
+|---|---|---|
+| Start-up, shut-down, settings, self-test | `port/vita/vita_net.c` | `sceSysmoduleLoadModule(NET)`, `sceNetInit` with a pool from the C heap (`online_pool`, 1 MB by default, its lowest free amount logged through `sceNetGetStatisticsInfo`), `sceNetCtlInit`, the console's address and Wi-Fi signal logged; `curl_global_init`; the CA list; `Vita_NetStop` undoes it all |
+| HTTPS, WebSocket, TLS | the build image's libcurl 8.17.0 (WS/WSS) on OpenSSL 1.1.1t, zstd, zlib | as the PC's Linux and macOS builds: the POSIX path of `curl_ws_io.h` and `voice_transport_curl.inc`, unchanged |
+| CA list | `lib/cacert.pem` in the package (the build image's `/etc/ssl/certs/ca-certificates.crt`, 180 KB, as `port/tools/package_native.py` does for the PC) | the firmware's own certificates are not used. `online_ca=<pem>` adds one (the test server's): both are joined into `ux0:data/bt4/net/lib/cacert.pem` and the SDL base folder points there |
+| A log line per request | `vita_net.c`, `-Wl,--wrap=curl_easy_init,curl_easy_perform,curl_multi_add_handle` | `net: POST https://host/v5/auth/start -> 200 in N ms (TLS ready at N ms), curl 0`; `net: opening ... (a connection held open: WebSocket)`. The query string, the bodies and the tokens are never logged. The `curl_easy_init` wrapper also sets every handle's CA list (curl's built-in path does not exist on the Vita; upstream's `http()` sets none) |
+| JSON | nlohmann json (`port/third_party/voice/json.hpp`), compiled in `supabase_signal.cpp` | the client's own |
+| SDL calls | `port/vita/sdlshim/SDL3/SDL.h` (declarations, small inline ones), `port/vita/vita_sdl.c` | threads (kernel threads, 256 KB stacks, cores 2-3, below the game's priority), recursive locks, semaphores, conditions, a per-thread value table, once-only start-up, files and folders (`SDL_GetPrefPath` = `ux0:data/bt4/`), random numbers of their own (never the game's), counters, string helpers, `flock` as a no-op (one program runs at a time); `SDL_LoadObject` and `SDL_CreateProcess` answer "none" (the PC's run-time libraries and its old `curl` process path are left out) |
+| BT4decomp's signaling client | `port/src/gs/supabase_signal.cpp` + `cloudflare_signal.inc` + `update_sign.c`, `update_crypto.c`, `update_monocypher.c` (its route checks) | unchanged but for two `PORT_VITA` blocks in `cloudflare_signal.inc`: the host is `bt3.txt`'s `online_server` at run time (none: `no-server.invalid`, so a test build never reaches the default service), and the v5 backend only (no Supabase migration). Its identity goes to `ux0:data/bt4/network/<server>/` (`BT4_SIGNAL_SESSION_DIR`). `gs/net_update.c`'s online gate is answered by `vita_net.c` (no GitHub policy fetch). `BT4_SIGNAL_HTTPS_ONLY=1`, `BT4_SIGNAL_DIAGNOSTICS=1` work as `bt3.txt` lines |
+| `Port_RollCan()` | `vita_bt4.c` | 0: no rollback on the Vita (delay-based lockstep, the study's section 5) |
+
+### The self-test
+
+`online_test=1` (then the game) or `2` (then the run ends with a `vita: exitafter:` line, which the console runners wait
+for), on the start-up screen and in the log, on a thread of the kind the network's own run on:
+
+1. DNS: `getaddrinfo(online_test_dns)` (default `stun.l.google.com`, the PC's first STUN server).
+2. UDP: the console's LAN address found as `gs/net.c`'s `lan_address` does (connect + getsockname), then ten
+   datagrams to `online_udp` (default the server's host, port 26011) on a non-blocking socket polled as `net.c`
+   polls, each echoed by the test server: count back and round trips.
+3. HTTPS: two GETs of `<online_server>/m1/get` on one handle (the second without a new handshake): status, name /
+   TCP / TLS / total times, the C heap's growth.
+4. WebSocket: upstream's `curl_ws_io.h` (`Bt4CurlWs_Open`, `_Connect`, `curl_ws_send` / `curl_ws_recv`) to
+   `<online_server>/m1/echo`, five texts echoed.
+5. Signaling: upstream's client asked `get` (consumer 0) and `nickname_get` (consumer 4): `/v5/auth/start`, the socket
+   `/v5/socket`, `{"op":"authenticate"}`, `bt4.ready`, two replies; its status and times.
+6. With `online_test_public=<url>`: an HTTPS GET of that address with the package's CA list only (no `online_ca`):
+   whether firmware 3.65's clock and our list verify a public chain (`https://www.cloudflare.com/cdn-cgi/trace`: the
+   kind of chain BT4decomp's `workers.dev` service has, without touching that service).
+
+After each step, `net: memory ...`: the C heap in use and its growth since before the network (its peak too), and
+SceNet's pool free now and at its lowest. Then `net: self-test done in N ms: N passed, N failed`.
+
+The test server: `psvita-agent/agent-tools/online_testserver.py` (standard library Python; on the developer's Windows
+PC with Windows' own Python, since a server inside WSL 2 sits behind its NAT). `--gen-cert` once (a test CA and a
+certificate for the PC's LAN address, with any `openssl` program, Git for Windows' included), then run it: HTTPS and
+WebSocket on 8443, UDP echo on 26011. It answers `/m1/get`, `/m1/echo`, `/v5/health`, `/v5/auth/start`,
+`/v5/auth/refresh`, `/v5/api` and `/v5/socket` the way BT4decomp's v5 Worker does for a user without a room
+(`authenticate` -> `bt4.ready`, `{serial, consumer, op}` -> `reply`, `ping` -> `pong`), and prints every request. It
+was checked from WSL (Python client: the echo, `auth/start`, the socket's `bt4.ready` and a reply, the UDP echo, an
+`/v5/api` call) and from Windows (`curl.exe` over the LAN address). BT4decomp's own `cloudflare/` Worker could be run
+with `wrangler dev` instead (it needs Node and its `AUTH_SECRET`, `ADMIN_SECRET`, `TURN_GATEWAY_SECRET`); the Python
+server is enough for M1. The console's settings: `psvita-agent/sets/bt4/online_m1_*.txt` (`online_m1_test`: the whole
+test; `_https_only`: the signaling's HTTPS fallback; `_public`: the public chain, no server; `_ingame` / `_off`: the
+u0 demo fight with the network up and without), each with what its log must show.
+
+### What it costs
+
+Measured off the console (the development build, `arm-vita-eabi-size` of `bt3.unstripped.elf`, against `tagteam`
+`5ebd70d` built the same way):
+
+| | `tagteam` | with the network part | added |
+|---|---|---|---|
+| program code (`text`) | 5,523,646 | 7,941,944 | +2,418,298 bytes (2.31 MB: OpenSSL's libcrypto and libssl, libcurl, zstd, the client and its JSON) |
+| initialised data | 245,704 | 261,420 | +15.7 KB |
+| zeroed data (`bss`; the game's 80 MB C heap is not in it) | 82,865,616 | 82,948,312 | +80.8 KB |
+| `eboot.bin` | 3,525,112 | 5,366,009 | +1.76 MB |
+| `.vpk` | 8,207,595 | 10,143,830 | +1.85 MB (with the 180 KB CA list) |
+
+The code is loaded whether `online` is on or not: about 2.4 MB of the program's memory in a development build. The
+release build has none of it (`BT4_VITA_ONLINE=0`; built 2026-11-18: 425 objects, `eboot.bin` 3,520,478 bytes, no CA
+list); a release with online play would carry it.
+
+At run time, only with `online=1` or a self-test: SceNet's pool (1 MB from the C library's heap, which the game's heap
+shares: 80 MB, 56.7 MB at most used in the 25-stage soak, 74.4 MB in a 5 vs 5), and curl's and OpenSSL's own
+allocations (a TLS connection's buffers, the CA list parsed into memory: the 180 KB file becomes a few hundred KB of
+OpenSSL's structures, once per handle that loads it). Not measured yet: the self-test's `net: memory` lines give both
+on the console. The threads: one per open WebSocket (`VoiceWs`) and one for the signaling client, 256 KB of stack each,
+only while open.
+
+### What builds, what does not
+
+`python3 port/vita/build.py netcheck` (in the image: `BT3_VITA_DEV=1 port/vita/tools/docker_build.sh netcheck`) compiles
+BT4decomp's other network files for the Vita into `port/build/obj_vita_dev/netcheck/`, without linking them, and lists
+what each needs that nothing defines and what it would define twice. 2026-11-18, all ten compile:
+
+| File | Compiles | Missing to link (besides the C library) | Defined already (`vita_bt4.c`'s stand-ins, to drop when it goes in) |
+|---|---|---|---|
+| `net.c` (1 vs 1 session, with `net_timing.h`) | yes | `Gs_HoldFrame`, `Gs_NetworkWait` (the PC renderer's hold while waiting), `MenuTranslation_PortText`, `Port_UiBanner`, `Port_UiNotice` (the PC's UI), `PortVoice_DuelKey` / `_NewKey` / `_Leave` (voice), `Update_BlocksOnline`, `Update_OnlineNote` (`net_update.c`), `execv` (`relaunch`: no `execv` on the Vita; a session start by `sceAppMgrLoadExec`, the study's 3.5) | 58: the `Port_Net*`, `Port_Lobby*` set, `Port_OnlineBlocked` |
+| `net_chat.c` | yes | nothing | none |
+| `net_relay.c` (TURN) | yes | nothing | none |
+| `net_match.c` (STUN, the old Worker) | yes | `Sign_HasKey`, `Sign_Request`, `Sign_SelfTest` (`net_sign.c`, the old Worker's HMAC: leave that path out) | none |
+| `net_lobby.c` | yes | nothing once `net.c` and `net_match.c` are in | 7 `Port_Lobby*` |
+| `build_identity.c` | yes | `Port_FileOpenHost` (the three base files through `vita_file.c` / `vita_iso.c`) | `Port_DevRulesEncode` |
+| `plat_fprint.c` | yes | nothing | the four `Port_DataFingerprint*` |
+| `match_supabase.cpp` (room discovery) | yes | `PortVoice_P2PSession`, `Port_UiDragonBallFound`, `pthread_cancel` | 11: nickname, presence, `Port_Ranked*` |
+| `tag_team_net.c` | yes | `TagPeer_*` (WebRTC, `tag_team_p2p.cpp`: libdatachannel, not on the Vita), `TagDirect_*` (`tag_team_direct.cpp`), `PortVoice_*`, `Gs_NetworkWait`, `Port_UiBanner` | 135 `Port_Tag*` (`vita_tag.c`, the offline room) |
+| `state.c` | yes | `Port_HeapRegion`, `Port_UiNotice` (its rollback is compiled only for x86-64 and Apple: the Vita gets the fallback) | `Port_RollCan`, `Port_StateLog`, `Port_StateTouch`, `gPortResim` |
+
+So M2 (1 vs 1 by address) needs: the PC UI's few calls answered on the Vita (`Port_UiBanner`, `Port_UiNotice`,
+`Gs_HoldFrame`, `Gs_NetworkWait`), voice's answered "none", `relaunch` replaced, `net_sign.c`'s three left out of
+`net_match.c`'s old path, `Port_FileOpenHost`, and `vita_bt4.c`'s stand-ins of these files removed as each goes in.
+None of it is the simulation: that is M0's (the float model, `wip/online-m0`).
 
 ## What a player has (PC)
 
@@ -205,7 +311,7 @@ What a client must match to play a PC:
 
 | Library | Used for | Built how on PC | On the Vita |
 |---|---|---|---|
-| WinHTTP (Windows), libcurl (Linux, macOS; `curl_ws_io.h` for WebSockets) | HTTPS, the signaling WebSocket, the update check | system / packaged | to bring: curl with OpenSSL or Mbed TLS, or SceHttp + SceSsl (no WebSocket) |
+| WinHTTP (Windows), libcurl (Linux, macOS; `curl_ws_io.h` for WebSockets) | HTTPS, the signaling WebSocket, the update check | system / packaged | the build image's libcurl 8.17.0 (WS/WSS) on OpenSSL 1.1.1t, linked since M1 (above), with `lib/cacert.pem` in the package |
 | libdatachannel 0.24.6 (libjuice, usrsctp, libSRTP, OpenSSL) | Tag Team P2P, voice | loaded at run time (`voiceLibrary`); `port/release/RTC_SDK.md`, `build_rtc.py` | not known to have been built for the Vita: C++17, threads, BSD sockets, a DTLS library |
 | Opus | voice | packaged | plain C |
 | nlohmann json (header), monocypher, SDL3 | JSON; Ed25519; threads, timers, preference folder | in `port/third_party` / system | json and monocypher compile anywhere; SDL3 through the Vita's shim (`port/vita/sdlshim`) |
