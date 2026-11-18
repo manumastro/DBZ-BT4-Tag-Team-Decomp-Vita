@@ -2699,6 +2699,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "tagteam") == 0) { /* 0: no Tag Team entry in the main menu; 1 BT4decomp's own Tag Team
                                                       screens (the default); 2 the Vita's earlier text setup (Vita_TagMenu) */
             sTagMenu = atoi(eq) < 0 || atoi(eq) > 2 ? 1 : atoi(eq);
+        } else if (strncmp(line, "online", 6) == 0) { /* the network (port/vita/vita_net.c): online, online_server, online_test, ... */
+            extern void Vita_NetSetting(const char *name, const char *value);
+            Vita_NetSetting(line, eq);
         } else if (strcmp(line, "replay") == 0) {
             setenv("BT3_REPLAY", eq, 1);
         } else if (strncmp(line, "BT3_", 4) == 0 || strncmp(line, "BT4_", 4) == 0) {
@@ -3555,6 +3558,14 @@ int __wrap_main(int argc, char **argv) {
     Vita_MapMemory(sHeapCdram);
     logf_("vita: %s floats, game heap at 0x%08X, disc folder %s, %s\n", gPortFastFloat ? "hardware" : "exact", (unsigned)gVitaHeapBase, gVitaDisc,
           getenv("BT3_REPLAY") != NULL ? getenv("BT3_REPLAY") : "attract-demo fight");
+    {   /* the network, only with bt3.txt online=1 or online_test (port/vita/vita_net.c): its start-up and self-test */
+        extern int Vita_NetBoot(void);
+        start_step("the network");
+        if (Vita_NetBoot()) { /* online_test=2: the run ends after the self-test, as an exitafter run does */
+            logf_("vita: exitafter: the network self-test ended the run (online_test=2)\n");
+            quit();
+        }
+    }
     sStart = now_us();
     {
         extern int Vita_PerfInit(void);

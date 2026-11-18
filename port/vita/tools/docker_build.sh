@@ -8,7 +8,7 @@
 #     port/vita/tools/docker_build.sh --image             only (re)build the image
 #
 # The image is amd64 (VitaSDK's toolchain); on an ARM Mac it runs under Docker's emulation, slower but the same.
-# The variables of build.py (BT3_PGO, BT3_VITA_DEV, BT3_INCREMENTAL, BT3_VITA_TITLE_ID, BT3_VITA_TITLE, BT3_VITA_VPK, BT3_JOBS) are
+# The variables of build.py (BT3_PGO, BT3_VITA_DEV, BT3_INCREMENTAL, BT3_VITA_TITLE_ID, BT3_VITA_TITLE, BT3_VITA_VPK, BT3_JOBS, BT4_VITA_TAGMOVIE, BT4_VITA_ONLINE) are
 # passed through. Run from the repository root.
 set -e
 IMAGE=bt3-vita-build:c9bcd74
@@ -21,7 +21,7 @@ cp port/vita/docker/Dockerfile port/vita/vitagl/vitagl.patch port/vita/vitagl/bu
 docker build --platform linux/amd64 -q -t "$IMAGE" "$CTX" > /dev/null
 [ "$1" = "--image" ] && exit 0
 ENVS=""
-for v in BT3_PGO BT3_VITA_DEV BT3_INCREMENTAL BT3_VITA_TITLE_ID BT3_VITA_TITLE BT3_VITA_VPK BT3_JOBS BT4_VITA_TAGMOVIE; do
+for v in BT3_PGO BT3_VITA_DEV BT3_INCREMENTAL BT3_VITA_TITLE_ID BT3_VITA_TITLE BT3_VITA_VPK BT3_JOBS BT4_VITA_TAGMOVIE BT4_VITA_ONLINE; do
     eval "val=\${$v-}"
     [ -n "$val" ] && ENVS="$ENVS -e $v" # (by name: docker takes the value from here, spaces and all)
 done
