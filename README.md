@@ -224,6 +224,32 @@ On a PS TV, or with a DualShock paired, the controller's own L2, R2, L3 and R3 b
   fingers to go back. A tap skips a film.
 - Holding START + SELECT for two seconds closes the game (press START on the screen that follows).
 
+## Tag Team
+
+**Main menu → Tag Team** (or **Duel → Tag**). These are the PC version's own screens, made larger for the Vita's
+screen.
+
+1. **Local Battle**: choose the **Mode** (Singleplayer: you and CPU allies against CPUs), the size of each team (2 vs
+   2 plays well; 3 or more a team is still too slow), the time, the CPU level, then **Select Fighters**. Each row's
+   description at the bottom says what it does.
+2. **Character select**: both teams pick in turns, then the stage and the music.
+3. **In the fight**:
+
+| Vita | Action |
+|---|---|
+| **Right stick** | Choose which enemy you target (a ring and a health bar mark him) |
+| Stay near a downed ally | Revive him (more helpers are faster; moving or being hit interrupts) |
+| Hold **L2** + press **SELECT** | Eat a Senzu Bean (if the rules give you any) |
+| **R3** + direction, near a compatible ally | Cooperative fusion (**L3** + **R3** separates a temporary one) |
+
+Everything else is the game's usual controls. The HUD: your bar top left, your allies down the left side, the enemy
+you target with his own bar, and the radar top right.
+
+- **Tag Team → Camera mode → Target selection** changes the target button: **Right stick** (the Vita's default), L3
+  (the PC's: on the Vita a rear touch quarter or a screen corner, see [Controls](#controls)) or the D-pad.
+- The text and HUD sizes are `tagui_scale=130` and `taghud_scale=135` (percent) in `ux0:data/bt4/bt3.txt`, if you want
+  them larger or smaller.
+
 ## Unlock All
 
 Three ways to open its screen:
