@@ -2,15 +2,19 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
-## Unreleased
+## v1.4 (2026-11-18)
 
 - **The anime soundtrack on the English game** (asked by players): play the English B14 Rev2 with the songs of the
   Spanish B14 Rev2 (the Latino dub's music), as the PC version's "Anime soundtrack". Copy your own Spanish B14 Rev2
   `.iso` to `ux0:data/bt4/es/` (the English one stays where it is) and turn it on in **Options -> Controller -> Vita
   Settings -> Mods**, the lower row (**ON / OFF**, off by default); it applies from the next song. Without the
-  Spanish image the English songs play as before. Not yet tried on the console.
-
-## v1.4 (2026-11-18)
+  Spanish image the English songs play as before. Run on the console: the Spanish image found and mounted next to
+  the extracted English disc, a fight's song streamed from it with its loop, no crash.
+- **Tag Team lettering like the rest of the game**: the Tag Team screens' and the 2 vs 2 HUD's lines are made when
+  the screen asks for them and shown from their first picture (they used to appear a line at a time, and a reused
+  line, such as the timer's figures, could show the old letters for a moment), and they are mipmapped as on the PC,
+  so they are no longer grainy when drawn small (`tbotext`, `tbomip`, both on). Run on the console (the Tag Team
+  screen and a 2 vs 2 fight, on and off: no crash, all lines there).
 
 - **Faster fights, above all 2 vs 2 and the big specials**: the 2 vs 2 demo fight averages 29.2 pictures a second
   (22.7 when this work began, with 10 of 39 stretches under 20; now none), the heavy 1 vs 1 (Super
