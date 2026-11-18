@@ -168,6 +168,9 @@ def main():
                     '{"at": s, "taps": ["START", ...], "hold_ms": 120, "gap_ms": 450, "shot": true}: the game launched '
                     "without a vita-agent-use run (which refuses input), each step's taps sent with `input submit`, a "
                     "screenshot after it when \"shot\"")
+    ap.add_argument("--fetch", action="append", default=[], metavar="CONSOLE_PATH",
+                    help="a file of the console fetched into --out after the run, when it is there (repeatable; e.g. the "
+                    "state log of bt3.txt BT3_HASH=, online play M0: ux0:data/bt4/m0hash.txt)")
     o = ap.parse_args()
     for k in ("settings", "eboot_dir", "out", "inputs"):  # (vita-agent-use runs from its own folder: relative paths would miss)
         if getattr(o, k, None) is not None:
@@ -295,6 +298,9 @@ def main():
         agent("fs", "download", LOG, out / "log-all.txt", timeout=600)
         if exists("ux0:data/bt4/hang-vgl.txt"):
             agent("fs", "download", "ux0:data/bt4/hang-vgl.txt", out / "hang.txt")
+        for path in o.fetch:  # (--fetch: files the run itself wrote, e.g. a state log)
+            if exists(path):
+                agent("fs", "download", path, out / path.replace(":", "/").split("/")[-1], timeout=600)
     finally:
         if had:
             restored = put_back(out / "bt3.console.txt", out, note)

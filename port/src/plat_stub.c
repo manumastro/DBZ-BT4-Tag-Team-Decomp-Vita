@@ -375,7 +375,9 @@ static void late_wait(void) {
 /* (Vita) A vertical blank of the game's: the Vita keeps its own time (port/vita/vita_main.c, Vita_VBlank); no online
    session, no rollback, no in-between pictures, no script mods. What the game's state needs is kept: the blank's
    count and the sound players' state by blanks (plat_sndstate.c). */
+static void vita_pad_table_write(void);
 void Port_VBlank(void) {
+    vita_pad_table_write(); /* (BT3_PAD_TABLE, as the PC's below: the pads of the blank that ends here) */
     gPortVBlanks++;
     gPortLiveBlanks++;
     {
@@ -562,9 +564,69 @@ int scePad2Read(int socket, unsigned char *data) {
     return n;
 }
 
+#ifdef PORT_VITA
+/* (Vita, online play's M0: port/vita/vita_m0.c) BT3_PAD_TABLE=<file> is written here as on the PC (36 bytes per blank:
+   pad 1, pad 2, as the game read them during that blank); BT3_PAD_TABLE_PLAY=<file> plays such a table back: during
+   blank n (gPortVBlanks) each pad's reads are row n's record for that pad, after the table's end the pads are idle.
+   Read whole at start (a few hundred KB for minutes of play). A table follows the blanks, a BT3_PAD_PLAY recording the
+   reads: two ways of driving the same fight on the PC and on the Vita. */
+static void vita_pad_table_write(void) {
+    PORT_HOST static FILE *table = NULL;
+    PORT_HOST static int tried = 0;
+    if (!tried) {
+        tried = 1;
+        table = getenv("BT3_PAD_TABLE") != NULL ? fopen(getenv("BT3_PAD_TABLE"), "wb") : NULL;
+    }
+    if (table != NULL) {
+        fwrite(sPadLast, 1, sizeof(sPadLast), table);
+        if ((gPortVBlanks & 63) == 0) {
+            fflush(table);
+        }
+    }
+}
+
+static int vita_pad_table_read(int socket, unsigned char *data) {
+    PORT_HOST static unsigned char *rows = NULL;
+    PORT_HOST static long count = -1;
+    if (count < 0) {
+        const char *path = getenv("BT3_PAD_TABLE_PLAY");
+        FILE *fp = path != NULL ? fopen(path, "rb") : NULL;
+        count = 0;
+        if (fp != NULL) {
+            long size;
+            fseek(fp, 0, SEEK_END);
+            size = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+            if (size >= 36 && (rows = malloc((size_t)size)) != NULL && fread(rows, 1, (size_t)size, fp) == (size_t)size) {
+                count = size / 36;
+            }
+            fclose(fp);
+            fprintf(stderr, "bt3: pad table %s: %ld blanks\n", path, count);
+        }
+    }
+    if (count <= 0 || socket < 0 || socket > 1) {
+        return 0;
+    }
+    if ((long)gPortVBlanks < count) {
+        memcpy(data, rows + (long)gPortVBlanks * 36 + socket * 18, 18);
+    } else {
+        int i;
+        data[0] = 0xFF; data[1] = 0xFF;
+        for (i = 2; i < 6; i++) { data[i] = 0x80; }
+        for (i = 6; i < 18; i++) { data[i] = 0; }
+    }
+    return 18;
+}
+#endif
+
 static int pad_read(int socket, unsigned char *data) {
     int i;
 
+#ifdef PORT_VITA
+    if (vita_pad_table_read(socket, data)) {
+        return 18;
+    }
+#endif
     if (!sPadFilesTried) {
         sPadFilesTried = 1;
         if (getenv("BT3_PAD_PLAY") != NULL) {
