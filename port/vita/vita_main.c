@@ -1536,9 +1536,16 @@ void Vita_VBlank(unsigned vblanks) {
                                     extern unsigned gVitaTboLines[3];
                                     extern int gVitaTboText, gVitaTboMip;
                                     if (gVitaTboLines[0] != 0 || gVitaTboLines[2] != 0) {
-                                        logf_("vita:   tbotext=%d tbomip=%d: %u lines made when asked for, in %u ms; %u made by the drawing thread\n",
+                                        logf_("vita:   tbotext=%d tbomip=%d: %u lines made at once, in %u us; %u handed to the maker (the screen waited for them)\n",
                                               gVitaTboText, gVitaTboMip, gVitaTboLines[0], gVitaTboLines[1], gVitaTboLines[2]);
                                         gVitaTboLines[0] = gVitaTboLines[1] = gVitaTboLines[2] = 0;
+                                    }
+                                    {
+                                        extern unsigned gVitaTboGated;
+                                        if (gVitaTboGated != 0) {
+                                            logf_("vita:   tbotext: %u pictures' draws held back while a screen waited for its lines\n", gVitaTboGated);
+                                            gVitaTboGated = 0;
+                                        }
                                     }
                                 }
                             }
@@ -2295,6 +2302,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "tbotextpct") == 0) { /* the Tag Team screens' and HUD's letters this many hundredths of the PC's size (port_screen.c, vita_tbo.c): 100 (default) the PC's */
             extern int gVitaTboTextPct;
             gVitaTboTextPct = atoi(eq);
+        } else if (strcmp(line, "tbotextsize") == 0) { /* BT4decomp's screens' lines written at the Vita's size (capitals 40 / 24, tbo_text.c): 1 (default), 0 the PC's 80 / 48 then halved */
+            extern int gVitaTboTextSize;
+            gVitaTboTextSize = atoi(eq) != 0;
         } else if (strcmp(line, "tbomip") == 0) { /* BT4decomp's screens' lines and pictures with their smaller copies, sampled trilinearly as on PC (vita_tbo.c, vita_vgl.c): 0 v1.4's way, 1 (default) on, 2 the soak's B battles */
             extern int gVitaTboMip;
             gVitaTboMip = atoi(eq);

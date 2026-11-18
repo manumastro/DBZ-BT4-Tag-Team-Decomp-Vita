@@ -47,6 +47,7 @@
 #include <string.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/io/stat.h>
 #include "vita_paths.h"
 #include "../../include/menu/tbo_art.h"
 
@@ -87,6 +88,7 @@ unsigned gVitaTboN[6]; /* (the report) pictures made, lines made, textures given
 int gVitaTboText = 1;
 int gVitaTboMip = 1;
 unsigned gVitaTboLines[3];
+unsigned gVitaTboGated; /* (the report) pictures' draws held back while a screen waited for its lines */
 /* bt3.txt tbotextpct (default 100, the PC's size): the Tag Team screens' and HUD's lines of letters (not the talk box's,
    not the headings) drawn this many hundredths of their size, their capitals' middle kept (src/menu/port_screen.c
    Ps_TextExOuterXY, Ps_TextWidth, under PORT_VITA): to try on the console whether they read as the game's own text */
@@ -396,6 +398,35 @@ static uint32_t *tbo_gs(uint8_t *rgba, uint32_t w, uint32_t h, uint32_t id) {
     return px;
 }
 
+/* tbo/ui/<name>.vt (tools/tbo_vita_assets.py): "VTX1", width, height, flags, then the texture's RGBA with the GS's alpha,
+   sized, touched and bled at build time. NULL if there is none (the PNG is read then, as before). */
+static uint32_t *tbo_vt(const char *name, uint32_t *pw, uint32_t *ph, char *path, size_t pathSize) {
+    uint32_t hdr[4], *px;
+    size_t n;
+    FILE *f;
+
+    snprintf(path, pathSize, "app0:tbo/ui/%s.vt", name);
+    f = fopen(path, "rb");
+    if (f == NULL) {
+        return NULL;
+    }
+    if (fread(hdr, 4, 4, f) != 4 || memcmp(hdr, "VTX1", 4) != 0 || hdr[1] == 0 || hdr[2] == 0 || hdr[1] > 2048 || hdr[2] > 2048) {
+        fclose(f);
+        return NULL;
+    }
+    n = (size_t)hdr[1] * hdr[2];
+    px = malloc(n * 4);
+    if (px == NULL || fread(px, 4, n, f) != n) {
+        free(px);
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
+    *pw = hdr[1];
+    *ph = hdr[2];
+    return px;
+}
+
 /* A picture made as it is shown, as the GS's RGBA, or NULL (not readable: *missing). Everything but the texture's making:
    with tbopre=1 it is done by the maker's thread (below), else by the drawing thread at the picture's first use. */
 static uint32_t *tbo_decode(uint32_t id, uint32_t *pw, uint32_t *ph, char *path, size_t pathSize, int *missing) {
@@ -403,6 +434,13 @@ static uint32_t *tbo_decode(uint32_t id, uint32_t *pw, uint32_t *ph, char *path,
     uint8_t *rgba;
 
     *missing = 0;
+    {   /* the picture made ready when the package was built (port/vita/tools/tbo_vita_assets.py): read as it is */
+        uint32_t *px = tbo_vt(id == TBO_MAIN_TAG_EMBLEM ? "main_tag_emblem" : kTboNames[id == TBO_TAG_LOGO_OFF ? TBO_TAG_LOGO : id],
+                              pw, ph, path, pathSize);
+        if (px != NULL) {
+            return px;
+        }
+    }
     rgba = tbo_png(kTboNames[id == TBO_MAIN_TAG_EMBLEM || id == TBO_TAG_LOGO_OFF ? TBO_TAG_LOGO : id], &w, &h, path, pathSize);
     if (rgba == NULL) {
         Vita_Log("tbo: cannot read %s\n", path);
@@ -474,6 +512,13 @@ static SceUID sMakerSema, sMakerThread;
 static int sMakerState; /* 0 not started, 1 running, -1 could not be started */
 static unsigned sPreAsked, sPreFrame;
 static int sBootDone;
+/* (tbotext=1) Lines asked for by a screen and handed to the maker, not made yet: while there are any, none of the
+   screens' pictures or lines is drawn (a screen shows whole, a few pictures later, never a line at a time); at most
+   GATE_FRAMES pictures, then what is ready is drawn. */
+#define GATE_FRAMES 45
+static volatile int sGatePending;
+static volatile unsigned sGateFrame;
+static uint32_t *line_pixels(uint32_t id, uint32_t *version, uint32_t *w, uint32_t *h);
 
 static int maker_thread(unsigned args, void *argp) {
     (void)args;
@@ -509,10 +554,7 @@ static int maker_thread(unsigned args, void *argp) {
         }
         t0 = sceKernelGetProcessTimeWide();
         if (j.line) {
-            px = TboText_Pixels(j.id, &version, &w, &h);
-            if (px != NULL) {
-                px = tbo_fit(px, &w, &h, 1024, 128);
-            }
+            px = line_pixels(j.id, &version, &w, &h);
         } else {
             px = tbo_decode(j.id, &w, &h, path, sizeof(path), &missing);
         }
@@ -528,8 +570,16 @@ static int maker_thread(unsigned args, void *argp) {
         j.t->state = px != NULL ? 2 : 3; /* ready; 3: nothing came of it (a line: until its version changes) */
         j.t->failVersion = version;
         j.t->readyFrame = gGsFrame;
+        if (j.line) {
+            j.t->madeVersion = version;
+            if (sGatePending > 0) {
+                sGatePending--; /* (tbotext=1: one line fewer that the screen waits for) */
+            }
+        }
         pthread_mutex_unlock(&sMaker);
-        sceKernelDelayThread(1500); /* (the game's thread asks the menus' font for its lines' measures: let go of it between two) */
+        if (!j.line) {
+            sceKernelDelayThread(1500); /* (between two pictures: the cores to the game) */
+        }
     }
     return 0;
 }
@@ -607,7 +657,30 @@ static unsigned tbo_prefetch_ids(unsigned *ids) {
     ids[n++] = TBO_BTN_SQUARE;
     ids[n++] = TBO_BTN_START;
     ids[n++] = Port_GameProfilePortuguese() ? TBO_TAG_BUTTONS_PT : Port_GameProfileEnglish() ? TBO_TAG_BUTTONS_EN : TBO_TAG_BUTTONS_ES;
+    ids[n++] = TBO_TAG_LOGO_OFF;
+    ids[n++] = TBO_KIT_BAR_COMPACT;
+    ids[n++] = TBO_KIT_SEL_COMPACT;
     return n;
+}
+
+/* (tbopre=1) The Tag Team set is resident: read (tbo/ui/<name>.vt, no decoding) by the maker in the first seconds of
+   play, uploaded by the drawing thread at the pictures' ends (UPLOAD_BYTES a picture), and never given back (tbo_drop,
+   Vita_TboFrameEnd): entering the Tag Team screens neither reads nor uploads a picture. */
+static int tbo_resident(const TboTex *t) {
+    unsigned ids[24], n, i;
+    if (!gVitaTboPre) {
+        return 0;
+    }
+    if (t == &sEmblem) {
+        return 1;
+    }
+    n = tbo_prefetch_ids(ids);
+    for (i = 0; i < n; i++) {
+        if (t == &sPic[ids[i]]) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void tbo_prefetch(void) {
@@ -658,7 +731,7 @@ static unsigned tbo_picture(uint32_t id) {
             t->px = NULL;
             t->state = 0;
             pthread_mutex_unlock(&sMaker);
-            snprintf(path, sizeof(path), "app0:tbo/ui/%s.png", kTboNames[id == TBO_MAIN_TAG_EMBLEM || id == TBO_TAG_LOGO_OFF ? TBO_TAG_LOGO : id]);
+            snprintf(path, sizeof(path), "app0:tbo/ui/%s", id == TBO_MAIN_TAG_EMBLEM ? "main_tag_emblem" : kTboNames[id == TBO_TAG_LOGO_OFF ? TBO_TAG_LOGO : id]);
             gVitaTboMs[3] += w * h * 4;
             tex = tbo_make(t, px, w, h, path, 0);
             if (tex == 0) {
@@ -732,9 +805,28 @@ static uint32_t *tbo_pot_stretch(uint32_t *px, uint32_t *pw, uint32_t *ph) {
     return dst;
 }
 
-/* (tbotext=1) A line asked for by the screens' code (tbo_text.c text_id, the game's thread; or the drawing thread when
-   it was not): its picture made now unless the texture or a picture of this version is there already. */
-void Vita_TboLineAsked(uint32_t id, uint32_t version) {
+/* A line's picture as the texture takes it: written (tbo_text.c, at the Vita's size with tbotextsize=1), at most
+   1024 x 128, a heading stretched to powers of two for its smaller copies. NULL: none. */
+static uint32_t *line_pixels(uint32_t id, uint32_t *version, uint32_t *w, uint32_t *h) {
+    uint32_t *px = TboText_Pixels(id, version, w, h);
+    if (px != NULL) {
+        px = tbo_fit(px, w, h, 1024, 128);
+    }
+    if (px != NULL && MIP_ON() && (!tbo_pot(*w) || !tbo_pot(*h))) {
+        px = tbo_pot_stretch(px, w, h); /* (a heading: any size) */
+    }
+    return px;
+}
+
+/* (tbotext=1) A line asked for by the screens' code (tbo_text.c text_id, the game's thread; game 1) or by the drawing
+   thread (game 0): its picture made unless the texture or a picture of this version is there already. On the game's
+   thread at most LINE_BUDGET_US of a picture go to lines (the HUD's figures, a few labels: well under a millisecond
+   each at the Vita's size); the others go to the maker, and the screens are not drawn until it has made them (the gate,
+   GATE_FRAMES). Entering the Tag Team screens: some forty lines, a few made here, the rest by the maker on another core. */
+#define LINE_BUDGET_US 4000
+void Vita_TboLineAsked(uint32_t id, uint32_t version);
+static void line_asked(uint32_t id, uint32_t version, int game) {
+    static unsigned budgetFrame, budgetUs;
     TboTex *t;
     uint32_t w = 0, h = 0, made = 0, *px;
     int need;
@@ -747,18 +839,42 @@ void Vita_TboLineAsked(uint32_t id, uint32_t version) {
     pthread_mutex_lock(&sMaker);
     /* madeVersion: the version made here and either waiting (state 2) or uploaded since; set back to 0 when the
        texture or the waiting picture is given back (Vita_TboFrameEnd, tbo_drop) */
-    need = t->state != 1 && t->madeVersion != version; /* (state 1: the maker has it, queued before tbotext was on) */
+    need = t->state != 1 && t->madeVersion != version; /* (state 1: the maker has it) */
     pthread_mutex_unlock(&sMaker);
     if (!need) {
         return;
     }
-    t0 = sceKernelGetProcessTimeWide();
-    px = TboText_Pixels(id, &made, &w, &h);
-    if (px != NULL) {
-        px = tbo_fit(px, &w, &h, 1024, 128);
+    if (game) {
+        if (budgetFrame != gGsFrame) {
+            budgetFrame = gGsFrame;
+            budgetUs = 0;
+        }
+        if (budgetUs >= LINE_BUDGET_US && gVitaTboPre && maker_start()) {
+            int queued;
+            pthread_mutex_lock(&sMaker);
+            if (t->state == 2) { /* (an older version of the line waiting: let go) */
+                free(t->px);
+                t->px = NULL;
+                t->state = 0;
+            }
+            pthread_mutex_unlock(&sMaker);
+            queued = maker_ask(1, id, t);
+            if (queued) {
+                pthread_mutex_lock(&sMaker);
+                if (sGatePending == 0) {
+                    sGateFrame = gGsFrame;
+                }
+                sGatePending++;
+                pthread_mutex_unlock(&sMaker);
+                gVitaTboLines[2]++;
+                return;
+            }
+        }
     }
-    if (px != NULL && MIP_ON() && (!tbo_pot(w) || !tbo_pot(h))) {
-        px = tbo_pot_stretch(px, &w, &h); /* (a heading: any size; its smaller copies need powers of two) */
+    t0 = sceKernelGetProcessTimeWide();
+    px = line_pixels(id, &made, &w, &h);
+    if (game) {
+        budgetUs += (unsigned)(sceKernelGetProcessTimeWide() - t0);
     }
     pthread_mutex_lock(&sMaker);
     free(t->px);
@@ -772,7 +888,10 @@ void Vita_TboLineAsked(uint32_t id, uint32_t version) {
     t->readyFrame = gGsFrame;
     pthread_mutex_unlock(&sMaker);
     gVitaTboLines[0]++;
-    gVitaTboLines[1] += (unsigned)((sceKernelGetProcessTimeWide() - t0 + 500) / 1000);
+    gVitaTboLines[1] += (unsigned)(sceKernelGetProcessTimeWide() - t0);
+}
+void Vita_TboLineAsked(uint32_t id, uint32_t version) {
+    line_asked(id, version, 1);
 }
 
 static unsigned tbo_line(uint32_t id) {
@@ -798,9 +917,8 @@ static unsigned tbo_line(uint32_t id) {
             t->state = 0;
         }
         pthread_mutex_unlock(&sMaker);
-        if (lpx == NULL) {
-            gVitaTboLines[2]++; /* (not expected: asked for on another way, or no memory) */
-            Vita_TboLineAsked(id, version); /* (made here then, at once, not in a later picture) */
+        if (lpx == NULL && t->state != 1) { /* (state 1: the maker is making it; the screen waits, the gate) */
+            line_asked(id, version, 0); /* (not asked for by the game's thread: made here then, not in a later picture) */
             pthread_mutex_lock(&sMaker);
             if (t->state == 2 && t->pxVersion == version) {
                 lpx = t->px;
@@ -889,24 +1007,98 @@ static unsigned tbo_line(uint32_t id) {
     return t->tex;
 }
 
-/* ---- the main menu's "Tag Team" in the disc's lettering (bt4_main_lettering.inc), made once in a thread ---- */
-#define LETTER_ROOT PORT_VITA_HOME "/gamedata"
+/* ---- the main menu's "Tag Team" in the disc's lettering (bt4_main_lettering.inc), made once in a thread ----
+   The members 448 / 449 are written from the disc that is played, in a folder of their own per disc language
+   (gamedata/en, gamedata/es): v1.4 wrote them to gamedata/pzs4us1 once and kept them, so a player who started with the
+   Spanish disc and then played the English one had the Spanish menu's members put together with the English menu's
+   names (bt4_main_lettering.inc: 11 names, the English rows), which fails: no Tag Team entry (the developer's run,
+   2026-11-18). The old folder is left as it is. If the disc's letters still cannot be put together, the entry is
+   written in the Menu font (letter_fallback), so it always shows. */
+#define LETTER_HOME PORT_VITA_HOME "/gamedata"
 static unsigned char *sLetterPic[2];
 static volatile int sLetterState; /* 0 not begun, 1 being made, 2 done (sLetterPic NULL: not made) */
+extern uint8_t *MenuText_LineRender(int kind, const char *text, int cap, int pad, int *w, int *h, int *base); /* menu_text.c */
+extern void MenuText_LinePrewarm(int kind, int cap);
+extern int gVitaTboTextSize; /* tbo_text.c */
+
+/* "Tag Team" in the Menu font as a 512 x 32 picture of the main menu's row (straight RGBA): the letters left at the
+   row's margin, their capitals 18 pixels, a gold fill (the chosen row a brighter one) with a dark brown edge. */
+static unsigned char *letter_fallback(int lit) {
+    int w, h, base, x, y, dx, dy;
+    uint8_t *cov = MenuText_LineRender(0, "Tag Team", 18, 3, &w, &h, &base);
+    unsigned char *out;
+    static const unsigned char top[2][3] = {{255, 244, 196}, {255, 255, 150}}, bottom[2][3] = {{232, 168, 56}, {255, 140, 16}},
+                                edge[2][3] = {{58, 28, 8}, {96, 30, 0}};
+    if (cov == NULL) {
+        return NULL;
+    }
+    out = calloc(512 * 32, 4);
+    if (out == NULL) {
+        free(cov);
+        return NULL;
+    }
+    for (y = 0; y < 32; y++) {
+        int sy = y - (25 - base); /* (the baseline 25 rows down: the capitals in the row's middle) */
+        for (x = 0; x < 512; x++) {
+            int sx = x - 13, fill = 0, line = 0, k;
+            unsigned char *o = out + (y * 512 + x) * 4;
+            if (sy >= 0 && sy < h && sx >= 0 && sx < w) {
+                fill = cov[sy * w + sx];
+            }
+            for (dy = -2; dy <= 2; dy++) {
+                for (dx = -2; dx <= 2; dx++) {
+                    int yy = sy + dy, xx = sx + dx;
+                    if (dx * dx + dy * dy <= 6 && yy >= 0 && yy < h && xx >= 0 && xx < w && cov[yy * w + xx] > line) {
+                        line = cov[yy * w + xx];
+                    }
+                }
+            }
+            if (line == 0) {
+                continue;
+            }
+            for (k = 0; k < 3; k++) {
+                int f = top[lit][k] + (bottom[lit][k] - top[lit][k]) * y / 31;
+                o[k] = (unsigned char)((edge[lit][k] * (255 - fill) + f * fill) / 255);
+            }
+            o[3] = (unsigned char)line;
+        }
+    }
+    free(cov);
+    return out;
+}
 
 static int letter_thread(unsigned args, void *argp) {
+    extern int Port_GameProfileEnglish(void);
+    char root[96];
+    int ok = 0;
     (void)args;
     (void)argp;
     /* (the PC reads the menus' archive members as loose files of its data folder: written once from the disc) */
-    if (Vita_MemberFile("pzs4us1", 448, LETTER_ROOT) && Vita_MemberFile("pzs4us1", 449, LETTER_ROOT)) {
-        if (!MenuLabels_Bt4MainItem(LETTER_ROOT, "Tag Team", sLetterPic)) {
-            Vita_Log("tbo: the main menu's Tag Team lettering could not be put together from the disc\n");
+    snprintf(root, sizeof(root), "%s/%s", LETTER_HOME, Port_GameProfileEnglish() ? "en" : "es");
+    sceIoMkdir(LETTER_HOME, 0777);
+    if (Vita_MemberFile("pzs4us1", 448, root) && Vita_MemberFile("pzs4us1", 449, root)) {
+        ok = MenuLabels_Bt4MainItem(root, "Tag Team", sLetterPic);
+        if (!ok) {
+            Vita_Log("tbo: the main menu's Tag Team lettering could not be put together from the disc (%s): written in the Menu font\n", root);
         }
     } else {
-        Vita_Log("tbo: the main menu's archive members 448 / 449 could not be written to " LETTER_ROOT "\n");
+        Vita_Log("tbo: the main menu's archive members 448 / 449 could not be written to %s: the entry written in the Menu font\n", root);
+    }
+    if (!ok) {
+        free(sLetterPic[0]);
+        free(sLetterPic[1]);
+        sLetterPic[0] = letter_fallback(0);
+        sLetterPic[1] = letter_fallback(1);
     }
     __sync_synchronize();
     sLetterState = 2;
+    if (TEXT_ON()) {
+        /* the lines' glyphs written ahead (menu_text.c's cache): the Tag Team screens' lines are then copies of them */
+        unsigned long long t0 = sceKernelGetProcessTimeWide();
+        MenuText_LinePrewarm(0, gVitaTboTextSize ? 40 : 80);
+        MenuText_LinePrewarm(1, gVitaTboTextSize ? 24 : 48);
+        Vita_Log("tbo: the lines' glyphs written ahead in %u ms\n", (unsigned)((sceKernelGetProcessTimeWide() - t0) / 1000));
+    }
     return sceKernelExitDeleteThread(0);
 }
 
@@ -957,6 +1149,8 @@ static unsigned tbo_letters(int lit) {
 /* The renderer (vita_vgl.c state_of_, the drawing thread): the texture of picture `id`, 0 for none (not drawn).
    *mip: it has its smaller copies (tbomip=1): to be sampled with them. */
 static unsigned tbo_texture(uint32_t id, int *mip) {
+    /* (tbotext=1) lines the screen waits for at the maker: the screen's pictures and lines not drawn meanwhile */
+    int gated = sGatePending > 0 && gGsFrame - sGateFrame < GATE_FRAMES && TEXT_ON();
     *mip = 0;
     if (!tbo_on()) {
         return 0;
@@ -964,7 +1158,11 @@ static unsigned tbo_texture(uint32_t id, int *mip) {
     if (id >= TBO_TEXT_BASE && id < TBO_TEXT_BASE + TBO_TEXT_SLOTS) {
         unsigned tex = tbo_line(id);
         *mip = tex != 0 && sText[id - TBO_TEXT_BASE].mip;
-        return tex;
+        return gated ? 0 : tex;
+    }
+    if (gated && id != TBO_MAIN_TAG_OFF && id != TBO_MAIN_TAG_ON && id != TBO_MAIN_TAG_EMBLEM) {
+        gVitaTboGated++;
+        return 0;
     }
     if (id == TBO_MAIN_TAG_OFF || id == TBO_MAIN_TAG_ON) {
         unsigned tex;
@@ -1000,7 +1198,7 @@ unsigned Vita_TboTextureMip(uint32_t id, int *mip) {
 static void tbo_drop(TboTex *t, unsigned n) {
     unsigned i;
     for (i = 0; i < n; i++) {
-        if (t[i].tex != 0 && gGsFrame - t[i].frame > KEEP_FRAMES) {
+        if (t[i].tex != 0 && gGsFrame - t[i].frame > KEEP_FRAMES && !tbo_resident(&t[i])) {
             Vita_VglTexFree(t[i].tex);
             pthread_mutex_lock(&sMaker);
             t[i].tex = 0;
@@ -1025,16 +1223,52 @@ void Vita_TboFrameEnd(void) {
     }
     if (gVitaTboPre && !sBootDone && gGsFrame >= 240 && tbo_on()) {
         /* the main menu's emblem and lettering, made in the first seconds, long before the menu shows them */
+        unsigned ids[24], n, i;
         sBootDone = 1;
         letters_start();
         maker_ask(0, TBO_MAIN_TAG_EMBLEM, &sEmblem);
+        n = tbo_prefetch_ids(ids); /* the Tag Team set, resident from now on (tbo_resident) */
+        for (i = 0; i < n; i++) {
+            if (sPic[ids[i]].tex == 0 && !sPic[ids[i]].missing) {
+                maker_ask(0, ids[i], &sPic[ids[i]]);
+            }
+        }
+    }
+    if (gVitaTboPre && sBootDone) {
+        /* the resident set's pictures read by the maker: uploaded here, at the pictures' ends, within the budget */
+        static unsigned done, logged;
+        if (!done) {
+            unsigned ids[24], n, i, left = 0, kb = 0;
+            n = tbo_prefetch_ids(ids);
+            for (i = 0; i <= n; i++) {
+                uint32_t id = i < n ? ids[i] : TBO_MAIN_TAG_EMBLEM;
+                TboTex *t = i < n ? &sPic[id] : &sEmblem;
+                if (t->tex == 0 && !t->missing) {
+                    int state;
+                    pthread_mutex_lock(&sMaker);
+                    state = t->state;
+                    pthread_mutex_unlock(&sMaker);
+                    if (state == 2) {
+                        tbo_picture(id);
+                    }
+                    left += t->tex == 0;
+                }
+                kb += t->bytes / 1024;
+            }
+            if (left == 0) {
+                done = 1;
+                if (!logged++) {
+                    Vita_Log("tbo: the Tag Team set resident: %u pictures, %u KB (with their smaller copies about a third more)\n", n + 1, kb);
+                }
+            }
+        }
     }
     if (gVitaTboPre && (gGsFrame & 63) == 32 && gGsFrame - sPreAsked > KEEP_FRAMES) {
         /* the menus have not been shown for 20 s (a fight): the pixels kept for the Tag Team screens given back */
         unsigned i;
         pthread_mutex_lock(&sMaker);
         for (i = 0; i < TBO_ART_COUNT; i++) {
-            if (sPic[i].state == 2) {
+            if (sPic[i].state == 2 && !tbo_resident(&sPic[i])) {
                 free(sPic[i].px);
                 sPic[i].px = NULL;
                 sPic[i].state = 0;

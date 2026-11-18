@@ -45,8 +45,19 @@ uint32_t TboText_Version(uint32_t id);
 
 /* The size the letters are drawn at, by kind (capitals, in pixels: the screens show them smaller, from smaller
    copies), and the outline's thickness: as the letter sheet had it, about a 16th of the capitals. */
+#ifdef PORT_VITA
+/* (bt3.txt tbotextsize=1, the default: port/vita/vita_tbo.c) The Vita shows a line with capitals of 7-20 pixels and
+   made it smaller by halves to fit 128 rows: capitals of 40 (talk box 24) were all it kept. Written at that size
+   straight away, with the outline as thick as it came out (about 1.5 pixels: the 3 x 3 disc of radius 1): a quarter of the
+   pixels to write, outline and halve, so a screen's lines can be made as it comes in. The measures are in
+   thousandths of the capitals, so the layout does not change. */
+int gVitaTboTextSize = 1;
+static int line_cap(int kind) { return gVitaTboTextSize ? (kind == 0 ? 40 : 24) : (kind == 0 ? 80 : 48); }
+static int line_outline(int kind) { return gVitaTboTextSize ? 1 : (kind == 0 ? 3 : 2); }
+#else
 static int line_cap(int kind) { return kind == 0 ? 80 : 48; }
 static int line_outline(int kind) { return kind == 0 ? 3 : 2; }
+#endif
 /* Keep the fill and outline on aligned, power-of-two rows. Otherwise their
  * shared edge drifts through odd mip heights and clips short menu labels. */
 static int line_extent(int value){int size=1;while(size<value&&size<16384)size*=2;return size;}

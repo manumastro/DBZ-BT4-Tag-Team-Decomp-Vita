@@ -156,6 +156,29 @@ split screen, the floating allies' gauges), the target selection's three methods
 target, the results' Rematch / Back to character select / exit, the Duel menu's Tag type, `tagteam=2` (the earlier
 text setup) and `tagteam=0`.
 
+### Entering Tag Team and the English disc's entry (2026-11-18, branch `wip/v14rel`)
+
+The developer's run on the English B14 Rev2 (extracted folder) after v1.4:
+
+- **No Tag Team entry in the main menu**: `tbo: the main menu's Tag Team lettering could not be put together`. The
+  members 448 / 449 the lettering is cut from were written once to `ux0:data/bt4/gamedata/pzs4us1` and never again
+  (`Vita_MemberFile` keeps a file that is there): written from the Spanish disc in an earlier run, they were put
+  together with the English menu's names (`bt4_main_lettering.inc` takes 11 English rows, 6 Spanish ones), which fails.
+  The folder form of the disc was not the cause (its archives are opened the same way). Now the members go to
+  `gamedata/en` or `gamedata/es` by the disc played (the old folder left as it is), and if the disc's letters cannot be
+  put together the entry is written in the Menu font (`letter_fallback`), so it always shows.
+- **Entering Tag Team held the game's thread 1.9-2.7 s** (at 37.5 s, the first entry, and 151 s; both at the Tag Team
+  screens' music starting, afs:1:2071: that is the entry, not the music): the screens' some forty lines were written
+  on the game's thread at 80 pixels with their outlines (`tbotext=1` of `wip/tagtext`), and the pictures, given back
+  after 600 pictures not drawn, were read and uploaded again. Now: the pictures made at build time and resident, the
+  lines written at the Vita's size from kept glyphs, at most 4 ms a picture on the game's thread, the rest by the
+  maker with the screen held until they are made (`tbotextsize`, `docs/vita/development.md`). To measure: the log's
+  `held up` lines when entering (target under 100 ms), `tbo: the Tag Team set resident`, the report's `tbotext` lines.
+
+Console check: `psvita-agent/sets/bt4/tagentry_{en,es}.txt` with `.inputs.json` (boot to the main menu, 2 minutes
+there, down to Tag Team, enter, back, enter again; screenshots after each step; the DOWN count is a guess to check on
+the first shot).
+
 ### The Tag Team text after v1.4 (2026-11-18, branch `wip/tagtext`)
 
 The developer, playing v1.4 with its fixes on the Spanish disc: the Tag Team strings are "strange" (too small,

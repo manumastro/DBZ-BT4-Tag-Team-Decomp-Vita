@@ -2310,6 +2310,43 @@ static unsigned line_next(const unsigned char **text) {
    returns how far the pen goes, in pixels (0: no font, or nothing to write). A character the font does not have is
    a question mark. */
 #define LINE_CHARS 160
+#ifdef PORT_VITA
+/* (the Vita) The glyphs of the lines kept once written: a line is then copies of them (the Tag Team screens' forty
+   lines and the HUD's figures written in a fraction of the time), the outline as stb_truetype rasterised it. Kept by
+   font, glyph, size and the pen's quarter pixel (the line's letters fall on quarter pixels instead of anywhere: a
+   difference of an eighth of a pixel at most); the whole set given back when the font changes (sLineGeneration).
+   Filled ahead by MenuText_LinePrewarm (port/vita/vita_tbo.c: Latin-1, both kinds, in the first seconds of play). */
+#define GC_SLOTS 1024
+typedef struct { const Face *face; int glyph, cap, shift, w, h, ox, oy; uint32_t gen; unsigned char *px; } GlyphCache;
+static GlyphCache sGc[GC_SLOTS];
+static unsigned char *gc_bitmap(const Face *f, int glyph, float scale, int cap, float shift, int *w, int *h, int *ox, int *oy, int *owned) {
+    int q = (int)(shift * 4.0f + 0.5f) & 3;
+    unsigned hash = ((unsigned)glyph * 2654435761u ^ (unsigned)cap * 40503u ^ (unsigned)q * 97u ^ (unsigned)(uintptr_t)f) % GC_SLOTS, k;
+    for (k = 0; k < 8; k++) {
+        GlyphCache *c = &sGc[(hash + k) % GC_SLOTS];
+        if (c->px != NULL && c->face == f && c->glyph == glyph && c->cap == cap && c->shift == q && c->gen == sLineGeneration) {
+            *w = c->w; *h = c->h; *ox = c->ox; *oy = c->oy; *owned = 0;
+            return c->px;
+        }
+    }
+    {
+        unsigned char *g = face_bitmap(f, glyph, scale, scale, (float)q * 0.25f, 0.0f, w, h, ox, oy);
+        *owned = 1;
+        if (g == NULL) { return NULL; }
+        for (k = 0; k < 8; k++) {
+            GlyphCache *c = &sGc[(hash + k) % GC_SLOTS];
+            if (c->px == NULL || c->gen != sLineGeneration || k == 7) {
+                free(c->px);
+                c->face = f; c->glyph = glyph; c->cap = cap; c->shift = q; c->gen = sLineGeneration;
+                c->w = *w; c->h = *h; c->ox = *ox; c->oy = *oy; c->px = g;
+                *owned = 0;
+                break;
+            }
+        }
+        return g;
+    }
+}
+#endif
 static int line_layout(int kind, const char *text, int cap, int pad, uint8_t **out, int *w, int *h, int *base) {
     const unsigned char *p = (const unsigned char *)text;
     Face *f = line_face(kind);
@@ -2343,7 +2380,12 @@ static int line_layout(int kind, const char *text, int cap, int pad, uint8_t **o
         for (i = 0; px != NULL && i < count; i++) {
             int gw, gh, ox, oy, gx, gy;
             float shift = pen[i] - floorf(pen[i]);
+#ifdef PORT_VITA
+            int owned;
+            unsigned char *g = gc_bitmap(f, glyphs[i], scale, cap, shift, &gw, &gh, &ox, &oy, &owned);
+#else
             unsigned char *g = face_bitmap(f, glyphs[i], scale, scale, shift, 0.0f, &gw, &gh, &ox, &oy);
+#endif
             if (g == NULL) { continue; }
             for (gy = 0; gy < gh; gy++) {
                 int y = *base + oy + gy;
@@ -2354,7 +2396,11 @@ static int line_layout(int kind, const char *text, int cap, int pad, uint8_t **o
                     if (xx >= 0 && xx < width && v > px[(size_t)y * width + xx]) { px[(size_t)y * width + xx] = v; }
                 }
             }
+#ifdef PORT_VITA
+            if (owned) { free(g); }
+#else
             free(g);
+#endif
         }
     }
     return (int)ceilf(x);
@@ -2379,6 +2425,29 @@ int MenuText_LineMeasure(int kind, const char *text, int cap, int pad, int *w, i
     return r;
 }
 
+#ifdef PORT_VITA
+/* The glyphs of Latin-1 written once at `cap` (kind 0 the Menu font, 1 the Dialogue / UI font) into the cache above. */
+void MenuText_LinePrewarm(int kind, int cap) {
+    char text[4 * 48 + 1];
+    int c = 33, n;
+    while (c < 256) {
+        n = 0;
+        while (c < 256 && n < 4 * 48) {
+            if (c < 0x7F || c >= 0xA1) {
+                if (c < 0x80) { text[n++] = (char)c; }
+                else { text[n++] = (char)(0xC0 | (c >> 6)); text[n++] = (char)(0x80 | (c & 63)); }
+            }
+            c++;
+        }
+        text[n] = 0;
+        {
+            int w, h, base;
+            uint8_t *px = MenuText_LineRender(kind, text, cap, 0, &w, &h, &base);
+            free(px);
+        }
+    }
+}
+#endif
 uint8_t *MenuText_LineRender(int kind, const char *text, int cap, int pad, int *w, int *h, int *base) {
     uint8_t *px = NULL;
     if (kind < 0 || kind > 1) { return NULL; }
