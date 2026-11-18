@@ -3270,6 +3270,27 @@ void Vita_WatchThread(int slot, int id, const char *name) {
         sWatch[slot].name = name;
     }
 }
+/* Every sleep of 1 ms or more of a watched thread (the program's own calls and vitaGL's: build.py wraps
+   sceKernelDelayThread): who asked for it, for the watchdog. A hang after a fight (v1.4.1: the drawing thread asleep
+   in a picture's end, "waits for 1", for good) then names the place: the address against Vita_Log's, which bt3.map
+   gives. A thread asleep with no sleep of its own noted is asleep inside a system module (the chip's, the display's). */
+static struct { volatile unsigned lr, us, n, atMs; } sSleep[NWATCH];
+int __real_sceKernelDelayThread(SceUInt delay);
+int __wrap_sceKernelDelayThread(SceUInt delay) {
+    if (delay >= 1000) {
+        int id = sceKernelGetThreadId(), i;
+        for (i = 0; i < NWATCH; i++) {
+            if (sWatch[i].id == id) {
+                sSleep[i].lr = (unsigned)(uintptr_t)__builtin_return_address(0);
+                sSleep[i].us = delay;
+                sSleep[i].n++;
+                sSleep[i].atMs = (unsigned)(sceKernelGetProcessTimeWide() / 1000);
+                break;
+            }
+        }
+    }
+    return __real_sceKernelDelayThread(delay);
+}
 static void watch_log(void) {
     char line[1300];
     int n = 0, i;
@@ -3351,7 +3372,7 @@ static int watchdog_thread(SceSize args, void *argp) {
         }
         dumps++;
         {
-            static char out[3000];
+            static char out[5000];
             int n = 0, i;
             SceUID fd;
             extern int gVitaInMenus;
@@ -3372,6 +3393,18 @@ static int watchdog_thread(SceSize args, void *argp) {
                 n += snprintf(out + n, sizeof(out) - (size_t)n, "vita: WATCHDOG:   %s: status %x, priority %d, core %d (last %d), waits for %x (object %x), run %u ms\n", sWatch[i].name,
                               (unsigned)ti.status, (int)ti.currentPriority, (int)ti.currentCpuId, (int)ti.lastExecutedCpuId, (unsigned)ti.waitType, (unsigned)ti.waitId,
                               (unsigned)(ti.runClocks / 1000));
+                if (sSleep[i].n != 0 && n > 0 && n < (int)sizeof(out)) { /* (its last sleep of 1 ms or more: from where) */
+                    n--; /* (on the same line) */
+                    n += snprintf(out + n, sizeof(out) - (size_t)n, "; its last long sleep %u us asked at %08x (Vita_Log at %08x), %u ms ago, %u such\n",
+                                  sSleep[i].us, sSleep[i].lr, (unsigned)(uintptr_t)&Vita_Log, (unsigned)(sceKernelGetProcessTimeWide() / 1000) - sSleep[i].atMs, sSleep[i].n);
+                }
+            }
+            {
+                extern void Vita_HangWhere(char *b, int n);
+                if (n < (int)sizeof(out) - 400) {
+                    Vita_HangWhere(out + n, (int)sizeof(out) - n);
+                    n += (int)strlen(out + n);
+                }
             }
             fd = sceIoOpen(HOME "/hang" SFX, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0777);
             if (fd >= 0) {

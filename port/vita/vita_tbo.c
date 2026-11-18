@@ -1230,12 +1230,15 @@ static void tbo_drop(TboTex *t, unsigned n) {
 /* At every picture's end (vita_vgl.c GsGpu_FrameEnd, after its batches are handed over): the lines' replaced
    textures given back; every 64th, the textures not drawn for a while. The main menu's emblem and lettering (~600 KB)
    are kept: made again, they would cost the logo's decoding and the disc's letters at every return to the menu. */
+volatile int gVitaTboPhase; /* (the watchdog, vita_vgl.c Vita_HangWhere: the step below the drawing thread is at; 0 none) */
 void Vita_TboFrameEnd(void) {
     unsigned held;
     if ((gGsFrame & 63) == 0) {
+        gVitaTboPhase = 1;
         Vita_TagMovieIdle(); /* the film's texture not drawn for a while */
         Vita_TagMovieSwIdle();
     }
+    gVitaTboPhase = 2;
     if (gVitaTboPre && !sBootDone && gGsFrame >= 240 && tbo_on()) {
         /* the main menu's emblem and lettering, made in the first seconds, long before the menu shows them */
         unsigned ids[24], n, i;
@@ -1249,6 +1252,7 @@ void Vita_TboFrameEnd(void) {
             }
         }
     }
+    gVitaTboPhase = 3;
     if (gVitaTboPre && sBootDone) {
         /* the resident set's pictures read by the maker: uploaded here, at the pictures' ends, within the budget */
         static unsigned done, logged;
@@ -1278,6 +1282,7 @@ void Vita_TboFrameEnd(void) {
             }
         }
     }
+    gVitaTboPhase = 4;
     if (gVitaTboPre && (gGsFrame & 63) == 32 && gGsFrame - sPreAsked > KEEP_FRAMES) {
         /* the menus have not been shown for 20 s (a fight): the pixels kept for the Tag Team screens given back */
         unsigned i;
@@ -1306,6 +1311,7 @@ void Vita_TboFrameEnd(void) {
         }
         pthread_mutex_unlock(&sMaker);
     }
+    gVitaTboPhase = 5;
     while (sLateN > 0) {
         sLateN--;
         Vita_VglTexFree(sLate[sLateN]);
@@ -1315,11 +1321,14 @@ void Vita_TboFrameEnd(void) {
     }
     held = gVitaTboN[3];
     if ((gGsFrame & 63) != 0 || held == 0) {
+        gVitaTboPhase = 0;
         return;
     }
+    gVitaTboPhase = 6;
     tbo_drop(sPic, TBO_ART_COUNT);
     tbo_drop(sText, TBO_TEXT_SLOTS);
     if (gVitaTboN[3] != held) {
         Vita_Log("tbo: textures not drawn for %u pictures given back: %u held, %u KB\n", KEEP_FRAMES, gVitaTboN[3], gVitaTboN[4] / 1024);
     }
+    gVitaTboPhase = 0;
 }

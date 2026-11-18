@@ -573,3 +573,27 @@ Not finished, to do next, in this order:
 4. The gap between the intro and the loop (a second source on the same player: the poster may show for an instant) and the sound
    (the films have none).
 5. Before the default can be 1: the 5v5 and 2v2 heap peaks unchanged, no leak of the pool over many openings of the Tag screens.
+
+## The hang back to character select (v1.4.1, open; 2026-11-18, branch `wip/v14rel`)
+
+After a fight, at the switch from the fight size (640 x 368) to the menus (960 x 544), about 15 pictures later, the
+game stops for good (not every time; seen with and without anime music, and in a build from before the screens'
+pictures were made at build time). Every watchdog of it says the same: the drawing thread asleep (wait type 1, a
+sleep) in a picture's end (back end record 7, not in `rt_sync`, the swap or the ring), its run time frozen; the back
+end's queue full (8 MB); the list reader sleeping for room in it; the game's thread on its condition variable; the
+render thread idle; **the pictures shown counter frozen too** (the display callback no longer runs: the chip has not
+finished a picture). The likeliest reading is the chip stalled and the drawing thread waiting in a system call
+(`sceGxmBeginScene` for a free scene of the display's target, at the next picture's `glClear`, is outside every
+marker the watchdog had).
+
+What the watchdog now says (commit "Hang after a fight: name what every thread waits on"):
+- the drawing thread's step in `GsGpu_FrameEnd` (`gVitaFePhase`: 1 last batches ... 9 `vglSwapResolution`, 10 swap,
+  11 `scr_resized`, 13 the next picture's `glClear`) and in `Vita_TboFrameEnd` (`gVitaTboPhase`);
+- for every watched thread its last sleep of 1 ms or more and who asked for it (`sceKernelDelayThread` is wrapped:
+  the caller's address against `Vita_Log`'s; `bt3.map` turns it into a function). No sleep noted for a thread that
+  is asleep = asleep inside a system module (the chip's or the display's calls);
+- what the game's thread and the list reader wait for, and for how long; a wait over 1 s is also logged when it ends.
+
+The next step: a run with `hangdump=8` (the program stops on purpose after 8 s without a picture, so that the system
+writes a crash dump with every thread's stack: `vita-parse-core` with `bt3.unstripped.elf`). Sets:
+`sets/bt4/hang_tag2v2_am1.txt`, `hang_tag2v2_am0.txt`, `hang_1v1.txt` (psvita-agent).

@@ -3020,6 +3020,7 @@ unsigned long long gVitaWall[6];
 unsigned long long gVitaWallK[4][2]; /* draw submissions by kind: stage, fighters, other models, GS primitives: microseconds, count */
 static inline void *wt_map(GLenum t, GLenum a) { unsigned long long t0 = sceKernelGetProcessTimeWide(); void *r = glMapBuffer(t, a); gVitaWall[1] += sceKernelGetProcessTimeWide() - t0; return r; }
 static volatile int gVitaDrawWhere;
+extern volatile int gVitaFePhase; /* (GsGpu_FrameEnd: the step it is at, for the watchdog) */
 /* (sMemVramK, sMemRamK, declared above: the watchdog's and the log's vitaGL free memory as last looked at, every 64th
    picture, by the drawing thread: the watchdog itself calls nothing of vitaGL, which may be what is stuck) */
 /* (the log) the lowest free video and main memory seen since the last report, read every 64th picture (two
@@ -7155,13 +7156,17 @@ static void swap_sized(void) {
     int w = menu ? SCR_W_MENU : SCR_W_FIGHT, h = menu ? SCR_H_MENU : SCR_H_FIGHT;
     int change = w != sScrW || h != sScrH;
     if (change) {
+        gVitaFePhase = 9;
         rt_sync();
         vglSwapResolution(w, h);
     }
+    gVitaFePhase = 10;
     wt_swap();
     if (change) {
+        gVitaFePhase = 11;
         scr_resized(w, h);
     } else if (VITA_RARE(sDispCheck > 0) && --sDispCheck == 0) {
+        gVitaFePhase = 12;
         disp_check();
     }
 }
@@ -8026,10 +8031,29 @@ static void fe_sync(void) {
         target_set(0);
     }
 }
+/* The drawing thread's step in a picture's end, for the watchdog (Vita_HangWhere): a hang after a fight (v1.4.1) had
+   it asleep in a picture's end (record 7) with nothing else said. 0: not in a picture's end. */
+volatile int gVitaFePhase;
+extern volatile int gVitaTboPhase; /* (vita_tbo.c: its steps in Vita_TboFrameEnd) */
+void Vita_HangWhere(char *b, int n) {
+    extern void Gs_GameWaitState(char *b, int n);
+    static const char *const kStep[] = {"-", "the last batches", "the screens' pictures (vita_tbo.c)", "the render thread's draws awaited", "vitaGL's state cache",
+                                        "the picture bound again", "the work pages and samples", "the swap's preparations (shots, film)", "the swap by the render thread",
+                                        "the swap: the size changed (vglSwapResolution)", "the swap (vglSwapBuffers, pacing)", "everything of the new size made again",
+                                        "what the display shows asked", "the next picture begun (glClear)"};
+    int k, ph = gVitaFePhase;
+    k = snprintf(b, (size_t)n, "vita: WATCHDOG:   the drawing thread's step in a picture's end: %d (%s); in the screens' pictures: %d\n", ph,
+                 ph >= 0 && ph < (int)(sizeof(kStep) / sizeof(kStep[0])) ? kStep[ph] : "?", gVitaTboPhase);
+    if (k > 0 && k < n) {
+        Gs_GameWaitState(b + k, n - k);
+    }
+}
 void GsGpu_FrameEnd(void) {
+    gVitaFePhase = 1;
     al_frame_end(!gVitaGsSkip);
     flush();
     flush_bins_c(1);
+    gVitaFePhase = 2;
     {
         extern void Vita_TboFrameEnd(void); /* (vita_tbo.c: the screens' pictures not drawn for a while given back) */
         Vita_TboFrameEnd();
@@ -8052,6 +8076,7 @@ void GsGpu_FrameEnd(void) {
         }
         battleWas = battle;
     }
+    gVitaFePhase = 3;
     if (!sFeAsync) {
         rt_sync(); /* the render thread's draws done: what follows is this thread's (the parts kept are let go, the swap) */
         if (texrt_on()) {
@@ -8069,15 +8094,18 @@ void GsGpu_FrameEnd(void) {
         extern int vgl_bt3_gxm_cache, gVitaAbSide;
         extern void vglbt3_GxmDirty(void);
         int want = gVitaGxmCache == 2 ? gVitaAbSide == 1 : gVitaGxmCache != 0;
+        gVitaFePhase = 4;
         if (want != vgl_bt3_gxm_cache) {
             fe_sync();
             vgl_bt3_gxm_cache = want;
             vglbt3_GxmDirty();
         }
     }
+    gVitaFePhase = 5;
     if (!sFeAsync) {
         target_set(0); /* (the picture bound again before the swap; rtswap: in the ring) */
     }
+    gVitaFePhase = 6;
     if (sWpClrN > 0) { /* a clear of the page held back and never needed: the page was not cleared */
         sWpValid = 0;
         sWpClrN = 0;
@@ -8212,6 +8240,7 @@ void GsGpu_FrameEnd(void) {
         if (sLogFrames > 0) {
             Vita_Log("vgl: frame %u: swap (%u primitives left out for their coordinates)\n", gGsFrame, sBadVerts);
         }
+        gVitaFePhase = 7;
         {
             T_IN;
             gProf = 8;
@@ -8362,6 +8391,7 @@ void GsGpu_FrameEnd(void) {
             }
             if (sFeAsync) {
                 RtSwap sw;
+                gVitaFePhase = 8;
                 pace_swap_pre(&sw);
                 frame_begin_be();
                 *(RtSwap *)(void *)rt_reserve(RT_SWAP, sizeof(RtSwap)) = sw;
@@ -8383,12 +8413,14 @@ void GsGpu_FrameEnd(void) {
             sLogFrames--;
         }
         if (!sFeAsync) {
+            gVitaFePhase = 13;
             frame_begin();
         }
         sFeAsync = 0;
     }
     sFeAsync = 0; /* (skipasync: a list not drawn) */
     t114_list_end(!gVitaGsSkip);
+    gVitaFePhase = 0;
 }
 
 /* Not in this first back end: the vertex programs as shaders (the interpreter is forced, vita_gfx.c), the movie

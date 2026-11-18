@@ -364,6 +364,8 @@ VUFAST_WRAPS = """ClipPoly_ClipPlane ClipPoly_ProjectCur Mtx_Mul Mtx_MulVec3 Mtx
 PORT_WRAPS = "Progress_Main main exit Port_GsVif1Chain sceMpegGetPicture GsVu1_Call".split()
 # The C library's per-thread lookups the short way (vita_tls.c, as mh3-wii's fast_tls.c) and a faster memcmp (vita_clib.c)
 PORT_WRAPS += ["__getreent", "pte_osTlsGetValue", "memcmp"]
+# Every long sleep of the watched threads noted, who asked for it (vita_main.c: the watchdog names it in a hang)
+PORT_WRAPS += ["sceKernelDelayThread"]
 # The file calls, the C library's included: the disc's files read from its .iso as it is (vita_iso.c, arielxflores's)
 PORT_WRAPS += """sceIoOpen sceIoClose sceIoRead sceIoPread sceIoLseek sceIoLseek32 sceIoGetstat sceIoGetstatByFd sceIoDopen sceIoDread
     sceIoDclose""".split()

@@ -3752,6 +3752,39 @@ int Port_InGr(const void *p) {
 unsigned long long gGrRoomUs; /* for the log: the front end's time waiting for room in the queue */
 unsigned long long gVitaFeUs[2][2]; /* for the log: lists not drawn / drawn: how many, the front end's microseconds */
 static unsigned sGrHeadSeen; /* the front end's last look at sGrHead (another core writes it: looked at again only when needed) */
+#ifdef PORT_VITA
+/* What the game's thread and the list reader wait for, and since when (the watchdog: Gs_GameWaitState); a wait of
+   more than a second logged when it ends. A hang after a fight (v1.4.1) showed the game's thread waiting on a
+   semaphore and the list reader asleep, with nothing saying for what. */
+static const char *volatile sGameWait, *volatile sReaderWait;
+static volatile unsigned long long sGameWaitFrom, sReaderWaitFrom;
+static void wait_begin(const char *volatile *who, volatile unsigned long long *from, const char *what) {
+    if (*who != what) {
+        *from = sceKernelGetProcessTimeWide();
+        *who = what;
+    }
+}
+static void wait_end(const char *volatile *who, volatile unsigned long long *from, const char *thread) {
+    const char *what = *who;
+    if (what != NULL) {
+        unsigned long long us = sceKernelGetProcessTimeWide() - *from;
+        *who = NULL;
+        if (us >= 1000000ull) {
+            extern void Vita_Log(const char *fmt, ...);
+            Vita_Log("vita: the %s waited %u ms for %s (frame %u)\n", thread, (unsigned)(us / 1000), what, sFrame);
+        }
+    }
+}
+#define GAME_WAIT(what) wait_begin(&sGameWait, &sGameWaitFrom, what)
+#define GAME_WAIT_END() wait_end(&sGameWait, &sGameWaitFrom, "game's thread")
+#define READER_WAIT(what) wait_begin(&sReaderWait, &sReaderWaitFrom, what)
+#define READER_WAIT_END() wait_end(&sReaderWait, &sReaderWaitFrom, "list reader")
+#else
+#define GAME_WAIT(what) do { } while (0)
+#define GAME_WAIT_END() do { } while (0)
+#define READER_WAIT(what) do { } while (0)
+#define READER_WAIT_END() do { } while (0)
+#endif
 static void gr_room(unsigned need) {
     unsigned spins = 0;
     unsigned long long t0;
@@ -3764,11 +3797,13 @@ static void gr_room(unsigned need) {
     }
     gGrWaits++;
     t0 = sceKernelGetProcessTimeWide();
+    READER_WAIT("room in the back end's queue (the drawing thread to take records)");
     while (sGrTail + need - sGrHead > GR_SIZE) {
         if (++spins > 500) {
             sceKernelDelayThread(50);
         }
     }
+    READER_WAIT_END();
     sGrHeadSeen = sGrHead;
     gGrRoomUs += sceKernelGetProcessTimeWide() - t0;
 }
@@ -3826,9 +3861,11 @@ static void gr_drain(void) {
     if (sRegDefN != 0) {
         reg_def_flush();
     }
+    GAME_WAIT("the back end's queue empty (the drawing thread to finish every record)");
     while (!gr_idle()) {
         sceKernelDelayThread(100);
     }
+    GAME_WAIT_END();
 }
 
 void GsFE_RegWrite(uint32_t addr, uint64_t d) {
@@ -6045,6 +6082,14 @@ void Gs_QueueState(char *b, int n) {
     snprintf(b, (size_t)n, "vita: WATCHDOG:   lists queued %u, unfinished %d (drawn %d); back end queue %u of %u bytes taken, record %d being done; frame %u\n",
              sQCount, sLists, sDrawnLists, sGrHead, sGrTail, sGrCurType, sFrame);
 }
+/* For the watchdog (vita_vgl.c Vita_HangWhere): what the game's thread and the list reader wait for. Reads only. */
+void Gs_GameWaitState(char *b, int n) {
+    const char *g = sGameWait, *r = sReaderWait;
+    unsigned long long now = sceKernelGetProcessTimeWide(), gf = sGameWaitFrom, rf = sReaderWaitFrom;
+    snprintf(b, (size_t)n, "vita: WATCHDOG:   the game's thread waits for %s%s%u ms; the list reader for %s%s%u ms\n", g != NULL ? g : "nothing of the lists",
+             g != NULL ? ", for " : ", ", g != NULL ? (unsigned)((now - gf) / 1000) : 0u, r != NULL ? r : "nothing of the queues", r != NULL ? ", for " : ", ",
+             r != NULL ? (unsigned)((now - rf) / 1000) : 0u);
+}
 
 /* Blocks until the render thread has nothing to do. */
 static void render_wait(void) {
@@ -6052,8 +6097,10 @@ static void render_wait(void) {
         pthread_mutex_lock(&sLock);
         while (sQCount != 0) {
             gProfGame = 2;
+            GAME_WAIT("every list handed over read (Port_GsSync: the list reader)");
             pthread_cond_wait(&sDone, &sLock);
         }
+        GAME_WAIT_END();
         pthread_mutex_unlock(&sLock);
         gr_drain();
         gProfGame = 0;
@@ -6062,8 +6109,10 @@ static void render_wait(void) {
     pthread_mutex_lock(&sLock);
     while (sQCount != 0) {
         gProfGame = 2;
+        GAME_WAIT("every list handed over read (the list reader)");
         pthread_cond_wait(&sDone, &sLock);
     }
+    GAME_WAIT_END();
     gProfGame = 0;
     pthread_mutex_unlock(&sLock);
 }
@@ -6075,8 +6124,10 @@ static int render_wait_lists(int most) {
     pthread_mutex_lock(&sLock);
     while (sLists > most) {
         gProfGame = 2;
+        GAME_WAIT("the lists unfinished to go down (the list reader and the drawing thread)");
         pthread_cond_wait(&sDone, &sLock);
     }
+    GAME_WAIT_END();
     gProfGame = 0;
     n = sLists;
     pthread_mutex_unlock(&sLock);
@@ -6090,8 +6141,10 @@ static void render_wait_drawn(int most) {
     pthread_mutex_lock(&sLock);
     while (sDrawnLists > most) {
         gProfGame = 2;
+        GAME_WAIT("the drawn lists to go down (the drawing thread to finish a list)");
         pthread_cond_wait(&sDone, &sLock);
     }
+    GAME_WAIT_END();
     gProfGame = 0;
     pthread_mutex_unlock(&sLock);
 }
@@ -6125,8 +6178,10 @@ static int render_drawing(void) {
 static void render_put(const RJob *job) {
     pthread_mutex_lock(&sLock);
     while (sQCount == RQ) {
+        GAME_WAIT("room in the list queue (the list reader to take one)");
         pthread_cond_wait(&sDone, &sLock);
     }
+    GAME_WAIT_END();
     sQ[(sQHead + sQCount) % RQ] = *job;
     sQCount++;
     if (job->kind == 2) {
