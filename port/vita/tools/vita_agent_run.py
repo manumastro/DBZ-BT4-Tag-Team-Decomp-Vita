@@ -215,6 +215,7 @@ def main():
             note(str(eboot), "not found (BT3_VITA_DEV=1 python3 port/vita/build.py)")
             return 2
         long_run = o.seconds + 180 > 3600 or o.inputs is not None
+        ev_from = 0
         steps = json.loads(o.inputs.read_text()) if o.inputs else []
         t0 = time.time()
         if not long_run:
@@ -230,6 +231,11 @@ def main():
                 return 3
             note("run", run_id, "for about", o.seconds, "s")
         else:
+            # (no run of vita-agent-use's: the events read after it are only those after this point; else every crash
+            # dump of the journal, an earlier run's too, counted as this run's)
+            rc, objs = agent("server", "status")
+            st0 = last(objs)
+            ev_from = int(st0.get("latest_event") or st0.get("result", {}).get("latest_event") or 0)
             if o.eboot:
                 upload(eboot, "ux0:app/%s/eboot.bin" % o.title, out, overwrite=True)
             agent("server", "performance-start", "--seconds", 3600, "--interval-ms", 2000)
@@ -279,7 +285,7 @@ def main():
             agent("server", "performance-stop")
 
         # the run's events (performance samples, crash dumps, dialogs)
-        after, events = 0, []
+        after, events = (0 if run_id else ev_from), []
         for _ in range(64):
             rc, objs = agent("server", "events", "--after", after, "--limit", 1024)
             r = last(objs)
