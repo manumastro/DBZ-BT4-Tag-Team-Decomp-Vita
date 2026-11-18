@@ -256,6 +256,15 @@ unsigned Port_GameBigAlloc(int size) {
     }
     ((uint32_t *)p)[0] = BIG_MAGIC;
     ((uint32_t *)p)[1] = (uint32_t)(uintptr_t)p ^ BIG_MAGIC;
+    {   /* for the log: what the blocks outside the game heap are (their size, who asked: the address against
+           Vita_Log's, bt3.map), the first 128 (the hang after a fight, v1.4.1: they are given back just before it) */
+        extern void Vita_Log(const char *fmt, ...);
+        static unsigned logged;
+        if (logged++ < 128) {
+            Vita_Log("vita: a block outside the game heap at %08x taken: %d bytes, asked at %08x (Vita_Log at %08x)\n",
+                     (unsigned)(uintptr_t)(p + 64), size, (unsigned)(uintptr_t)__builtin_return_address(0), (unsigned)(uintptr_t)&Vita_Log);
+        }
+    }
     return (unsigned)(uintptr_t)(p + 64);
 }
 int Port_GameBigFree(unsigned addr) {

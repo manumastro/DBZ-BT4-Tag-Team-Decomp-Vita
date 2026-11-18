@@ -39,6 +39,7 @@
 extern int gVitaTagMovie; /* bt3.txt tbomovie (vita_tagmovie.c) */
 extern int gVitaTagMovieCsc; /* bt3.txt tbomoviecsc */
 extern int gVitaTagMovieMem; /* bt3.txt tbomoviemem: MB of physically contiguous memory left to the player */
+int gVitaVglPoolKb = 64; /* bt3.txt vglpool=<KB>: vitaGL's immediate-mode pool (vitaGL's start, below; 16384 before v1.4.1's fix) */
 
 extern int gGsMainFbp;  /* gs_sony.c: the buffer this frame is drawn into */
 #include <psp2/perf.h>
@@ -1809,7 +1810,16 @@ int GsGpu_Init(void) {
        for a block of 14 MB besides the frames (batch 30: 16 MB was too little, 0x80024302), so the default is 32 MB as
        vitaGL's samples/video_playback; bt3.txt tbomoviemem sets it */
     {
-        vglInitWithCustomThreshold(0x1000000, gVitaMenuHi ? SCR_W_MENU : SCR_W_FIGHT, gVitaMenuHi ? SCR_H_MENU : SCR_H_FIGHT, 0x1800000,
+        /* The first number is vitaGL's pool for GL1's immediate mode (glBegin / glVertex / glEnd, glRect), which nothing
+           here uses (every draw gives its arrays). It was 16 MB: vitaGL takes it at the first scene of every picture
+           (gxm.c scene_reset), from the circular pool when it fits there (32 MB in thirds, one per display buffer:
+           10.7 MB, so it never did) or else as a 16 MB block of its own, given back a few pictures later. When the
+           mapped memory had no free run of 16 MB (after a fight, with the menus' large pictures made: v1.4.1's freeze
+           on the way back to character select), the block was refused, and vitaGL's way out of that (a glFinish, which
+           begins a scene again and asks for the pool again) went round for good: the drawing thread asleep in
+           gpu_alloc_mapped_aligned_unsafe_for_cpu, every other thread waiting behind it (a crash dump of the freeze,
+           2026-11-18). 64 KB now, taken from the circular pool. bt3.txt vglpool=<KB>: 16384 the old way. */
+        vglInitWithCustomThreshold(gVitaVglPoolKb * 1024, gVitaMenuHi ? SCR_W_MENU : SCR_W_FIGHT, gVitaMenuHi ? SCR_H_MENU : SCR_H_FIGHT, 0x1800000,
                     0, gVitaTagMovie == 1 ? gVitaTagMovieMem * 1024 * 1024 : 0, 0x8C6000 /* (vitaGL's SCE_KERNEL_MAX_MAIN_CDIALOG_MEM_SIZE: none of that pool) */,
                     gVitaMsaa == 4 ? SCE_GXM_MULTISAMPLE_4X : gVitaMsaa == 2 ? SCE_GXM_MULTISAMPLE_2X : SCE_GXM_MULTISAMPLE_NONE);
     }
@@ -1818,6 +1828,7 @@ int GsGpu_Init(void) {
                  gVitaTagMovieMem == 0 ? " (none: vitaGL's pool is given back to the system while the film plays)" : "",
                  (unsigned)(vglMemFree(VGL_MEM_PHYCONT) / 1024), (unsigned)(vglMemTotal(VGL_MEM_PHYCONT) / 1024));
     }
+    Vita_Log("vgl: vitaGL's immediate-mode pool %d KB (vglpool)\n", gVitaVglPoolKb);
     Vita_Log("vgl: multisampling %s; menus at %s, fights at %d x %d\n", gVitaMsaa == 4 ? "4x" : gVitaMsaa == 2 ? "2x" : "off",
              gVitaMenuHi ? "960 x 544" : "the fights' size", SCR_W_FIGHT, SCR_H_FIGHT);
     disp_plugins();

@@ -2335,6 +2335,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "tbomoviecsc") == 0) { /* tbomovie=1: the colour conversion of the chip's YUV texture: 0 CSC0 (default), 1 CSC1 (vitaGL's sample) */
             extern int gVitaTagMovieCsc;
             gVitaTagMovieCsc = atoi(eq);
+        } else if (strcmp(line, "vglpool") == 0) { /* KB of vitaGL's immediate-mode pool (vita_vgl.c gVitaVglPoolKb; 16384 the old 16 MB) */
+            extern int gVitaVglPoolKb;
+            gVitaVglPoolKb = atoi(eq);
         } else if (strcmp(line, "tbomoviemem") == 0) { /* tbomovie=1: MB of physically contiguous memory vitaGL leaves to the player (default 0: vitaGL pool given back while the film plays; the decoder asks for a 14 MB block) */
             extern int gVitaTagMovieMem;
             gVitaTagMovieMem = atoi(eq);
