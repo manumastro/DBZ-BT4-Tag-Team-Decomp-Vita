@@ -35,6 +35,9 @@ typedef struct {
     uint64_t askedMs;
     unsigned askedFrame;
     int advance, w, h, base, pad, cap, outline;
+#ifdef PORT_VITA
+    int fine; /* (taghudfine) written at the HUD's capitals: made again when that changes */
+#endif
 } TboLine;
 
 static TboLine sLines[TBO_TEXT_SLOTS];
@@ -52,8 +55,11 @@ uint32_t TboText_Version(uint32_t id);
    pixels to write, outline and halve, so a screen's lines can be made as it comes in. The measures are in
    thousandths of the capitals, so the layout does not change. */
 int gVitaTboTextSize = 1;
-static int line_cap(int kind) { return gVitaTboTextSize ? (kind == 0 ? 40 : 24) : (kind == 0 ? 80 : 48); }
-static int line_outline(int kind) { return gVitaTboTextSize ? 1 : (kind == 0 ? 3 : 2); }
+/* (bt3.txt taghudfine, vita_tbo.c Vita_TagHudCap: in a battle the lines are written with capitals about their size on
+   the fight's picture, with an outline of 1) */
+extern int Vita_TagHudCap(void);
+static int line_cap(int kind) { int f = Vita_TagHudCap(); return f > 0 ? f : gVitaTboTextSize ? (kind == 0 ? 40 : 24) : (kind == 0 ? 80 : 48); }
+static int line_outline(int kind) { return gVitaTboTextSize || Vita_TagHudCap() > 0 ? 1 : (kind == 0 ? 3 : 2); }
 #else
 static int line_cap(int kind) { return kind == 0 ? 80 : 48; }
 static int line_outline(int kind) { return kind == 0 ? 3 : 2; }
@@ -75,6 +81,9 @@ static int line_measure(TboLine *l, uint32_t generation) {
     }
     l->cap = line_cap(l->kind);
     l->outline = line_outline(l->kind);
+#ifdef PORT_VITA
+    l->fine = Vita_TagHudCap() > 0;
+#endif
     l->pad = l->outline + 2;
     l->advance = MenuText_LineMeasure(l->kind, l->text, l->cap, l->pad, &l->w, &l->h, &l->base);
     return l->advance > 0;
@@ -102,7 +111,11 @@ static int text_id(const char *text, int kind, int translate) {
         TboLine *l = &sLines[i];
         if (l->version != 0 && l->kind == kind && strncmp(l->text, text, TEXT_MAX - 1) == 0) {
             l->askedMs = now; l->askedFrame = gGsFrame;
+#ifdef PORT_VITA
+            if ((l->generation != generation || l->fine != (Vita_TagHudCap() > 0)) && !line_measure(l, generation)) {
+#else
             if (l->generation != generation && !line_measure(l, generation)) {
+#endif
                 break;
             }
             id = l->advance > 0 ? TBO_TEXT_BASE + i : -1;
@@ -170,6 +183,19 @@ int PortTbo_TextInfo(int id, int what) {
     pthread_mutex_unlock(&sLock);
     return r;
 }
+
+#ifdef PORT_VITA
+/* (vita_tbo.c tbo_make, taghudfine) the line was written at the HUD's capitals: no smaller copies */
+int TboText_Fine(uint32_t id) {
+    int r = 0;
+    pthread_mutex_lock(&sLock);
+    if (id >= TBO_TEXT_BASE && id < TBO_TEXT_BASE + TBO_TEXT_SLOTS) {
+        r = sLines[id - TBO_TEXT_BASE].fine;
+    }
+    pthread_mutex_unlock(&sLock);
+    return r;
+}
+#endif
 
 /* The version of a line's place (0: nothing there). */
 uint32_t TboText_Version(uint32_t id) {

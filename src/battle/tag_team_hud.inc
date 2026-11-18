@@ -36,6 +36,13 @@ extern float Vita_TagHudScale(void);
 static void TagHud_Stroke(f32 x0,f32 y0,f32 x1,f32 y1,f32 width,u32 c) {
     f32 dx=x1-x0,dy=y1-y0,n=sqrtf(dx*dx+dy*dy),px,py;
     if(n<0.001f)return;
+#ifdef PORT_VITA
+    {   /* (bt3.txt taghudfine: no stroke under 1.25 pixels of the fight's 640 x 368 picture, port/vita/vita_tbo.c) */
+        extern float Vita_TagHudMinStroke(void);
+        f32 least=(f32)Vita_TagHudMinStroke();
+        if(width<least)width=least;
+    }
+#endif
     px=-dy*width*0.5f/n;py=dx*width*0.5f/n;
     Ps_Quad(x0+px,y0+py,x1+px,y1+py,x0-px,y0-py,x1-px,y1-py,c,c,c,c);
 }

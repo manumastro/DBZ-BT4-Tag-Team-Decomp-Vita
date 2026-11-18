@@ -117,6 +117,29 @@ static int tbo_ab(int v) { /* (2: the soak's B battles only) */
 }
 #define TEXT_ON() tbo_ab(gVitaTboText)
 #define MIP_ON() tbo_ab(gVitaTboMip)
+/* bt3.txt taghudfine (0 off, the default until compared on the console; 1 on; 2 the soak's B battles): the Tag Team
+   fight's HUD drawn for the picture it lands in. A fight is drawn at 640 x 368 (the system stretches it to the
+   screen), where a page unit is 0.82 pixels down: the HUD's labels have capitals of 4-10 pixels, made from lines
+   written with capitals of 40 and sampled down through their smaller copies (soft, grainy), and its thinnest
+   strokes (the target's inner ring, 0.55 units) are under a pixel wide (broken). With it, in a battle: the lines are
+   written with capitals of TAGHUD_CAP pixels, about their size on the screen, and drawn without smaller copies
+   (tbo_text.c line_cap; tbo_make), and no stroke is drawn thinner than 1.25 pixels of the fight's picture
+   (tag_team_hud.inc TagHud_Stroke). The layout does not change (the lines' measures are in thousandths of their
+   capitals; the PC's layout logic as it is). */
+int gVitaTagHudFine = 0;
+#define TAGHUD_CAP 12
+int Vita_TagHudFine(void) {
+    extern int Vita_InBattle(void);
+    return tbo_ab(gVitaTagHudFine) && Vita_InBattle();
+}
+int Vita_TagHudCap(void) { /* (tbo_text.c: 0 for the usual capitals) */
+    return Vita_TagHudFine() ? TAGHUD_CAP : 0;
+}
+float Vita_TagHudMinStroke(void) { /* (tag_team_hud.inc) in page units; 0 off */
+    extern int gVitaFightW;
+    int h = gVitaFightW >= 960 ? 544 : gVitaFightW >= 720 ? 408 : 368;
+    return Vita_TagHudFine() ? 1.25f * 448.0f / (float)h : 0.0f;
+}
 static int tbo_pot(uint32_t v) {
     return v != 0 && (v & (v - 1)) == 0;
 }
@@ -257,7 +280,11 @@ static unsigned tbo_make(TboTex *t, uint32_t *px, uint32_t w, uint32_t h, const 
         return 0;
     }
     {
+        extern int TboText_Fine(uint32_t id); /* (tbo_text.c: a line written at the HUD's capitals, taghudfine) */
         int mip = MIP_ON() && tbo_pot(w) && tbo_pot(h) && w >= 8 && h >= 8;
+        if (line && t >= sText && t < sText + TBO_TEXT_SLOTS && TboText_Fine(TBO_TEXT_BASE + (uint32_t)(t - sText))) {
+            mip = 0; /* (taghudfine: about its size on the screen already) */
+        }
         tex = mip ? Vita_VglTexRgbaMip(px, (int)w, (int)h) : Vita_VglTexRgba(px, (int)w, (int)h);
         free(px);
         if (tex == 0) {
