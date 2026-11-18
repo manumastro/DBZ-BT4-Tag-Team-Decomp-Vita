@@ -574,7 +574,12 @@ Not finished, to do next, in this order:
    (the films have none).
 5. Before the default can be 1: the 5v5 and 2v2 heap peaks unchanged, no leak of the pool over many openings of the Tag screens.
 
-## The hang back to character select (v1.4.1, open; 2026-11-18, branch `wip/v14rel`)
+## The hang back to character select (v1.4.1, found and fixed 2026-11-18, branch `wip/v14rel`)
+
+**Found** (the overnight sweep, a crash dump with `hangdump=8`): the drawing thread was in an endless recursion inside
+vitaGL (`scene_reset` -> the immediate-mode pool, 16 MB, asked of the mapped memory -> refused -> the unsafe allocator ->
+`glFinish` -> `scene_reset` -> ...), sleeping a second at a time; every other thread waited behind it. The pool is 64 KB
+now (`vglpool`, `docs/vita/development.md`). What follows is how it was looked for.
 
 After a fight, at the switch from the fight size (640 x 368) to the menus (960 x 544), about 15 pictures later, the
 game stops for good (not every time; seen with and without anime music, and in a build from before the screens'

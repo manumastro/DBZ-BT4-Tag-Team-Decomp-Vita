@@ -4,6 +4,11 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 ## v1.4.1 (2026-11-18)
 
+- **No more freeze going back to character select after a fight**: now and then (Duel or Tag Team, with or without
+  the anime soundtrack) the game stopped for good on the way from a fight's end to character select. The graphics
+  library took a 16 MB block for every picture for a drawing mode the game never uses; after a fight that block
+  could be refused, and the library's way out of that never ended. It now takes 64 KB. Run on the console: a long
+  loop of fights and returns to character select, Duel 1 vs 1 and Tag Team 2 vs 2, without a freeze.
 - **The main menu's Tag Team entry shows on the English disc too**: its lettering is cut from the disc's own menu
   files, and those were kept from the first disc ever played (the Spanish one here), so on the English disc the
   entry had no name. Each disc now has its own copy (`ux0:data/bt4/gamedata/en`, `/es`), and if the disc's lettering
