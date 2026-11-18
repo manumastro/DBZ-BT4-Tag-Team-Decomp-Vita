@@ -2,6 +2,18 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## v1.4.1 (2026-11-18)
+
+- **The main menu's Tag Team entry shows on the English disc too**: its lettering is cut from the disc's own menu
+  files, and those were kept from the first disc ever played (the Spanish one here), so on the English disc the
+  entry had no name. Each disc now has its own copy (`ux0:data/bt4/gamedata/en`, `/es`), and if the disc's lettering
+  cannot be made the entry is written in the menu's font. Run on the console with both discs.
+- **No more stall entering Tag Team**: its pictures are made ready for the Vita when the package is built (the size
+  they are shown at, no PNG to decode), loaded once at start and kept (about 8 MB); the letters are drawn ahead at
+  start and the lines at the Vita's size. Run on the console with both discs after two minutes in the main menu:
+  entering and re-entering Tag Team show the whole screen at once, no hold-up logged (it was 1.9-2.7 s). The
+  package is 1.5 MB smaller. Left: a hold-up of about half a second while scrolling the main menu.
+
 ## v1.4 (2026-11-18)
 
 - **The anime soundtrack on the English game** (asked by players): play the English B14 Rev2 with the songs of the
