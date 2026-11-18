@@ -20,6 +20,7 @@ law for using it (its `serve` must run for the whole session; a person approves 
     --title     default BTFV00008, the development build
     --out       default port/build/runs/agent-<date-time>
     env VITA_AGENT             the vita-agent launcher (default: vita-agent on the PATH)
+        VITA_RUN_TICK          seconds between the run loop's looks (default 5; 1 sends a button script's steps on time)
         VITA_AGENT_CONFIG_DIR  the directory chosen in vita-agent-use's bootstrap
 
 Leaves in --out: log.txt (this run's part of ux0:data/bt4/log-vgl.txt), shots/*.jpg, run.json and run_status.json,
@@ -238,8 +239,9 @@ def main():
 
         shots_at = [o.seconds * (k + 1) / (o.shots + 1) for k in range(o.shots)]
         status = {}
+        tick = float(os.environ.get("VITA_RUN_TICK", "5"))  # (seconds between looks: 1 keeps a button script on time)
         while True:
-            time.sleep(5)
+            time.sleep(tick)
             el = time.time() - t0
             while steps and el >= steps[0]["at"]:
                 st = steps.pop(0)
