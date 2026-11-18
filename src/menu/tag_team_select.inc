@@ -230,7 +230,14 @@ static void TeamSel_TagCaption(s32 seat,s32 pending){
     if(gTeamSel->flags&TEAMSEL_STAGE)return; /* native map/music UI owns this page */
     Ps_PageSet();left=Port_MenusWide()?Ps_Left():0;
     Ps_Align(0);Ps_Panel(TBO_KIT_WINDOW,10+left,1,502-left,29,0x78);
+#ifdef PORT_VITA
+    /* (the Vita, tagui_scale) the header's and the teams' captions had capitals of 8-9 pixels on the 5-inch screen:
+       a third larger again (the screens' own tagui_scale on top), centred on their bars; the teams' bar a little
+       taller, the red team's line kept left of the prompts */
+    Ps_Text(24+left,Ps_TextTop(15,.56f*1.3f),sTagTransition?"TAG TEAM | PREPARING STAGE SELECT":"TAG TEAM | CHARACTER SELECT",.56f*1.3f,365-2*left,3);
+#else
     Ps_Text(24+left,7,sTagTransition?"TAG TEAM | PREPARING STAGE SELECT":"TAG TEAM | CHARACTER SELECT",.56f,365-2*left,3);
+#endif
     if(sTagTurnSeconds>0){
         sprintf(line,"%02d",sTagTurnSeconds);Ps_Align(2);
         Ps_Text(486-left,3,line,.95f,65,sTagTurnSeconds<=10?1:0);
@@ -240,12 +247,20 @@ static void TeamSel_TagCaption(s32 seat,s32 pending){
     }
     for(team=0;team<2;++team){
         turn=-1;for(n=0;n<Port_TagCapacity();++n)if(Port_TagTeam(n)==team&&!Port_TagConfirmed(n)){turn=n;break;}
+#ifdef PORT_VITA
+        Ps_Panel(TBO_KIT_WINDOW,team?263:10+left,422,team?502-left:249,447,0x78);
+#else
         Ps_Panel(TBO_KIT_WINDOW,team?263:10+left,431,team?502-left:249,447,0x78);
+#endif
         Ps_Copy(line,(char*)PortOnline_Text(Port_TagFreeForAll()?"Fighters: ":team?"RED TEAM: ":"BLUE TEAM: "),128);
         if(turn<0)Ps_Cat(line,(char *)PortOnline_Text("READY"),128);else Ps_Cat(line,(char*)Port_TagPlayerName(turn),128);
         {char pageText[40];sprintf(pageText," | %d-%d/%d",sTagPage[team]*5+1,(sTagPage[team]+1)*5<Port_TagTeamCount(team)?(sTagPage[team]+1)*5:Port_TagTeamCount(team),Port_TagTeamCount(team));Ps_Cat(line,pageText,128);}
         if(turn==seat)Ps_Cat(line,pending?(char *)PortOnline_Text(" | CONFIRMING"):Port_TagCPU(seat)?(char *)PortOnline_Text(" | SELECT CPU"):(char *)PortOnline_Text(" | YOUR TURN"),128);
+#ifdef PORT_VITA
+        Ps_Text(team?273:20+left,Ps_TextTop(434.5f,.43f*1.4f),line,.43f*1.4f,team?120:217-left,team?1:3);
+#else
         Ps_Text(team?273:20+left,433,line,.43f,217-left,team?1:3);
+#endif
     }
     Ps_PromptsClear();
     if(sTagChoiceHistoryCount||Port_TagConfirmed(Port_TagSeat()))Ps_Prompt(2,"Reselect");
