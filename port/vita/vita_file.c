@@ -472,10 +472,216 @@ static void bt4_table(Partition *pt, const char *path) {
         Vita_Log("vita: %s: %u files, by BT4's index (BIN/DBZ4.BIN)\n", pt->name, (unsigned)pt->count);
     }
 }
+
+/* ---- (BT4) The anime soundtrack: the English B14 Rev2 with the songs of the player's own Spanish B14 Rev2 ----
+   Upstream's feature (port/src/gs/game_profile.c Port_GameProfileAnimeMusicPath, the PC's F1 > Audio "Anime
+   soundtrack", setting anime_music): on the English disc, a song of archive 1 (pzs4us1, members 0x815 to 0x8FE, the
+   BGM) that the Spanish release has as an ADX stream (it starts 0x80 0x00) is played from the Spanish one; the same
+   member numbers in both releases, as on the PC. The PC reads the Spanish install's unpacked files; here the Spanish
+   disc is read as it is, the same way as the game's: its .iso mounted (vita_iso.c) next to the English one, or its
+   files unpacked. Where: bt3.txt es_disc=<.iso or folder>, else the first Spanish B14 Rev2 (told by its program's
+   size) in ux0:data/bt4/es, ux0:data/bt4, its disc/ and disk/, ux0:data/bt3/bt4/es. It is looked for the first
+   time a song asks with the setting on, or Vita Settings shows its ON plate (nothing else with it off); not found: the English disc's songs, and
+   one line in the log. Cost: one more image mounted (a few KB), one handle kept open, 1.9 KB of table; the index
+   (BIN/DBZ4.BIN, 229 KB) is read once and let go. The songs stream as the English ones do (snd_adx.c start). */
+#define ES_FIRST 0x815
+#define ES_END 0x8FF
+#define ES_N (ES_END - ES_FIRST)
+#define ES_ELF_SIZE 2115688u /* the Spanish release's program (bt4_online_compat.h kBt4BaseFiles[0].size[0]) */
+char gVitaEsDisc[256];     /* bt3.txt es_disc= (empty: looked for) */
+int gVitaAnimeMusic = -1;  /* bt3.txt anime_music=: 0 or 1 over the saved setting (Vita Settings); -1 the saved one */
+static int sEsState;       /* 0 not looked for, 1 ready, -1 not there */
+static SceUID sEsFd;
+static uint32_t sEsTab[ES_N * 2]; /* offset, size per song */
+static uint8_t sEsCheck[ES_N];    /* 0 not looked at, 1 an ADX stream, 2 not */
+static int sEsLogN;
+
+static int es_spanish_dir(const char *dir) { /* the Spanish release's files, unpacked */
+    char p[320];
+    SceIoStat st;
+    snprintf(p, sizeof(p), "%s/" PORT_VITA_ELF, dir);
+    return sceIoGetstat(p, &st) >= 0 && (uint64_t)st.st_size == ES_ELF_SIZE;
+}
+
+static int es_find(const char *where, char *out, int size) {
+    extern int Vita_IsoMountIfSized(const char *path, const char *file, unsigned size);
+    extern int Vita_IsoFindSized(const char *dir, const char *file, unsigned size, const char *skip, char *out, int outSize);
+    size_t l = strlen(where);
+    if (l > 4 && strcasecmp(where + l - 4, ".iso") == 0) {
+        if (Vita_IsoMountIfSized(where, PORT_VITA_ELF, ES_ELF_SIZE)) {
+            snprintf(out, (size_t)size, "%s", where);
+            return 1;
+        }
+        return 0;
+    }
+    if (strcasecmp(where, gVitaDisc) != 0 && es_spanish_dir(where)) {
+        snprintf(out, (size_t)size, "%s", where);
+        return 1;
+    }
+    return Vita_IsoFindSized(where, PORT_VITA_ELF, ES_ELF_SIZE, gVitaDisc, out, size);
+}
+
+/* the Spanish disc's archive 1 and its index, from `root` */
+static int es_open(const char *root) {
+    extern void Vita_Log(const char *fmt, ...);
+    char p[320];
+    uint8_t *db = NULL;
+    SceUID fd;
+    SceOff dbSize, afsSize;
+    uint32_t i, hdr[4], at = 0, found = 0;
+    uint64_t off = 0;
+    const char *want = "pzs4us1.afs";
+
+    snprintf(p, sizeof(p), "%s/BIN/DBZ4.BIN", root);
+    fd = sceIoOpen(p, SCE_O_RDONLY, 0);
+    if (fd < 0) {
+        Vita_Log("anime music: %s not found\n", p);
+        return 0;
+    }
+    dbSize = sceIoLseek(fd, 0, SCE_SEEK_END);
+    if (dbSize > 0 && dbSize <= 16 * 1024 * 1024) {
+        db = malloc((size_t)dbSize);
+    }
+    if (db == NULL || sceIoPread(fd, db, (SceSize)dbSize, 0) != (int)dbSize) {
+        sceIoClose(fd);
+        free(db);
+        Vita_Log("anime music: %s cannot be read\n", p);
+        return 0;
+    }
+    sceIoClose(fd);
+    for (i = 16; i + strlen(want) < (uint32_t)dbSize; i++) {
+        if (memcmp(db + i, want, strlen(want) + 1) == 0) {
+            at = i - 16;
+            found = 1;
+            break;
+        }
+    }
+    if (found) {
+        memcpy(hdr, db + at, 16);
+    }
+    if (!found || hdr[0] != 0 || hdr[2] < ES_END || hdr[3] != hdr[2] || hdr[1] != 0x11A + hdr[2] * 2 || at + hdr[1] > (uint32_t)dbSize) {
+        free(db);
+        Vita_Log("anime music: %s has no table for %s\n", p, want);
+        return 0;
+    }
+    snprintf(p, sizeof(p), "%s/DATA/PZS4US1.AFS", root);
+    fd = sceIoOpen(p, SCE_O_RDONLY, 0);
+    if (fd < 0) {
+        free(db);
+        Vita_Log("anime music: %s not found\n", p);
+        return 0;
+    }
+    afsSize = sceIoLseek(fd, 0, SCE_SEEK_END);
+    for (i = 0; i < ES_END; i++) {
+        uint16_t sectors;
+        memcpy(&sectors, db + at + 0x11A + i * 2, 2);
+        if (i >= ES_FIRST) {
+            uint64_t bytes = (uint64_t)sectors * SECTOR;
+            if (off + bytes > (uint64_t)afsSize) {
+                bytes = off < (uint64_t)afsSize ? (uint64_t)afsSize - off : 0; /* (an image cut short: those songs left out) */
+            }
+            sEsTab[(i - ES_FIRST) * 2] = (uint32_t)off;
+            sEsTab[(i - ES_FIRST) * 2 + 1] = (uint32_t)bytes;
+        }
+        off += (uint64_t)sectors * SECTOR;
+    }
+    free(db);
+    sEsFd = fd;
+    Vita_Log("anime music: the songs of the Spanish B14 Rev2 from %s (%s: %u files, the English disc's %u)\n", root, want,
+             (unsigned)hdr[2], (unsigned)sPart[1].count);
+    return 1;
+}
+
+/* 1 when the Spanish disc's songs can be played (looked for once, the first time it is asked) */
+int Vita_AnimeMusicReady(void) {
+    extern void Vita_Log(const char *fmt, ...);
+    extern int gVitaBt4English;
+    static const char *const kWhere[] = {PORT_VITA_HOME "/es", PORT_VITA_HOME, PORT_VITA_HOME "/disc", PORT_VITA_HOME "/disk",
+                                         "ux0:data/bt3/bt4/es"};
+    char root[300];
+    int k, ok = 0;
+
+    if (sEsState != 0) {
+        return sEsState > 0;
+    }
+    if (sPart[1].fd <= 0) {
+        return 0; /* (the archives not opened yet: asked again later) */
+    }
+    sEsState = -1;
+    if (!gVitaBt4English || strcmp(sPart[1].name, "pzs4us1") != 0) {
+        return 0;
+    }
+    if (gVitaEsDisc[0] != '\0') {
+        ok = es_find(gVitaEsDisc, root, sizeof(root));
+        if (!ok) {
+            Vita_Log("anime music: es_disc=%s is not the Spanish B14 Rev2\n", gVitaEsDisc);
+        }
+    }
+    for (k = 0; !ok && k < (int)(sizeof(kWhere) / sizeof(kWhere[0])); k++) {
+        ok = es_find(kWhere[k], root, sizeof(root));
+    }
+    if (!ok) {
+        Vita_Log("anime music: no Spanish B14 Rev2 found (its .iso in " PORT_VITA_HOME "/es, or bt3.txt es_disc=): the "
+                 "English disc's songs\n");
+        return 0;
+    }
+    if (es_open(root)) {
+        sEsState = 1;
+    }
+    return sEsState > 0;
+}
+
+/* the setting: bt3.txt anime_music= over the saved one (Vita Settings > Mods, the lower row) */
+int Vita_AnimeMusicOn(void) {
+    extern int Port_Setting(const char *name, int def);
+    return gVitaAnimeMusic >= 0 ? gVitaAnimeMusic != 0 : Port_Setting("anime_music", 0) != 0;
+}
+
+/* (port/src/gs/game_profile.c, the PC's; called by snd_adx.c ADXT_StartAfs for the music's player) A song of the
+   English disc that the Spanish one has: 1 and `path` its member there ("afses:<n>", Vita_FileSpan below). */
+int Port_GameProfileAnimeMusicPath(int partition, int file, char *path, int size) {
+    extern void Vita_Log(const char *fmt, ...);
+    extern int gVitaBt4English;
+    int k = file - ES_FIRST;
+
+    /* BGM IDs start at 0x816, in archive 1 whose indices are global ID - 1 (upstream's note) */
+    if (!gVitaBt4English || partition != 1 || k < 0 || k >= ES_N || !Vita_AnimeMusicOn() || !Vita_AnimeMusicReady()) {
+        return 0;
+    }
+    if (sEsCheck[k] == 0) {
+        uint8_t mark[2];
+        int adx = sEsTab[k * 2 + 1] >= 2 && sceIoPread(sEsFd, mark, 2, (SceOff)sEsTab[k * 2]) == 2 && mark[0] == 0x80 && mark[1] == 0;
+        sEsCheck[k] = adx ? 1 : 2;
+        if (!adx) {
+            Vita_Log("anime music: the Spanish disc's song %05d is not an ADX stream: the English one plays\n", file);
+        }
+    }
+    if (sEsCheck[k] != 1 || snprintf(path, (size_t)size, "afses:%d", file) >= size) {
+        return 0;
+    }
+    if (sEsLogN < 60) {
+        sEsLogN++;
+        Vita_Log("anime music: song %05d from the Spanish disc (%u KB)\n", file, (unsigned)(sEsTab[k * 2 + 1] >> 10));
+    }
+    return 1;
+}
 #endif
 int Vita_FileSpan(const char *path, SceUID *fd, uint32_t *base, uint32_t *size, int *own) {
     int ptid, flid;
 
+#ifdef PORT_VITA_BT4
+    if (strncmp(path, "afses:", 6) == 0) { /* (the Spanish disc's song, above) */
+        int k = atoi(path + 6) - ES_FIRST;
+        if (sEsState != 1 || k < 0 || k >= ES_N || sEsTab[k * 2 + 1] == 0) {
+            return 0;
+        }
+        *fd = sEsFd;
+        *base = sEsTab[k * 2];
+        *size = sEsTab[k * 2 + 1];
+        *own = 0;
+        return 1;
+    }
+#endif
     if (sscanf(path, "afs:%d:%d", &ptid, &flid) == 2) {
         Partition *pt = &sPart[ptid & 7];
         char mod[300];

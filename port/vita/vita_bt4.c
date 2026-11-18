@@ -253,11 +253,7 @@ int Port_GameProfileMenuActive(void) { return 0; }
 int Port_GameProfilePrompt(void) { return 0; }
 void Port_GameProfileMenuSet(int active,int choice,int alpha) {}
 int Port_GameProfilePortuguese(void) { return 0; } /* (the Brazilian Portuguese pack is the PC's) */
-/* The English profile's songs from an installed Spanish profile (the anime soundtrack, F1 setting anime_music): the
-   PC reads them from the Spanish install's extracted files (<root>/languages/es/pzs4us1/NNNNN.bin, NNNNN 02069 to
-   02302). The Vita looks for one disc only, so none here; the same files put in a mods pack
-   (ux0:data/bt4/mods/<Pack>/pzs4us1/NNNNN.bin, vita_file.c mod_path) replace the English disc's songs today. */
-int Port_GameProfileAnimeMusicPath(int partition,int file,char *path,int size) { (void)partition; (void)file; (void)path; (void)size; return 0; }
+/* (Port_GameProfileAnimeMusicPath, the English profile's songs from the Spanish disc: vita_file.c) */
 
 /* (port/src/gs/gs_draw.c) */
 int Port_BoundaryDrawing(void) { return 0; }

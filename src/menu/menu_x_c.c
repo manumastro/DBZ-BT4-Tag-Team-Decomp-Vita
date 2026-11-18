@@ -332,7 +332,8 @@ static void Option_VitaKeysLeave(void) {
      level 4: Clashes: Square / Stick, what wins a beam or rush clash, and ON / OFF below them, the clash assist
               (port/vita/vita_gfx.c, clash_pad);
      level 5: 2nd Pad: ON / OFF, a second controller as player 2 (a PS TV's second DualShock);
-     level 6: Mods: ON / OFF, the files of ux0:data/bt3/mods (port/vita/vita_file.c), from the next start;
+     level 6: Mods: ON / OFF, the files of ux0:data/bt3/mods (port/vita/vita_file.c), from the next start; on the
+              English disc a second row, ON / OFF, the anime soundtrack (vita_file.c, setting anime_music);
      level 7: Stick, the sticks' dead zone and response (vita_gfx.c, stick_shape); level 8: its one plate, Left /
               Right the dead zone (0 to 40%), Up / Down the response, Cross keeps them.
    All but Touch are kept in ux0:data/bt3/bt3_settings.txt, not in the save. In each level Cross chooses (the setting
@@ -370,6 +371,19 @@ static int Option_VitaModsOn(void) {
     return Port_Setting("mods", 1) != 0;
 }
 
+/* The anime soundtrack (port/vita/vita_file.c, upstream's F1 > Audio "Anime soundtrack"): on the English disc, level
+   6 (Mods) has a second row, ON / OFF, the songs of the player's Spanish B14 Rev2 instead of the English disc's. */
+extern int Vita_AnimeMusicOn(void);
+extern int Vita_AnimeMusicReady(void);
+static int Option_VitaAnimeRow(void) {
+#ifdef PORT_VITA_BT4
+    extern int gVitaBt4English;
+    return gVitaBt4English;
+#else
+    return 0;
+#endif
+}
+
 static void Option_VitaSetGuide(void) {
     static const char *const kName[4] = {"L2", "R2", "L3", "R3"};
     static const char *const kQuarter[4] = {"upper left", "upper right", "lower left", "lower right"};
@@ -386,6 +400,13 @@ static void Option_VitaSetGuide(void) {
                     Vita_ClashAssist() ? "ON" : "OFF");
         } else if (v == 2) {
             sprintf(text, "2nd Pad: a second controller\nis player 2 (PS TV): %s.\nDown: the sticks.", Vita_Pad2Setting() ? "ON" : "OFF");
+        } else if (Option_VitaAnimeRow()) { /* (the English disc: Mods and the anime soundtrack, Cross for both) */
+            Vita_ModsSummary(more, 24);
+            if (Option_VitaModsOn()) {
+                sprintf(text, "Mods: ON (%s).\nAnime soundtrack: %s.", more, Vita_AnimeMusicOn() ? "ON" : "OFF");
+            } else {
+                sprintf(text, "Mods: OFF.\nAnime soundtrack: %s.", Vita_AnimeMusicOn() ? "ON" : "OFF");
+            }
         } else if (Option_VitaModsOn()) {
             s32 k, line = 0, sp = -1;
             Vita_ModsSummary(more, 50);
@@ -466,6 +487,14 @@ static void Option_VitaSetGuide(void) {
                 sVitaStickCurve ? "soft" : "even");
         break;
     default:
+        if (v == 2) {
+            sprintf(text, Vita_AnimeMusicReady() ? "Anime soundtrack ON: the songs\nof your Spanish B14 Rev2, from\nthe next song."
+                                                 : "Anime soundtrack: no Spanish\nB14 Rev2 .iso found in\n" PORT_VITA_HOME "/es.");
+            break;
+        } else if (v == 3) {
+            sprintf(text, "Anime soundtrack OFF: the\nEnglish disc's own songs.");
+            break;
+        }
         sprintf(text, v == 0 ? "ON: files in " PORT_VITA_HOME "/mods\nreplace the disc's, from the\nnext start."
                              : "OFF: the disc's files only, from\nthe next start.");
         break;
@@ -619,10 +648,13 @@ static void Option_VitaTouchInput(void) {
     default: /* 4 Square Stick / ON OFF, 5 and 6 ON OFF */
         if (pressed & (PADG_LEFT | PADG_RIGHT)) {
             Option_VitaSetMove(v ^ 1);
-        } else if (sVitaSetLevel == 4 && (pressed & (PADG_UP | PADG_DOWN))) {
+        } else if ((sVitaSetLevel == 4 || (sVitaSetLevel == 6 && Option_VitaAnimeRow())) && (pressed & (PADG_UP | PADG_DOWN))) {
             Option_VitaSetMove(v ^ 2);
         } else if (pressed & PADG_CROSS) {
-            if (sVitaSetLevel == 4 && v >= 2) {
+            if (sVitaSetLevel == 6 && v >= 2) { /* the anime soundtrack: from the next song */
+                Port_SettingSave("anime_music", v == 2);
+                Port_SettingsWrite();
+            } else if (sVitaSetLevel == 4 && v >= 2) {
                 Vita_ClashAssistSet(v == 2);
             } else if (sVitaSetLevel == 4) {
                 Port_ClashSquareSet(v == 0);
@@ -1875,7 +1907,7 @@ static void Option_VitaTouchPlates(MFlash *flash) {
     static const s8 kCount[9] = {0, 4, 4, 3, 4, 2, 2, 1, 1};
     static const s8 kTex[9][4] = {{0}, {1, 1, 1, 1}, {1, 1, 1, 1}, {1, 1, 0, 0}, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0},
                                   {1, 0, 0, 0}, {1, 0, 0, 0}};
-    static const s8 kRow[9][4] = {{0}, {0, 1, 4, 5}, {0, 1, 4, 7}, {5, 6, 1, 0}, {6, 7, 0, 1}, {0, 1, 0, 0}, {0, 1, 0, 0},
+    static const s8 kRow[9][4] = {{0}, {0, 1, 4, 5}, {0, 1, 4, 7}, {5, 6, 1, 0}, {6, 7, 0, 1}, {0, 1, 0, 0}, {0, 1, 0, 1},
                                   {7, 0, 0, 0}, {7, 0, 0, 0}};
     MFlashRef ref;
     MFlashUv uv;
@@ -1896,7 +1928,7 @@ static void Option_VitaTouchPlates(MFlash *flash) {
     for (i = 0; i < 4; i++) {
         sprintf(name, "mc_select_plate_%d", i + 1);
         Flash_FindLabel(flash, NULL, name, &ref);
-        if (i >= kCount[lv]) {
+        if (i >= (lv == 6 && Option_VitaAnimeRow() ? 4 : kCount[lv])) { /* (Mods: the anime soundtrack row below on the English disc) */
             Flash_ClipSetFlags(flash, &ref, 2, 0);
             sVitaPlatesHidden = 1;
             continue;

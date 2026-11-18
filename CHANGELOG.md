@@ -2,6 +2,14 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## Unreleased
+
+- **The anime soundtrack on the English game** (asked by players): play the English B14 Rev2 with the songs of the
+  Spanish B14 Rev2 (the Latino dub's music), as the PC version's "Anime soundtrack". Copy your own Spanish B14 Rev2
+  `.iso` to `ux0:data/bt4/es/` (the English one stays where it is) and turn it on in **Options -> Controller -> Vita
+  Settings -> Mods**, the lower row (**ON / OFF**, off by default); it applies from the next song. Without the
+  Spanish image the English songs play as before. Not yet tried on the console.
+
 ## v1.4 (2026-11-18)
 
 - **Faster fights, above all 2 vs 2 and the big specials**: the 2 vs 2 demo fight averages 29.2 pictures a second

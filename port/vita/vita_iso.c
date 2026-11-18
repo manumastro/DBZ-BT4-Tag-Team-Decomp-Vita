@@ -685,6 +685,56 @@ int Vita_IsoFind(const char *dir, const char *file, int keep, char *out, int siz
     return found;
 }
 
+/* (BT4's anime soundtrack, vita_file.c) The image at `path` mounted when its `file` is `size` bytes: 1; else 0, and
+   an image mounted here only to look into it is let go again (one mounted before, the game's disc, stays). Which of
+   Team BT4's two releases an image is, is told by its program's size (bt4_online_compat.h). */
+int Vita_IsoMountIfSized(const char *path, const char *file, unsigned size) {
+    char inner[400];
+    int was = sMountN, m, i;
+
+    if (!Vita_IsoMount(path)) {
+        return 0;
+    }
+    snprintf(inner, sizeof(inner), "%s/%s", path, file);
+    if (lookup(inner, &m, &i) && i >= 0 && !sMount[m].ent[i].dir && sMount[m].ent[i].size == size) {
+        return 1;
+    }
+    if (sMountN > was) {
+        unmount_last();
+    }
+    return 0;
+}
+
+/* The same for the first such .iso in folder `dir`, its path in `out`; `skip` (an image not to look into, the game's
+   own disc) may be NULL. */
+int Vita_IsoFindSized(const char *dir, const char *file, unsigned size, const char *skip, char *out, int outSize) {
+    SceUID d = __real_sceIoDopen(dir);
+    SceIoDirent e;
+    int found = 0;
+
+    if (d < 0) {
+        return 0;
+    }
+    memset(&e, 0, sizeof(e));
+    while (!found && __real_sceIoDread(d, &e) > 0) {
+        size_t l = strlen(e.d_name);
+        char path[300];
+        if (SCE_S_ISDIR(e.d_stat.st_mode) || l < 5 || strcasecmp(e.d_name + l - 4, ".iso") != 0 || e.d_name[0] == '.') {
+            continue;
+        }
+        snprintf(path, sizeof(path), "%s/%s", dir, e.d_name);
+        if (skip != NULL && strcasecmp(path, skip) == 0) {
+            continue;
+        }
+        if (Vita_IsoMountIfSized(path, file, size)) {
+            snprintf(out, (size_t)outSize, "%s", path);
+            found = 1;
+        }
+    }
+    __real_sceIoDclose(d);
+    return found;
+}
+
 /* --- what an image is, for the start's messages (vita_main.c, vita_mem.c) --- */
 
 /* An .iso file looked at without mounting it: 1 an ISO 9660 image, its size in `have`, the disc's (its volume's

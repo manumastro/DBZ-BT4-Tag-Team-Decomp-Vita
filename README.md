@@ -213,6 +213,8 @@ On a PS TV, or with a DualShock paired, the controller's own L2, R2, L3 and R3 b
     clash presses it for you about ten times a second.
   - **2nd Pad**: a second controller plays as player 2 (on by default).
   - **Mods**: the files in `ux0:data/bt4/mods/` are used (on by default; see [Mods](#mods)).
+    On the English game it has a second row, **ON / OFF**: the **anime soundtrack** (off by default), see
+    [the question below](#faq-anime-soundtrack).
   - **Stick**: makes the sticks less quick. Left / Right sets a **dead zone** of 0 (the default: the sticks as they
     are) to 40%, the part of the stick's travel from the centre that does nothing, on top of the game's own; Up /
     Down sets the **response**, even (the default) or soft (half way out gives a quarter, for finer control).
@@ -317,6 +319,14 @@ replace the BT3 port. Both stay installed, each with its own files and saves (`u
 the game in the language of the image it finds, with that release's texts and music; there is no language choice in
 the game. On the Spanish image Options > Controller > Vita Settings has its lettering too (drawn over that disc's own
 pictures); the Duel menu's "Multiplayer" row keeps that disc's own name, in the same place.
+
+<a id="faq-anime-soundtrack"></a>
+**Can I play in English with the anime soundtrack of the Spanish release?** Yes, as on the PC version. Copy your own
+Spanish B14 Rev2 image to `ux0:data/bt4/es/` (any name ending in `.iso`; the English image stays where it is, for
+example in `ux0:data/bt4/`), then turn on **Options -> Controller -> Vita Settings -> Mods**, lower row, **ON**. The
+game stays English (texts, voices); its songs come from the Spanish image, from the next song on. Elsewhere on the
+card, name the Spanish image in `ux0:data/bt4/bt3.txt` with a line `es_disc=ux0:path/to/the.iso`. Without it the
+English songs play as before.
 
 **Is there a full save?** Use [Unlock All](#unlock-all): every character and form, stage, song and item, and
 4,850,000 Zenni, with a copy of your save kept first.

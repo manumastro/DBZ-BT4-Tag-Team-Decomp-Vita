@@ -2144,12 +2144,20 @@ static void read_settings(void) {
         /* the released program: only the player's settings. The test runs leave theirs in the same file
            (mode=demo, film=...): a game started from its bubble goes to its title screen, not into a test fight */
         if (strcmp(line, "disc") != 0 && strcmp(line, "heap") != 0 && strcmp(line, "wide") != 0 && strcmp(line, "report") != 0 &&
-            strcmp(line, "fightres") != 0 && strcmp(line, "tagteam") != 0) {
+            strcmp(line, "fightres") != 0 && strcmp(line, "tagteam") != 0 && strcmp(line, "es_disc") != 0 && strcmp(line, "anime_music") != 0) {
             continue;
         }
 #endif
         if (strcmp(line, "disc") == 0) {
             snprintf(gVitaDisc, sizeof(gVitaDisc), "%s", eq);
+#ifdef PORT_VITA_BT4
+        } else if (strcmp(line, "es_disc") == 0) { /* the Spanish B14 Rev2 (.iso or folder) whose songs the English disc plays: the anime soundtrack (vita_file.c) */
+            extern char gVitaEsDisc[256];
+            snprintf(gVitaEsDisc, sizeof(gVitaEsDisc), "%s", eq);
+        } else if (strcmp(line, "anime_music") == 0) { /* the anime soundtrack: 0 off, 1 on, over the Vita Settings one (vita_file.c) */
+            extern int gVitaAnimeMusic;
+            gVitaAnimeMusic = atoi(eq) != 0;
+#endif
         } else if (strcmp(line, "discdir") == 0) { /* (the test runs, whose settings cannot hold a path) disc=<home>/<name> */
             snprintf(gVitaDisc, sizeof(gVitaDisc), HOME "/%s", eq);
         } else if (strcmp(line, "float") == 0) {
