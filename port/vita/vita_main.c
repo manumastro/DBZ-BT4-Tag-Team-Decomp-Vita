@@ -1523,6 +1523,15 @@ void Vita_VBlank(unsigned vblanks) {
                                 logf_("vita:   tboui: %u pictures and %u lines made, %u given back; %u textures held, %u KB\n", gVitaTboN[0], gVitaTboN[1],
                                       gVitaTboN[2], gVitaTboN[3], gVitaTboN[4] / 1024);
                                 gVitaTboN[0] = gVitaTboN[1] = gVitaTboN[2] = 0;
+                                {
+                                    extern unsigned gVitaTboMs[4];
+                                    extern int gVitaTboPre;
+                                    if (gVitaTboMs[0] != 0 || gVitaTboMs[1] != 0 || gVitaTboMs[2] != 0) {
+                                        logf_("vita:   tbopre=%d: the drawing thread spent %u ms on pictures and lines (uploads %u KB); the maker %u ms on %u jobs\n",
+                                              gVitaTboPre, gVitaTboMs[0], gVitaTboMs[3] / 1024, gVitaTboMs[1], gVitaTboMs[2]);
+                                        gVitaTboMs[0] = gVitaTboMs[1] = gVitaTboMs[2] = gVitaTboMs[3] = 0;
+                                    }
+                                }
                             }
                             memset(gVitaFxClampN, 0, sizeof(gVitaFxClampN));
                             Gs_GifShapesLog();
@@ -2256,6 +2265,10 @@ static void read_settings(void) {
         } else if (strcmp(line, "tboui") == 0) { /* BT4decomp's own screens' pictures and TrueType lines drawn (vita_tbo.c): 0 off, 1 on, 2 soak B */
             extern int gVitaTboUi;
             gVitaTboUi = atoi(eq);
+        } else if (strcmp(line, "tbopre") == 0) { /* BT4decomp's screens' pictures and lines made by a thread of its own, the Tag Team set ahead, the outline faster (vita_tbo.c, tbo_text.c): 0 the drawing thread at first use (v1.4), 1 (default) the maker */
+            extern int gVitaTboPre, gTboFastOutline;
+            gVitaTboPre = atoi(eq) != 0;
+            gTboFastOutline = gVitaTboPre;
         } else if (strcmp(line, "tagcam") == 0) { /* BT4decomp's free / spectator camera (vita_spectator.c): 0 the game's camera, 1 as on PC */
             extern int gVitaTagCam;
             gVitaTagCam = atoi(eq) != 0;

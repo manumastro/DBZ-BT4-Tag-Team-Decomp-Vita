@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "vita_optart.h"
+#include "vita_optart_es.h"
 
 extern void Vita_Log(const char *fmt, ...);
 
@@ -129,6 +130,40 @@ static unsigned apply(void *res, const ArtSection *secs, unsigned n, const uint3
     return done;
 }
 
+/* Whether the first section's bytes (section 14, the picker captions) are those the patch is made over (no log). */
+static int art_hash_ok(void *res, const ArtSection *secs, const uint32_t (*runs)[3]) {
+    uint8_t *sec = pack_at(res, secs[0].section);
+    uint32_t h = 2166136261u, k, i;
+    for (k = 0; k < (uint32_t)secs[0].count; k++) {
+        const uint8_t *p = sec + runs[secs[0].first + k][0];
+        for (i = 0; i < runs[secs[0].first + k][1]; i++) {
+            h = (h ^ p[i]) * 16777619u;
+        }
+    }
+    return h == secs[0].hash;
+}
+
+/* The options screen's patches, by the release whose pictures they are made over: the English disc's (vita_optart.h) and
+   the Spanish one's (vita_optart_es.h; its lettering differs: "Volumen, Coleccion de Musica, Tipo de Control", the
+   captions "Normal, Personali."). Which one is told by the hash of section 14's bytes. */
+typedef struct OptVariant {
+    const char *name;
+    const void *secs;
+    unsigned nsecs;
+    const uint32_t (*runs)[3];
+    const uint8_t *bytes;
+    const uint32_t (*capRuns)[2];
+    unsigned ncap;
+    const uint8_t *capT, *capV;
+} OptVariant;
+static const OptVariant kOptVariants[2] = {
+    {"English", kOptArtSections, sizeof(kOptArtSections) / sizeof(kOptArtSections[0]), kOptArtRuns, kOptArtBytes, kOptCapRuns,
+     sizeof(kOptCapRuns) / sizeof(kOptCapRuns[0]), kOptCapT, kOptCapV},
+    {"Spanish", kOptArtEsSections, sizeof(kOptArtEsSections) / sizeof(kOptArtEsSections[0]), kOptArtEsRuns, kOptArtEsBytes,
+     kOptCapEsRuns, sizeof(kOptCapEsRuns) / sizeof(kOptCapEsRuns[0]), kOptCapEsT, kOptCapEsV},
+};
+static const OptVariant *sVar = &kOptVariants[0];
+
 /* section 14 of the options screen as unpacked and patched (NULL: not the USA disc's, or not up), the captions in it */
 static uint8_t *sCapSec;
 static int sCapSet;
@@ -141,20 +176,26 @@ void Vita_OptionArt(void *res) {
         Vita_Log("optart: not the options screen's pack, left alone\n");
         return;
     }
-    done = apply(res, (const ArtSection *)kOptArtSections, sizeof(kOptArtSections) / sizeof(kOptArtSections[0]), kOptArtRuns, kOptArtBytes, "optart");
+    sVar = &kOptVariants[0];
+    if (!art_hash_ok(res, (const ArtSection *)kOptVariants[0].secs, kOptVariants[0].runs) &&
+        art_hash_ok(res, (const ArtSection *)kOptVariants[1].secs, kOptVariants[1].runs)) {
+        sVar = &kOptVariants[1]; /* (the Spanish release's options screen: the same art, drawn over its own pictures) */
+    }
+    done = apply(res, (const ArtSection *)sVar->secs, sVar->nsecs, sVar->runs, sVar->bytes, "optart");
     {   /* the captions of Touch Buttons in place (as patched): the other set can take turns with them */
         uint8_t *sec = pack_at(res, 14);
-        const uint8_t *b = kOptCapT;
+        const uint8_t *b = sVar->capT;
         int same = 1;
-        for (k = 0; k < sizeof(kOptCapRuns) / sizeof(kOptCapRuns[0]) && same; k++) {
-            same = memcmp(sec + kOptCapRuns[k][0], b, kOptCapRuns[k][1]) == 0;
-            b += kOptCapRuns[k][1];
+        for (k = 0; k < sVar->ncap && same; k++) {
+            same = memcmp(sec + sVar->capRuns[k][0], b, sVar->capRuns[k][1]) == 0;
+            b += sVar->capRuns[k][1];
         }
         if (same) {
             sCapSec = sec;
             sCapSet = 0;
         }
     }
+    Vita_Log("optart: the %s disc's options screen\n", sVar->name);
     /* the guide's lines (entry = line + 1), into slots of the Wii's lines: 24 the row's, 39 and 40 written as the
        page's cursor moves */
     {
@@ -212,14 +253,15 @@ int Vita_OptionGuide(const char *text) {
    Rear, Front, R3) or of the page above them (set 1: Touch, Clashes, 2nd Pad, Mods, Square, Stick). The menus upload
    a picture each time they draw it, so the change shows at once. */
 void Vita_OptionCaptions(int set) {
-    const uint8_t *b = set ? kOptCapV : kOptCapT;
+    const uint8_t *b;
     unsigned k;
     if (sCapSec == NULL || set == sCapSet) {
         return;
     }
-    for (k = 0; k < sizeof(kOptCapRuns) / sizeof(kOptCapRuns[0]); k++) {
-        memcpy(sCapSec + kOptCapRuns[k][0], b, kOptCapRuns[k][1]);
-        b += kOptCapRuns[k][1];
+    b = set ? sVar->capV : sVar->capT;
+    for (k = 0; k < sVar->ncap; k++) {
+        memcpy(sCapSec + sVar->capRuns[k][0], b, sVar->capRuns[k][1]);
+        b += sVar->capRuns[k][1];
     }
     sCapSet = set;
 }

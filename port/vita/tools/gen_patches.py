@@ -18,7 +18,9 @@ u = open(base + '/opt_s1.bin', 'rb').read()
 import os
 # (BT4decomp's versus menu says "Two-player" already: without vs_s1.bin, no versus change is made)
 HAVE_VS = os.path.exists(base + '/vs_s1.bin')
-packs = {'opt': u, 'vs': open(base + '/vs_s1.bin', 'rb').read() if HAVE_VS else b'', 'boot': open(base + '/boot.bin', 'rb').read()}
+# (without boot.bin no icon change is made: the Spanish disc takes the icons' patch of the English header)
+HAVE_BOOT = os.path.exists(base + '/boot.bin')
+packs = {'opt': u, 'vs': open(base + '/vs_s1.bin', 'rb').read() if HAVE_VS else b'', 'boot': open(base + '/boot.bin', 'rb').read() if HAVE_BOOT else b''}
 
 def sec_bytes(n, pack='opt'):
     u = packs[pack]
@@ -211,7 +213,7 @@ out_vs = runs_of(patches)
 
 # the button icons of the game's text (file 5, member 8): L3 / R3 as plates like L1, not the PS2's sticks
 patches, previews = [], []
-for e, (idx, pal) in sorted(vita_icons.make(sec_bytes(8, 'boot')[1]).items()):
+for e, (idx, pal) in (sorted(vita_icons.make(sec_bytes(8, 'boot')[1]).items()) if HAVE_BOOT else []):
     icon_job(e, idx, pal)
 out_icons = runs_of(patches)
 
@@ -250,6 +252,8 @@ open(sys.argv[2], 'w').write('\n'.join(lines) + '\n')
 vis = []
 for pack, o, shows in (('opt', out, {16: (1, 3), 14: (1, 3), 21: (0,)}), ('vs', out_vs, {8: (0, 1)}),
                        ('boot', out_icons, {8: (16, 19, 26, 27)})):
+    if not o:
+        continue
     for section, runs in o:
         a, sec = sec_bytes(section, pack)
         new = bytearray(sec)

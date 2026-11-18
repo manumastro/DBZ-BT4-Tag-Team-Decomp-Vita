@@ -14,6 +14,13 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
   sizes and CRC; another build (B13 and older, other mods) stops with a clear message. An archive (`.7z`, `.zip`,
   `.rar`) left in `ux0:data/bt4/`, a cut `.iso` and the 4 GB limit of FAT32 cards are named on the error screen; the
   log says which image and folder are used.
+- **Fixes after the first run of this build on a Vita 1000 with the Spanish disc**: choosing the DP battle type in the
+  Duel menu no longer crashes (the game's heap had no hole for a 3.5 MB menu file after the Tag Team screens; such a
+  block now comes from the system's memory); the main menu and the Tag Team screens no longer stall (their pictures and
+  lines are made by a helper thread, the Tag Team set ahead while the main menu is shown; `tbopre`); and Options >
+  Controller > Vita Settings, where L2, R2, L3 and R3 are placed on the rear or front touch plates, has its lettering on
+  the Spanish disc too (its row kept the disc's own name, with the plates' captions of the disc's own). Built, not yet run on the
+  console.
 - **README**: a step-by-step installation, more troubleshooting and a FAQ.
 - **Tag Team with the PC version's own screens** (run on the console: the screens, the menus by the pad, 2 vs 2 at
   29.4 pictures a second; 5 vs 5 runs but is not playable yet): the main menu's Tag Team entry and the

@@ -45,6 +45,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
 #include "vita_paths.h"
 #include "../../include/menu/tbo_art.h"
@@ -71,6 +72,9 @@ unsigned gVitaTboN[6]; /* (the report) pictures made, lines made, textures given
 typedef struct {
     unsigned tex, bytes, version, frame;
     unsigned char missing; /* not found or not readable: not looked for again */
+    /* (tbopre=1, the maker below: 0 nothing asked, 1 asked or being made, 2 made and waiting in px, 3 nothing came of it) */
+    unsigned char state;
+    uint32_t *px, w, h, pxVersion, failVersion, retry, readyFrame;
 } TboTex;
 
 #define TBO_NAME(id, name) name,
@@ -295,32 +299,26 @@ static uint32_t *tbo_gs(uint8_t *rgba, uint32_t w, uint32_t h, uint32_t id) {
     return px;
 }
 
-static unsigned tbo_picture(uint32_t id) {
-    TboTex *t = id == TBO_MAIN_TAG_EMBLEM ? &sEmblem : &sPic[id];
+/* A picture made as it is shown, as the GS's RGBA, or NULL (not readable: *missing). Everything but the texture's making:
+   with tbopre=1 it is done by the maker's thread (below), else by the drawing thread at the picture's first use. */
+static uint32_t *tbo_decode(uint32_t id, uint32_t *pw, uint32_t *ph, char *path, size_t pathSize, int *missing) {
     uint32_t w = 0, h = 0, limit;
     uint8_t *rgba;
-    char path[160];
 
-    if (t->tex != 0) {
-        t->frame = gGsFrame;
-        return t->tex;
-    }
-    if (t->missing) {
-        return 0;
-    }
-    rgba = tbo_png(kTboNames[id == TBO_MAIN_TAG_EMBLEM || id == TBO_TAG_LOGO_OFF ? TBO_TAG_LOGO : id], &w, &h, path, sizeof(path));
+    *missing = 0;
+    rgba = tbo_png(kTboNames[id == TBO_MAIN_TAG_EMBLEM || id == TBO_TAG_LOGO_OFF ? TBO_TAG_LOGO : id], &w, &h, path, pathSize);
     if (rgba == NULL) {
         Vita_Log("tbo: cannot read %s\n", path);
-        t->missing = 1;
-        return 0;
+        *missing = 1;
+        return NULL;
     }
     if (id == TBO_MAIN_TAG_EMBLEM) {
         uint32_t ew, eh;
         uint8_t *e = tbo_tag_emblem(rgba, w, h, &ew, &eh);
         free(rgba);
         if (e == NULL) {
-            t->missing = 1;
-            return 0;
+            *missing = 1;
+            return NULL;
         }
         rgba = e;
         w = ew;
@@ -343,7 +341,246 @@ static unsigned tbo_picture(uint32_t id) {
         }
     }
     limit = id == TBO_BG || id == TBO_TAG_ART ? 1280 : 640;
-    return tbo_make(t, tbo_fit(tbo_gs(rgba, w, h, id), &w, &h, limit, limit), w, h, path, 0);
+    {
+        uint32_t *px = tbo_fit(tbo_gs(rgba, w, h, id), &w, &h, limit, limit);
+        *pw = w;
+        *ph = h;
+        return px;
+    }
+}
+
+/* ---- the maker: the pictures and the lines made by a thread of its own (bt3.txt tbopre=1) ----
+   v1.4 made them on the drawing thread when first drawn: the 1280 x 720 poster, the kit's pieces and the buttons (each a
+   PNG read and halved), the main menu's emblem (the 2168 x 725 logo read and cut), the lines (a TrueType line written
+   80 pixels high with its outline, several milliseconds each, four a picture): the main menu's Tag Team entry came late
+   and the Tag Team screens froze for seconds (the watchdog's 3 s with the drawing thread busy). Now a thread at a lower
+   priority than the game's makes them (the drawing thread only uploads, a few hundred KB a picture), the main menu
+   asks for the Tag Team screens' set as soon as it is drawn, and until a picture or line is ready it is not drawn. */
+#define MAKER_QUEUE 64
+#define MAKER_PRIORITY 176 /* the game's thread 160: it runs when the cores have time */
+#define UPLOAD_BYTES 1572864 /* uploaded in a picture (one more may follow when none was yet) */
+int gVitaTboPre = 1;
+unsigned gVitaTboMs[4]; /* (the report) ms of the drawing thread on uploads and pictures made there; of the maker; jobs; bytes uploaded */
+
+typedef struct {
+    int line;
+    uint32_t id;
+    TboTex *t;
+} MakerJob;
+static MakerJob sQueue[MAKER_QUEUE];
+static int sQueueN;
+static pthread_mutex_t sMaker = PTHREAD_MUTEX_INITIALIZER;
+static SceUID sMakerSema, sMakerThread;
+static int sMakerState; /* 0 not started, 1 running, -1 could not be started */
+static unsigned sPreAsked, sPreFrame;
+static int sBootDone;
+
+static int maker_thread(unsigned args, void *argp) {
+    (void)args;
+    (void)argp;
+    for (;;) {
+        MakerJob j;
+        int have = 0, k, best = -1;
+        uint32_t w = 0, h = 0, version = 0, *px;
+        int missing = 0;
+        char path[160];
+        unsigned long long t0;
+
+        pthread_mutex_lock(&sMaker);
+        for (k = 0; k < sQueueN; k++) { /* (the lines the screen waits for before the pictures kept for later) */
+            if (sQueue[k].line) {
+                best = k;
+                break;
+            }
+        }
+        if (best < 0 && sQueueN > 0) {
+            best = 0;
+        }
+        if (best >= 0) {
+            j = sQueue[best];
+            memmove(&sQueue[best], &sQueue[best + 1], (size_t)(sQueueN - best - 1) * sizeof(sQueue[0]));
+            sQueueN--;
+            have = 1;
+        }
+        pthread_mutex_unlock(&sMaker);
+        if (!have) {
+            sceKernelWaitSema(sMakerSema, 1, NULL);
+            continue;
+        }
+        t0 = sceKernelGetProcessTimeWide();
+        if (j.line) {
+            px = TboText_Pixels(j.id, &version, &w, &h);
+            if (px != NULL) {
+                px = tbo_fit(px, &w, &h, 1024, 128);
+            }
+        } else {
+            px = tbo_decode(j.id, &w, &h, path, sizeof(path), &missing);
+        }
+        gVitaTboMs[1] += (unsigned)((sceKernelGetProcessTimeWide() - t0 + 500) / 1000);
+        gVitaTboMs[2]++;
+        pthread_mutex_lock(&sMaker);
+        free(j.t->px);
+        j.t->px = px;
+        j.t->w = w;
+        j.t->h = h;
+        j.t->pxVersion = version;
+        j.t->missing |= (unsigned char)missing;
+        j.t->state = px != NULL ? 2 : 3; /* ready; 3: nothing came of it (a line: until its version changes) */
+        j.t->failVersion = version;
+        j.t->readyFrame = gGsFrame;
+        pthread_mutex_unlock(&sMaker);
+        sceKernelDelayThread(1500); /* (the game's thread asks the menus' font for its lines' measures: let go of it between two) */
+    }
+    return 0;
+}
+
+static int maker_start(void) {
+    if (sMakerState != 0) {
+        return sMakerState > 0;
+    }
+    sMakerSema = sceKernelCreateSema("bt3_tbomake", 0, 0, 1000, NULL);
+    sMakerThread = sMakerSema >= 0 ? sceKernelCreateThread("bt3_tbomake", maker_thread, MAKER_PRIORITY, 0x80000, 0, 0, NULL) : -1;
+    if (sMakerThread < 0 || sceKernelStartThread(sMakerThread, 0, NULL) < 0) {
+        sMakerState = -1;
+        Vita_Log("tbo: the maker's thread could not be started: the pictures are made by the drawing thread\n");
+        return 0;
+    }
+    sMakerState = 1;
+    return 1;
+}
+
+/* A job for the maker unless one is queued or done for the picture (the drawing thread). 0 when it could not be put. */
+static int maker_ask(int line, uint32_t id, TboTex *t) {
+    int ok = 0;
+    if (!maker_start()) {
+        return 0;
+    }
+    pthread_mutex_lock(&sMaker);
+    if (t->state == 0 || t->state == 3) {
+        if (sQueueN < MAKER_QUEUE) {
+            sQueue[sQueueN].line = line;
+            sQueue[sQueueN].id = id;
+            sQueue[sQueueN].t = t;
+            sQueueN++;
+            t->state = 1;
+            ok = 1;
+        }
+    }
+    pthread_mutex_unlock(&sMaker);
+    if (ok) {
+        sceKernelSignalSema(sMakerSema, 1);
+    }
+    return ok;
+}
+
+static int upload_ok(unsigned bytes) {
+    static unsigned frame, taken;
+    if (frame != gGsFrame) {
+        frame = gGsFrame;
+        taken = 0;
+    }
+    if (taken != 0 && taken + bytes > UPLOAD_BYTES) {
+        return 0;
+    }
+    taken += bytes;
+    return 1;
+}
+
+/* The Tag Team screens' pictures, asked for while the main menu (or the Duel menu's Tag type) is shown: the PNG read
+   and halved by the maker, kept as pixels (about 5 MB) until they are asked for or the menu has not been shown for 20 s. */
+static unsigned tbo_prefetch_ids(unsigned *ids) {
+    unsigned n = 0;
+    extern int Port_GameProfilePortuguese(void);
+    extern int Port_GameProfileEnglish(void);
+    ids[n++] = TBO_TAG_ART;
+    ids[n++] = TBO_KIT_WINDOW;
+    ids[n++] = TBO_KIT_SEL;
+    ids[n++] = TBO_KIT_BAR;
+    ids[n++] = TBO_TAG_LOGO;
+    ids[n++] = TBO_BTN_CIRCLE;
+    ids[n++] = TBO_BTN_LEFTRIGHT;
+    ids[n++] = TBO_BTN_CROSS;
+    ids[n++] = TBO_BTN_TRIANGLE;
+    ids[n++] = TBO_KIT_DIALOG;
+    ids[n++] = TBO_KIT_GOLD;
+    ids[n++] = TBO_KIT_STEEL;
+    ids[n++] = TBO_BTN_SQUARE;
+    ids[n++] = TBO_BTN_START;
+    ids[n++] = Port_GameProfilePortuguese() ? TBO_TAG_BUTTONS_PT : Port_GameProfileEnglish() ? TBO_TAG_BUTTONS_EN : TBO_TAG_BUTTONS_ES;
+    return n;
+}
+
+static void tbo_prefetch(void) {
+    unsigned ids[24], n, i;
+    if (!gVitaTboPre || (sPreFrame != 0 && gGsFrame - sPreFrame < 30)) {
+        return;
+    }
+    sPreFrame = gGsFrame;
+    n = tbo_prefetch_ids(ids);
+    for (i = 0; i < n; i++) {
+        TboTex *t = &sPic[ids[i]];
+        if (t->tex == 0 && !t->missing && t->state == 0) {
+            maker_ask(0, ids[i], t);
+        }
+    }
+}
+
+static unsigned tbo_picture(uint32_t id) {
+    TboTex *t = id == TBO_MAIN_TAG_EMBLEM ? &sEmblem : &sPic[id];
+    uint32_t w = 0, h = 0;
+    char path[160];
+    int missing = 0;
+    uint32_t *px;
+    unsigned long long t0;
+    unsigned tex;
+
+    if (t->tex != 0) {
+        t->frame = gGsFrame;
+        return t->tex;
+    }
+    if (t->missing) {
+        return 0;
+    }
+    if (gVitaTboPre && maker_start()) {
+        int state;
+        pthread_mutex_lock(&sMaker);
+        state = t->state;
+        pthread_mutex_unlock(&sMaker);
+        if (state == 2) {
+            if (gGsFrame < t->retry || !upload_ok(t->w * t->h * 4)) {
+                return 0;
+            }
+            t0 = sceKernelGetProcessTimeWide();
+            pthread_mutex_lock(&sMaker);
+            px = t->px;
+            w = t->w;
+            h = t->h;
+            t->px = NULL;
+            t->state = 0;
+            pthread_mutex_unlock(&sMaker);
+            snprintf(path, sizeof(path), "app0:tbo/ui/%s.png", kTboNames[id == TBO_MAIN_TAG_EMBLEM || id == TBO_TAG_LOGO_OFF ? TBO_TAG_LOGO : id]);
+            gVitaTboMs[3] += w * h * 4;
+            tex = tbo_make(t, px, w, h, path, 0);
+            if (tex == 0) {
+                t->retry = gGsFrame + 120; /* (no texture for it just now: not made over and over) */
+            }
+            gVitaTboMs[0] += (unsigned)((sceKernelGetProcessTimeWide() - t0 + 500) / 1000);
+            return tex;
+        }
+        if (state == 0) {
+            maker_ask(0, id, t);
+        }
+        return 0;
+    }
+    t0 = sceKernelGetProcessTimeWide();
+    px = tbo_decode(id, &w, &h, path, sizeof(path), &missing);
+    if (px == NULL) {
+        t->missing = 1;
+        return 0;
+    }
+    tex = tbo_make(t, px, w, h, path, 0);
+    gVitaTboMs[0] += (unsigned)((sceKernelGetProcessTimeWide() - t0 + 500) / 1000);
+    return tex;
 }
 
 /* ---- a line of letters (tbo_text.c) ----
@@ -359,6 +596,46 @@ static unsigned tbo_line(uint32_t id) {
 
     if (t->tex != 0 && (t->version == version || t->frame == gGsFrame)) { /* (changed in this picture: the old one once more) */
         t->frame = gGsFrame;
+        return t->tex;
+    }
+    if (gVitaTboPre && maker_start()) { /* the maker writes it; the old picture of the place shows meanwhile, or none */
+        int state;
+        uint32_t readyVersion;
+        pthread_mutex_lock(&sMaker);
+        state = t->state;
+        readyVersion = t->pxVersion;
+        if (state == 2 && readyVersion != version) { /* (the line changed while it was being made: made again) */
+            free(t->px);
+            t->px = NULL;
+            t->state = state = 0;
+        }
+        if (state == 3 && t->failVersion != version) {
+            t->state = state = 0;
+        }
+        pthread_mutex_unlock(&sMaker);
+        if (state == 2) {
+            if (upload_ok(t->w * t->h * 4)) {
+                unsigned long long t0 = sceKernelGetProcessTimeWide();
+                uint32_t *px, w, h;
+                pthread_mutex_lock(&sMaker);
+                px = t->px;
+                w = t->w;
+                h = t->h;
+                t->px = NULL;
+                t->state = 0;
+                pthread_mutex_unlock(&sMaker);
+                gVitaTboMs[3] += w * h * 4;
+                if (tbo_make(t, px, w, h, "line", 1) != 0) {
+                    t->version = readyVersion;
+                }
+                gVitaTboMs[0] += (unsigned)((sceKernelGetProcessTimeWide() - t0 + 500) / 1000);
+            }
+        } else if (state == 0) {
+            maker_ask(1, id, t);
+        }
+        if (t->tex != 0) {
+            t->frame = gGsFrame;
+        }
         return t->tex;
     }
     if (frame != gGsFrame) {
@@ -405,6 +682,18 @@ static int letter_thread(unsigned args, void *argp) {
     return sceKernelExitDeleteThread(0);
 }
 
+static void letters_start(void) {
+    if (sLetterState == 0) {
+        /* (v1.4: at the game thread's own priority, 160, begun when the main menu first drew: the disc read and the
+           letters put together took the menu's time. With tbopre=1 a lower one, begun in the first seconds of play.) */
+        SceUID th = sceKernelCreateThread("bt3_letters", letter_thread, gVitaTboPre ? MAKER_PRIORITY : 0x10000100, 0x80000, 0, 0, NULL);
+        sLetterState = 1;
+        if (th < 0 || sceKernelStartThread(th, 0, NULL) < 0) {
+            sLetterState = 2;
+        }
+    }
+}
+
 static unsigned tbo_letters(int lit) {
     TboTex *t = &sLetters[lit];
     uint32_t w = 512, h = 32, *px;
@@ -414,13 +703,7 @@ static unsigned tbo_letters(int lit) {
         t->frame = gGsFrame;
         return t->tex;
     }
-    if (sLetterState == 0) {
-        SceUID th = sceKernelCreateThread("bt3_letters", letter_thread, 0x10000100, 0x80000, 0, 0, NULL);
-        sLetterState = 1;
-        if (th < 0 || sceKernelStartThread(th, 0, NULL) < 0) {
-            sLetterState = 2;
-        }
-    }
+    letters_start();
     if (sLetterState != 2 || t->missing) {
         return 0; /* (not yet: the plate without its words for a moment) */
     }
@@ -449,6 +732,8 @@ unsigned Vita_TboTexture(uint32_t id) {
         return tbo_line(id);
     }
     if (id == TBO_MAIN_TAG_OFF || id == TBO_MAIN_TAG_ON) {
+        sPreAsked = gGsFrame; /* (the main menu, or the Duel menu's Tag type, is shown: the Tag Team screens' pictures are made ahead) */
+        tbo_prefetch();
         return tbo_letters(id == TBO_MAIN_TAG_ON);
     }
     if (id == TBO_TAG_MOVIE) {
@@ -487,6 +772,39 @@ void Vita_TboFrameEnd(void) {
     if ((gGsFrame & 63) == 0) {
         Vita_TagMovieIdle(); /* the film's texture not drawn for a while */
         Vita_TagMovieSwIdle();
+    }
+    if (gVitaTboPre && !sBootDone && gGsFrame >= 240 && tbo_on()) {
+        /* the main menu's emblem and lettering, made in the first seconds, long before the menu shows them */
+        sBootDone = 1;
+        letters_start();
+        maker_ask(0, TBO_MAIN_TAG_EMBLEM, &sEmblem);
+    }
+    if (gVitaTboPre && (gGsFrame & 63) == 32 && gGsFrame - sPreAsked > KEEP_FRAMES) {
+        /* the menus have not been shown for 20 s (a fight): the pixels kept for the Tag Team screens given back */
+        unsigned i;
+        pthread_mutex_lock(&sMaker);
+        for (i = 0; i < TBO_ART_COUNT; i++) {
+            if (sPic[i].state == 2) {
+                free(sPic[i].px);
+                sPic[i].px = NULL;
+                sPic[i].state = 0;
+            }
+        }
+        pthread_mutex_unlock(&sMaker);
+        sPreFrame = 0;
+    }
+    if (gVitaTboPre && (gGsFrame & 63) == 48) {
+        /* a line made that was not asked for again (its screen was left): its pixels given back */
+        unsigned i;
+        pthread_mutex_lock(&sMaker);
+        for (i = 0; i < TBO_TEXT_SLOTS; i++) {
+            if (sText[i].state == 2 && gGsFrame - sText[i].readyFrame > KEEP_FRAMES) {
+                free(sText[i].px);
+                sText[i].px = NULL;
+                sText[i].state = 0;
+            }
+        }
+        pthread_mutex_unlock(&sMaker);
     }
     while (sLateN > 0) {
         sLateN--;

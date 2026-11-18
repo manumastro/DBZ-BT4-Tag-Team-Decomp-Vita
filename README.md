@@ -315,8 +315,8 @@ replace the BT3 port. Both stay installed, each with its own files and saves (`u
 
 **How do I get the game in Spanish?** Use Team BT4's Spanish B14 Rev2 image instead of the English one. The port runs
 the game in the language of the image it finds, with that release's texts and music; there is no language choice in
-the game. On the Spanish image the Vita's rows of the menus ("Vita Settings", "Multiplayer") keep that disc's own
-names, in the same places.
+the game. On the Spanish image Options > Controller > Vita Settings has its lettering too (drawn over that disc's own
+pictures); the Duel menu's "Multiplayer" row keeps that disc's own name, in the same place.
 
 **Is there a full save?** Use [Unlock All](#unlock-all): every character and form, stage, song and item, and
 4,850,000 Zenni, with a copy of your save kept first.

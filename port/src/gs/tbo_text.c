@@ -162,12 +162,84 @@ uint32_t TboText_Version(uint32_t id) {
     return r;
 }
 
+/* The outline's coverage: for every pixel the largest coverage of those within the disc dx*dx + dy*dy <= r*r + r, as the
+   loop in TboText_Pixels finds it (the same numbers), but a row at a time: the largest of a row within k pixels (a plane
+   for each k, each made from the one before) and, for each row of the disc, the plane of its width. About a tenth of the
+   work. NULL if there is no memory (the loop is used). free() it. (bt3.txt tbopre, the Vita: gTboFastOutline) */
+#ifdef PORT_VITA
+int gTboFastOutline = 1;
+#else
+int gTboFastOutline = 0;
+#endif
+__attribute__((optimize("O3")))
+static uint8_t *tbo_outline(const uint8_t *cov, int lw, int lh, int r) {
+    int hw[16], maxw = 0, dy, k, y, x;
+    uint8_t *planes[16] = {0}, *out;
+    size_t n = (size_t)lw * lh;
+
+    if (r < 0 || r > 7 || lw < 1 || lh < 1) {
+        return NULL;
+    }
+    for (dy = -r; dy <= r; dy++) {
+        int dx = 0;
+        while ((dx + 1) * (dx + 1) + dy * dy <= r * r + r) {
+            dx++;
+        }
+        hw[dy + r] = dx;
+        if (dx > maxw) {
+            maxw = dx;
+        }
+    }
+    out = calloc(n, 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    planes[0] = (uint8_t *)cov;
+    for (k = 1; k <= maxw; k++) {
+        planes[k] = malloc(n);
+        if (planes[k] == NULL) {
+            for (k--; k >= 1; k--) {
+                free(planes[k]);
+            }
+            free(out);
+            return NULL;
+        }
+        for (y = 0; y < lh; y++) {
+            const uint8_t *prev = planes[k - 1] + (size_t)y * lw, *c = cov + (size_t)y * lw;
+            uint8_t *dst = planes[k] + (size_t)y * lw;
+            for (x = 0; x < lw; x++) {
+                uint8_t v = prev[x], a = x >= k ? c[x - k] : 0, b = x + k < lw ? c[x + k] : 0;
+                v = a > v ? a : v;
+                dst[x] = b > v ? b : v;
+            }
+        }
+    }
+    for (y = 0; y < lh; y++) {
+        uint8_t *dst = out + (size_t)y * lw;
+        for (dy = -r; dy <= r; dy++) {
+            const uint8_t *src;
+            int yy = y + dy;
+            if (yy < 0 || yy >= lh) {
+                continue;
+            }
+            src = planes[hw[dy + r]] + (size_t)yy * lw;
+            for (x = 0; x < lw; x++) {
+                dst[x] = src[x] > dst[x] ? src[x] : dst[x];
+            }
+        }
+    }
+    for (k = 1; k <= maxw; k++) {
+        free(planes[k]);
+    }
+    return out;
+}
+
 /* The picture of a line for the renderer: *w x *h RGBA (the GS's alpha, 0x80 opaque), the filled line in the upper
    half and its outline in the lower (a heading: itself); NULL if there is none. free() it. *version: what it
    shows. */
 uint32_t *TboText_Pixels(uint32_t id, uint32_t *version, uint32_t *w, uint32_t *h) {
     TboLine l;
-    uint8_t *cov;
+    uint8_t *cov, *outl;
     uint32_t *px;
     int lw, lh, lb, x, y, dx, dy, r,tw,th;
 
@@ -207,10 +279,17 @@ uint32_t *TboText_Pixels(uint32_t id, uint32_t *version, uint32_t *w, uint32_t *
     }
     r = l.outline;
     for(y=0;y<th*2;++y)for(x=0;x<tw;++x)px[(size_t)y*tw+x]=0x00FFFFFFu;
+    outl = gTboFastOutline ? tbo_outline(cov, lw, lh, r) : NULL;
     for (y = 0; y < lh; y++) {
         for (x = 0; x < lw; x++) {
             int fill = cov[(size_t)y * lw + x], line = 0;
-            for (dy = -r; dy <= r && line < 255; dy++) {
+            if (outl != NULL) {
+                line = outl[(size_t)y * lw + x];
+                dy = r + 1; /* (no loop below) */
+            } else {
+                dy = -r;
+            }
+            for (; dy <= r && line < 255; dy++) {
                 int yy = y + dy;
                 if (yy < 0 || yy >= lh) {
                     continue;
@@ -230,6 +309,7 @@ uint32_t *TboText_Pixels(uint32_t id, uint32_t *version, uint32_t *w, uint32_t *
             px[(size_t)(y + th) * tw + x] = 0xFFFFFFu | (uint32_t)((line * 128 + 127) / 255) << 24;
         }
     }
+    free(outl);
     free(cov);
     *w = (uint32_t)tw;
     *h = (uint32_t)th * 2;

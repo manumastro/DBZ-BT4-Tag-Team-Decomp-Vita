@@ -279,6 +279,24 @@ void *Heap_Alloc(s32 size, u32 align, s32 fromTail, s32 heap) {
     if (block != NULL) {
         data = (void *)block->data;
     }
+#ifdef PORT_VITA
+    if (data == NULL && size > 0) {
+        /* The game heap has no hole this big (fragmented after the Tag Team screens, say: a 3.5 MB menu file asked
+           for with about 11 MB free). The PS2 would write through NULL; here the block comes from the C library's
+           heap (Port_GameBigAlloc), which Heap_Free gives back through Port_GameBigFree. */
+        extern unsigned Port_GameBigAlloc(int size);
+        extern void Vita_Log(const char *fmt, ...);
+        extern u32 Heap_GetLargestFree(void);
+        extern s32 Heap_GetFreeSize(void);
+        extern s32 Heap_GetUsedSize(void);
+        static s32 logged;
+        if (logged++ < 16) {
+            Vita_Log("vita: the game heap has no block of %d bytes (largest free %u, free %d, used %d): taken outside it\n", (int)size,
+                     (unsigned)Heap_GetLargestFree(), (int)Heap_GetFreeSize(), (int)Heap_GetUsedSize());
+        }
+        data = (void *)Port_GameBigAlloc(size);
+    }
+#endif
     return data;
 }
 
