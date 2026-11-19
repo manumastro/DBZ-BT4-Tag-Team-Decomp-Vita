@@ -134,6 +134,28 @@ So M2 (1 vs 1 by address) needs: the PC UI's few calls answered on the Vita (`Po
 `net_match.c`'s old path, `Port_FileOpenHost`, and `vita_bt4.c`'s stand-ins of these files removed as each goes in.
 None of it is the simulation: that is M0's (the float model, `wip/online-m0`).
 
+## Ad Hoc: Vita to Vita without internet (2026-11-19, branch `wip/online`)
+
+Our addition to BT4decomp's online play; everything else stays the PC's. Ad Hoc is a transport, not a game mode: the
+menus are the PC's hub (Create Match gets a Connection value "Ad Hoc", Join an "AD HOC" list of nearby rooms beside
+"BY ADDRESS"), and a match runs upstream's own protocol (`gs/net.c`: hello, timing, pad records, digests) over Ad Hoc
+datagrams instead of internet UDP. The plan, milestones A0-A2 and the reasons: psvita-agent
+`notes/online/vita-multiplayer-plan.md`.
+
+- The calls (`port/vita/vita_adhoc.c`): the PSP ad hoc layer the Vita keeps, as Rinnegatamante's vitaQuake uses it on
+  HENkaku: `SCE_SYSMODULE_PSPNET_ADHOC`, `sceNetAdhocInit`, `sceNetAdhocctlInit` (ID `BT4VITA01`, reserved type), the
+  system's own dialog for the group (`sceNetCheckDialog`, mode `PSP_ADHOC_CONN`; no PSN), then `sceNetAdhocPdp*`
+  sockets addressed by MAC and port (payload up to 1444 bytes: the 1 vs 1 input packet and Tag Team's 512-byte
+  packets fit). No programmatic group join exists in the SDK's stubs: the dialog it is. A Vita is either in Ad Hoc or
+  on its access point, never both.
+- A0 (`adhoc_test=1`, built, not run): start-up, the dialog, a socket, beacons and pings, a summary per Vita heard
+  (round trips). With one console it shows the start-up, the dialog and the group; peers need a second Vita.
+- A1 (next): `gs/net.c` unchanged on Ad Hoc: its one send (`net_send`) and one receive (`recvfrom`) on a pseudo socket
+  (a `--wrap` of the socket calls for that one socket), the peer's MAC carried as a pseudo `sockaddr_in` (4 + 2 bytes);
+  the room found from the beacons; the session as an address match.
+- Vita against Vita does not wait for M0: two Vitas compute the same floats; the session-like start of `m0=1`
+  (synchronous reads, neutral Vita Settings, the PC's key table) is what they need.
+
 ## What a player has (PC)
 
 | Mode | What it is | Players |

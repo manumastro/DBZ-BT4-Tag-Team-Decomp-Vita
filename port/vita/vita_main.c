@@ -2706,6 +2706,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "tagteam") == 0) { /* 0: no Tag Team entry in the main menu; 1 BT4decomp's own Tag Team
                                                       screens (the default); 2 the Vita's earlier text setup (Vita_TagMenu) */
             sTagMenu = atoi(eq) < 0 || atoi(eq) > 2 ? 1 : atoi(eq);
+        } else if (strncmp(line, "adhoc", 5) == 0) { /* Ad Hoc (port/vita/vita_adhoc.c): adhoc_test, adhoc_delay, ... */
+            extern void Vita_AdhocSetting(const char *name, const char *value);
+            Vita_AdhocSetting(line, eq);
         } else if (strncmp(line, "online", 6) == 0) { /* the network (port/vita/vita_net.c): online, online_server, online_test, ... */
             extern void Vita_NetSetting(const char *name, const char *value);
             Vita_NetSetting(line, eq);
@@ -3594,6 +3597,10 @@ int __wrap_main(int argc, char **argv) {
             logf_("vita: exitafter: the network self-test ended the run (online_test=2)\n");
             quit();
         }
+    }
+    {   /* Ad Hoc's first check, only with bt3.txt adhoc_test (port/vita/vita_adhoc.c): on its own thread, later */
+        extern void Vita_AdhocBoot(void);
+        Vita_AdhocBoot();
     }
     sStart = now_us();
     {

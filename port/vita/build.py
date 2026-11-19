@@ -325,6 +325,8 @@ def port_sources():
             (V / "vita_tagmovie.c", "hard"), (V / "vita_tagmovie_sw.c", "hard"),
             # the network (bt3.txt online, online_test; docs/vita/online-bt4.md): without BT4_VITA_ONLINE only its settings
             (V / "vita_net.c", "net"),
+            # Ad Hoc, Vita to Vita without an access point (bt3.txt adhoc_test; the transport of online play the Vita adds)
+            (V / "vita_adhoc.c", "net"),
             # the PS2 float model (bt3.txt ps2float; its calls only in the BT4_PS2FLOAT variant, with its check)
             (V / "vita_ps2float.c", "nofp"), (V / "vita_ps2float_a.S", "asm"),
             # online play, M0: the state log in the PC's format, the session-like start (bt3.txt m0)
@@ -502,7 +504,7 @@ LIBS = ["-lvitaGL", "-lpng16", "-lstdc++", "-lSceCommonDialog_stub", "-lSceGxm_s
         "-lSceIofilemgr_stub", "-lSceSysmem_stub", "-lpthread", "-lz", "-lm"]
 # the network part (BT4_VITA_ONLINE): the image's libcurl 8.17 (WebSocket) on OpenSSL 1.1.1, SceNet
 if ONLINE:
-    LIBS = LIBS[:-3] + ["-lcurl", "-lssl", "-lcrypto", "-lzstd", "-lSceNet_stub", "-lSceNetCtl_stub", "-lSceKernelModulemgr_stub"] + LIBS[-3:]
+    LIBS = LIBS[:-3] + ["-lcurl", "-lssl", "-lcrypto", "-lzstd", "-lSceNet_stub", "-lSceNetCtl_stub", "-lScePspnetAdhoc_stub", "-lSceKernelModulemgr_stub"] + LIBS[-3:]
 
 # Game functions replaced by faster equivalents (port/src/port_fast.c: the stage's culling, the effects' task lists).
 FAST_WRAPS = "StgFrustum_TestBox StgFrustum_TestPart BtlTaskList_Update BtlTaskList_Draw EftGfx_DrawPolyAvgZFront Bpe_Decode".split()

@@ -3074,12 +3074,13 @@ int Vita_VglTables(char *out, int size) {
     return snprintf(out, (size_t)size, "textures %d of %d (index sets %d of %d, palettes %d of %d, %u let go), video memory free %u KB, main %u KB",
                     sTexCount, MAX_TEX, idx, IDX_MAX, pal, PAL_MAX, gVitaPalDrop, sMemVramK, sMemRamK);
 }
+extern volatile int gVitaSysDialog; /* (vita_adhoc.c: a system dialog is open, the swap updates it) */
 static inline void wt_swap(void) {
     unsigned long long t0 = sceKernelGetProcessTimeWide();
     rt_sync();
     gVitaDrawWhere = 3;
     pace_swap(0);
-    vglSwapBuffers(GL_FALSE);
+    vglSwapBuffers(gVitaSysDialog ? GL_TRUE : GL_FALSE); /* (GL_TRUE: vitaGL updates a system dialog: vita_adhoc.c) */
     pace_swap(1);
     gVitaDrawWhere = 0;
     gVitaWall[0] += sceKernelGetProcessTimeWide() - t0;
@@ -3100,7 +3101,7 @@ static void rt_swap_exec(const RtSwap *s) {
     unsigned long long t0 = sceKernelGetProcessTimeWide();
     target_set(0); /* (the picture bound again before the swap) */
     pace_swap_rt(s, 0);
-    vglSwapBuffers(GL_FALSE);
+    vglSwapBuffers(gVitaSysDialog ? GL_TRUE : GL_FALSE);
     pace_swap_rt(s, 1);
     gVitaWall[0] += sceKernelGetProcessTimeWide() - t0;
     mem_sample();
