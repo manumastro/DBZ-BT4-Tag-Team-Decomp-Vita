@@ -75,8 +75,8 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "2nd Pad: a second controller plays as player 2 (PS TV).\n"
      "Mods: use the files in ux0:data/bt4/mods/. Its lower row: the anime soundtrack.\n"
      "Stick (press {D} from the lower row): a dead zone of 0 to 40% and a soft response, if the sticks feel too quick.\n"
-     "{S}: Unlock All.\n\n"
-     "Controls reminder in fights: pause > Vita Controls, then {S}."},
+     "{S}: Unlock All.\n"
+     "The fights' controls reminder: pause > Vita Controls, {S}."},
     {"Anime soundtrack",
      "The English game with the anime music of the Spanish release:\n"
      "1. Copy your own Spanish B14 Rev2 .iso to ux0:data/bt4/es/ (the English one stays where it is).\n"
@@ -186,8 +186,8 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "Mods: usa los archivos de ux0:data/bt4/mods/. Su fila de abajo: la banda sonora del anime.\n"
      "Stick (pulsa {D} desde la fila de abajo): una zona muerta del 0 al 40% y una respuesta suave, si los sticks van "
      "demasiado rápidos.\n"
-     "{S}: Desbloquear todo.\n\n"
-     "Recordatorio de controles en combate: pausa > Controles Vita, y luego {S}."},
+     "{S}: Desbloquear todo.\n"
+     "Recordatorio en combate: pausa > Controles Vita, {S}."},
     {"Banda sonora del anime",
      "El juego en inglés con la música del anime de la versión en español:\n"
      "1. Copia tu .iso de B14 Rev2 en español a ux0:data/bt4/es/ (la inglesa se queda donde está).\n"
