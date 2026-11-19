@@ -28,6 +28,7 @@
 #include "types.h"
 #include "sys/pad.h"
 #include "vita_guide_text.h"
+#include "battle/col_c.h"
 
 extern void Font_PushStyle(void);
 extern void Font_PopStyle(void);
@@ -45,8 +46,6 @@ extern void Font_FlushAll(void);
 extern void FontIcon_SetPadType(s32 type);
 extern void Font_SetClip(s32 x0, s32 y0, s32 x1, s32 y1);
 extern void Font_SetFlags(s32 flags);
-extern void Font_SetBeginCallback(s32 (*fn)(s32));
-extern void Font_SetTagCallback(void *fn, void *arg);
 extern s32 Font_GetCmdCount(void);
 extern s32 FontIcon_Begin(s32 vramBase);
 extern void FontTag_Handle();
@@ -67,7 +66,9 @@ extern void Vita_Log(const char *fmt, ...);
 
 /* ---- settings ---- */
 int gVitaGuide = 1;    /* bt3.txt vitaguide: 1 (default) the entries and the legend; 0 none of them */
-int gVitaHudHelp = -1; /* bt3.txt hudhelp: over the saved one (Vita Controls' SQUARE); -1 the saved one */
+int gVitaHudHelp = -1;
+int gVitaGuideTest = 0; /* bt3.txt guidetest (development, the black window's hunt): bits leaving parts out of the guide's
+                           picture: 1 the window's quads, 2 the flush before them, 4 the 4:3 page's markers, 8 the icons */ /* bt3.txt hudhelp: over the saved one (Vita Controls' SQUARE); -1 the saved one */
 #define HUDHELP_FIGHTS 5    /* hudhelp 2: in the first fights */
 #define HUDHELP_FRAMES 1200 /* ... their first 20 seconds */
 
@@ -333,8 +334,10 @@ int Vita_GuideIsOpen(void) { return sOpen; }
 
 static int sLogFrames; /* the guide's first pictures, each logged (what it handed the renderer) */
 void Vita_GuideOpen(void) {
+    extern void Vita_VglLogFrames(int n);
     sOpen = 1;
-    sLogFrames = 4;
+    sLogFrames = 3;
+    Vita_VglLogFrames(2); /* (the renderer's batch log of the guide's first two pictures: what reached the GPU) */
     sTopic = -1; /* the contents */
     sPage = 0;
     Snd_PlaySe(1, 1);
@@ -424,8 +427,68 @@ static void style_base(void) {
     Font_SetShadowMode(0);
     Font_SetShadowOffset(1, 1);
     Font_SetColorRGBA(0xFF, 0xFF, 0xFF, 0x80);
+    if (gVitaGuideTest & 8) { /* (test: no icons, their tags printed as letters) */
+        Font_SetBeginCallback(NULL);
+        Font_SetTagCallback(NULL, NULL);
+        return;
+    }
     Font_SetBeginCallback(FontIcon_Begin);           /* the <PAD=> icons, as FontIcon_Init hooks them at boot */
-    Font_SetTagCallback((void *)FontTag_Handle, &gFontIconPadType);
+    Font_SetTagCallback((FontTagFn)FontTag_Handle, &gFontIconPadType);
+}
+
+/* ---- the log's proof of what the text makes (the first pictures only) ----
+   Each queued command of ours drawn once more into a scratch packet by the font's own Font_DrawCmd (what Font_Flush
+   does with it next): its sprites counted (glyphs, their shadows, the icons), the first command's characters in hex,
+   how many of them the font has a glyph for, its first sprite's screen corner and the command's state. */
+extern FontCmd *gFontCmds;
+extern void Font_DrawCmd(u64 **pkt, FontCmd *cmd);
+extern FontGlyph *Font_FindGlyph(u16 ch, void *slotOut);
+#define SCRATCH_QW 12288
+static u64 sScratch[SCRATCH_QW];
+static int sCmd0; /* the first command of ours this picture */
+static void log_cmds(const char *who, int first) {
+    int i, n = (int)Font_GetCmdCount(), total = 0;
+    char line[600];
+    int o = 0;
+    for (i = first; i < n; i++) {
+        FontCmd tmp = gFontCmds[i];
+        const u16 *s = (const u16 *)tmp.arg;
+        int len = 0, found = 0, sprites;
+        u64 *p = sScratch + 2;
+        while (s != NULL && len < 400 && s[len]) {
+            len++;
+        }
+        if (tmp.kind != FONT_CMD_STR16 || s == NULL || len * 9 * 6 + 64 > SCRATCH_QW) {
+            o += snprintf(line + o, sizeof(line) - (size_t)o, " -");
+            continue;
+        }
+        tmp.vramBase = 0x3838;
+        Font_DrawCmd(&p, &tmp);
+        sprites = (int)((p - (sScratch + 2)) / 6); /* (6 64-bit words a sprite: TEX0, RGBAQ, UV, XYZ2, UV, XYZ2) */
+        total += sprites;
+        if (o < (int)sizeof(line) - 16) {
+            o += snprintf(line + o, sizeof(line) - (size_t)o, " %d", sprites);
+        }
+        if (i == first) {
+            char hex[200];
+            int h = 0, k;
+            for (k = 0; k < len; k++) {
+                found += s[k] != '<' && Font_FindGlyph(s[k], NULL) != NULL;
+                if (k < 24) {
+                    h += snprintf(hex + h, sizeof(hex) - (size_t)h, "%04x ", s[k]);
+                }
+            }
+            hex[h] = 0;
+            Vita_Log("vita: guide: %s: first text at %d,%d: %d characters, %d with a glyph: %s\n", who, tmp.x, tmp.y, len, found, hex);
+            Vita_Log("vita: guide: %s: its state: scale %d/%d %%, colour %08x, shadow %u, clip %u,%u-%u,%u, align %u, flags %d, "
+                     "begin %d, tag %d; %d sprites, the first: xyz %llx uv %llx rgba %llx tex0 %llx\n",
+                     who, (int)(tmp.scaleX * 100.0f), (int)(tmp.scaleY * 100.0f), (unsigned)tmp.color, (unsigned)tmp.shadowMode,
+                     tmp.clipX0, tmp.clipY0, tmp.clipX1, tmp.clipY1, (unsigned)tmp.align, (int)tmp.flags, tmp.begin != NULL,
+                     tmp.tag != NULL, sprites, sprites ? (unsigned long long)sScratch[5] : 0ULL, sprites ? (unsigned long long)sScratch[4] : 0ULL,
+                     sprites ? (unsigned long long)sScratch[3] : 0ULL, sprites ? (unsigned long long)sScratch[2] : 0ULL);
+        }
+    }
+    Vita_Log("vita: guide: %s: commands %d..%d, %d sprites made, a command:%s\n", who, first, n - 1, total, line);
 }
 
 static void style_body(void) {
@@ -459,14 +522,23 @@ void Vita_GuideDraw(void) {
     if (!sOpen) {
         return;
     }
-    Font_FlushAll(); /* (the menu's own letters under the window) */
+    if (!(gVitaGuideTest & 2)) {
+        Font_FlushAll(); /* (the menu's own letters under the window) */
+    }
     sQuads = 0;
-    Port_MenuPage(50); /* the 4:3 page in the middle, at its true shape (as the language picker, port_language.c) */
-    Port_MenuFill(1); /* (the part's marker before the packet, not inside it) */
-    p = quads_begin();
-    quad(&p, 0, 0, 512, 448, RGBA(0, 0, 0, 0x50)); /* the menu dimmed, the screen's width */
-    Dma_EndDirect(p);
-    Port_MenuFill(0);
+    if (!(gVitaGuideTest & 4)) {
+        Port_MenuPage(50); /* the 4:3 page in the middle, at its true shape (as the language picker, port_language.c) */
+        Port_MenuFill(1);  /* (the part's marker before the packet, not inside it) */
+    }
+    if (!(gVitaGuideTest & 1)) {
+        p = quads_begin();
+        quad(&p, 0, 0, 512, 448, RGBA(0, 0, 0, 0x50)); /* the menu dimmed, the screen's width */
+        Dma_EndDirect(p);
+    }
+    if (!(gVitaGuideTest & 4)) {
+        Port_MenuFill(0);
+    }
+    if (!(gVitaGuideTest & 1)) {
     p = quads_begin();
     quad(&p, GL_X0, GL_Y0, GL_X1, GL_Y1, RGBA(0x04, 0x10, 0x30, 0x74));      /* the window */
     quad(&p, GL_X0, GL_Y0, GL_X1, GL_Y0 + 34, RGBA(0x10, 0x30, 0x68, 0x70)); /* its title band */
@@ -477,6 +549,8 @@ void Vita_GuideDraw(void) {
         quad(&p, GL_X0 + 10, y, GL_X1 - 10, y + 22, RGBA(0x30, 0x60, 0xA0, 0x50));
     }
     Dma_EndDirect(p);
+    }
+    sCmd0 = (int)Font_GetCmdCount();
 
     FontIcon_SetPadType(0);
     Font_PushStyle();
@@ -535,19 +609,15 @@ void Vita_GuideDraw(void) {
     Font_PrintAt(GL_TEXT_X, GL_Y1 - 25, sFoot);
     Font_PopStyle();
     if (sLogFrames > 0) {
-        int k, letters = 0;
         sLogFrames--;
-        for (k = 0; k < (sTopic < 0 ? 0 : sLineCount); k++) {
-            const u16 *c = sLine[k];
-            while (*c) {
-                letters += *c++ != ' ';
-            }
-        }
-        Vita_Log("vita: guide: picture: %d quads, %d text commands queued, topic %d page %d (%d lines, %d letters)\n", sQuads,
-                 (int)Font_GetCmdCount(), sTopic, sPage, sTopic < 0 ? VG_TOPICS : sLineCount, letters);
+        Vita_Log("vita: guide: picture: %d quads, %d text commands queued, topic %d page %d, test %d\n", sQuads,
+                 (int)Font_GetCmdCount(), sTopic, sPage, gVitaGuideTest);
+        log_cmds("guide", sCmd0);
     }
     Font_FlushAll();
-    Port_MenuPage(0);
+    if (!(gVitaGuideTest & 4)) {
+        Port_MenuPage(0);
+    }
 }
 
 /* ---- the main menu's entry: its label in the game's font on the plate's row, its description ---- */
@@ -631,6 +701,8 @@ void Vita_GuideFightPage(int x0, int x1, int y0, int y1) {
     int i, n;
     f32 scale = 0.78f;
 
+    int first = (int)Font_GetCmdCount();
+
     wrap(body, x1 - x0 - 8, scale);
     sLastTopic = -1; /* (the lines are shared with the guide's) */
     Font_PushStyle();
@@ -660,6 +732,7 @@ void Vita_GuideFightPage(int x0, int x1, int y0, int y1) {
         sFightLog--;
         Vita_Log("vita: guide: Vita Controls page %d: box %d,%d-%d,%d, %d lines, %d text commands queued\n", sFightPage, x0, y0, x1, y1, n,
                  (int)Font_GetCmdCount());
+        log_cmds("Vita Controls", first);
     }
 }
 
