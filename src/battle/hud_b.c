@@ -911,6 +911,16 @@ void HudGauge_DrawHp(void) {
 #ifdef PORT
     HudGauge_HpAnchor(1);
 #endif
+#ifdef PORT_VITA
+    { /* the HUD's life bar drawn this frame: an online fight's names go under the bars (port/vita/vita_netline.c) */
+        extern void Vita_NetHudSeen(int tag);
+#ifdef BT4_TAG_TEAM_EXPANDED
+        Vita_NetHudSeen(sTagHudActor >= 0);
+#else
+        Vita_NetHudSeen(0);
+#endif
+    }
+#endif
     HUDG_HP_CLEAR();
     HudGauge_UpdateHp();
 #ifdef BT4_TAG_TEAM_EXPANDED

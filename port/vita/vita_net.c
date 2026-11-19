@@ -59,6 +59,12 @@ void Vita_NetSetting(const char *name, const char *value) {
         gVitaNetNeutralWanted = atoi(value);
     } else if (strcmp(name, "online_speed") == 0) { /* a session faster than 100 %: the Vita's pacing (vita_netglue.c) */
         gVitaNetSpeedOn = atoi(value);
+    } else if (strcmp(name, "online_names") == 0) { /* the names under the health bars (vita_netline.c) */
+        extern int gVitaNetNames;
+        gVitaNetNames = atoi(value);
+    } else if (strcmp(name, "online_hold") == 0) { /* the banner while the game waits (vita_netline.c) */
+        extern int gVitaNetHold;
+        gVitaNetHold = atoi(value);
     } else if (strcmp(name, "online_line") == 0) { /* the session's banner and notices drawn (vita_netline.c) */
         extern int gVitaNetLine;
         gVitaNetLine = atoi(value);

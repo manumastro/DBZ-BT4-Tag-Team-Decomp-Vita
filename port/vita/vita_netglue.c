@@ -20,7 +20,10 @@ extern char gVitaDisc[];
 extern int Update_OnlineRequired(void); /* vita_net.c: the server said UPDATE_REQUIRED */
 
 /* ---- the PC renderer (gs_draw.c): the last picture held while the session waits ---- */
-void Gs_HoldFrame(void) {}
+void Gs_HoldFrame(void) {
+    extern void Vita_NetLineHold(void); /* (vita_netline.c, bt3.txt online_hold: the banner over the picture on show) */
+    Vita_NetLineHold();
+}
 void Gs_NetworkWait(int waiting) { (void)waiting; }
 
 /* ---- the F1 window's lines (ui.cpp): Port_UiNotice and Port_UiBanner are vita_netline.c's (drawn the Vita's way) ---- */

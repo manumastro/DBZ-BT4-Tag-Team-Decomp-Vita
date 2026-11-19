@@ -14,7 +14,8 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
   rival...", a desync) drawn in the port screens' own window and letters (`online_line`); **Ad Hoc rooms** in the PC's
   menus: Create Match > Connection "Ad Hoc" and Join > "AD HOC", a list of the rooms nearby, the PC's lobby and match
   carried over Ad Hoc (`adhoc_menu`, needs two Vitas); in a session the Vita Settings that change the pad are neutral
-  (`online_neutral`) and a room's speed above 100 % is kept (`online_speed`).
+  (`online_neutral`) and a room's speed above 100 % is kept (`online_speed`); the waiting message over the held
+  picture (`online_hold`) and the players' names under the health bars (`online_names`).
 
 ## v1.4.1 (2026-11-18)
 

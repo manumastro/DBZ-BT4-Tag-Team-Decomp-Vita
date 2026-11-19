@@ -11,13 +11,13 @@
  * three, in the game's frame, no pass of its own.
  *
  * bt3.txt online_line: 0 the lines only logged (the old way), 1 drawn. Default 0 until seen on the console.
- * Not yet: the PC draws the waiting banner over the last picture again and again while the game's thread waits
- * (Gs_HoldFrame); on the Vita nothing is drawn while the game's thread waits, so the line shows from the first
- * frame after the wait (the handoff in notes/online/vita-multiplayer-plan.md section 7).
+ * While the game's thread waits (net.c Gs_HoldFrame) no frame is drawn: bt3.txt online_hold=1 writes the banner into
+ * the picture on show instead (Vita_NetLineHold, at the end of this file).
  */
 #include <stdio.h>
 #include <string.h>
 #include <psp2/kernel/processmgr.h>
+#include <psp2/kernel/threadmgr.h>
 
 extern void Vita_Log(const char *fmt, ...);
 extern const char *PortOnline_Text(const char *text); /* (gs/online_language.c: the player's language) */
@@ -33,6 +33,7 @@ extern float Ps_TextWidth(char *str, float scale);
 #include "menu/tbo_art.h" /* (plain C: TBO_KIT_DIALOG, the window of the hosts' lines) */
 
 int gVitaNetLine; /* bt3.txt online_line */
+extern int gVitaNetHold; /* bt3.txt online_hold (the held picture, below) */
 
 #define LINE_MAX 4
 typedef struct NetLine {
@@ -133,6 +134,51 @@ static void draw_line(NetLine *l, float middle, int dimmed, int style) {
     Ps_Align(0);
 }
 
+/* ---- the players' names under the health bars (bt3.txt online_names) ----
+   The PC writes each side's online name under its health bar while the HUD is on screen (ui.cpp, `names`: 106 of the
+   HUD's 512 x 448 units in from the outer edge, 56 down, white with a dark edge). Here the same place and words, in the
+   kit's letters, drawn in the game's frame only when the game drew its life bars in it (src/battle/hud_b.c
+   HudGauge_DrawHp, PORT_VITA: not in an intro or a cut-in) and not in a Tag Team fight's HUD. 0: not drawn; 2 (the
+   development build) sample names in any fight, without a session, for the console's screenshots. */
+int gVitaNetNames;
+static unsigned sFrameN, sHudFrameN;
+static int sHudTag;
+void Vita_NetHudSeen(int tag) {
+    sHudFrameN = sFrameN;
+    sHudTag = tag;
+}
+static void draw_names(void) {
+    extern int Port_NetSession(void), Port_HudSwap(void);
+    extern const char *Port_NetName(int player);
+    static char name[2][40];
+    int place;
+    int check = 0;
+#ifndef PORT_VITA_RELEASE
+    check = gVitaNetNames == 2 && !Port_NetSession(); /* (online_names=2: sample names in any fight, for screenshots) */
+#endif
+    if (!gVitaNetNames || (!Port_NetSession() && !check) || sHudTag || sFrameN - sHudFrameN > 2) {
+        return;
+    }
+    Ps_PageSet();
+    Ps_SetShift(0.0f);
+    for (place = 0; place < 2; place++) {
+        const char *t = check ? (place == 0 ? "Goku_Fan_99" : "VegetaPrince") : Port_NetName(place ^ Port_HudSwap());
+        int i, k;
+        if (t == NULL || t[0] == '\0') {
+            continue;
+        }
+        for (i = k = 0; t[i] != '\0' && k < (int)sizeof(name[0]) - 1; i++) { /* (the other side's text: printable only) */
+            if ((unsigned char)t[i] >= 0x20 && t[i] != 0x7F) {
+                name[place][k++] = t[i];
+            }
+        }
+        name[place][k] = '\0';
+        Ps_Align(place == 0 ? 0 : 2);
+        Ps_TextRaw(place == 0 ? 106.0f : 512.0f - 106.0f, 56.0f, name[place], 0.42f, 140.0f, 0);
+    }
+    Ps_Align(0);
+}
+
 /* Once a frame of every screen (src/sys/gfx.c Gfx_EndFrame, PORT_VITA), after the spectator's line. */
 #ifndef PORT_VITA_RELEASE
 /* online_line=2 (the development build): the lines on one Vita without a session, for the console's screenshots:
@@ -154,6 +200,18 @@ static void line_check(void) {
     step = s;
     if (s == 0) {
         Port_UiBanner("Connecting to your rival...", 0);
+        if (gVitaNetHold) { /* (online_hold=1 too: the game's thread held here 4 s, as net.c's wait holds it) */
+            extern void Vita_NetLineHold(void);
+            unsigned long long h = now_us();
+            while (now_us() - h < 4000000ull) {
+                if (now_us() - h > 2000000ull && strncmp(sBanner.text, "Your", 4) != 0) {
+                    Port_UiBanner("Your rival \"Vegeta\" is here! The match begins.\nRound trip: ~12 ms", 0);
+                }
+                Vita_NetLineHold();
+                sceKernelDelayThread(10000);
+            }
+            Port_UiBanner("Connecting to your rival...", 0);
+        }
     } else if (s == 1) {
         Port_UiBanner("Your rival \"Vegeta\" is here! The match begins.\nRound trip: ~12 ms", 0);
         Port_UiBanner(NULL, 4000);
@@ -167,6 +225,8 @@ void Vita_NetLineDraw(int vsyncs) {
     unsigned long long t;
     int banner, notice;
     (void)vsyncs;
+    sFrameN++;
+    draw_names();
 #ifndef PORT_VITA_RELEASE
     if (gVitaNetLine == 2) {
         line_check();
@@ -197,4 +257,145 @@ void Vita_NetLineDraw(int vsyncs) {
     if (notice) { /* near the top (the PC: 12 % down), white */
         draw_line(&sNotice, 54.0f, 0, 0);
     }
+}
+
+/* ---- the held picture (net.c Gs_HoldFrame; bt3.txt online_hold) ----
+   While the game's thread waits for the other side (the start of a session, a spectator's wait, the data check), the
+   PC draws its last picture again and again with the banner over it, dimmed. On the Vita the screen goes on showing
+   the last picture by itself (nothing is swapped meanwhile); what is missing is the banner. online_hold=1 writes it
+   straight into the picture on show (sceDisplayGetFrameBuf), on the game's thread, the renderer idle (Port_GsSync):
+   the picture dimmed once, then a dark window with the banner's lines in the port's own TrueType letters (the same
+   font and lines the kit draws: gs/menu_text.c MenuText_LineRender), drawn again only when the text changes or the
+   picture on show is another one. No vitaGL call, no texture, no pass on the chip. 0: the old way (nothing drawn
+   while the game waits). Not done here: a system dialog during the wait (it needs vitaGL's swaps). */
+#include <stdlib.h>
+#include <stdint.h>
+#include <psp2/display.h>
+
+int gVitaNetHold; /* bt3.txt online_hold */
+extern uint8_t *MenuText_LineRender(int kind, const char *text, int cap, int pad, int *w, int *h, int *base);
+
+static void *sHoldBase;
+static unsigned sHoldVersion, sHoldShown;
+static unsigned long long sHoldLast;
+unsigned gVitaHoldN[2]; /* (the log) pictures dimmed, windows drawn */
+
+static void hold_rect(uint32_t *px, int pitch, int x0, int y0, int x1, int y1, uint32_t c) {
+    int x, y;
+    for (y = y0; y < y1; y++) {
+        uint32_t *row = px + (size_t)y * pitch;
+        for (x = x0; x < x1; x++) {
+            row[x] = c;
+        }
+    }
+}
+
+/* a line's coverage blended into the picture at (x, y): a dark outline (the eight neighbours), then the colour */
+static void hold_text(uint32_t *px, int pitch, int fw, int fh, const char *text, int cap, int cx, int y, int maxw, uint32_t rgb) {
+    int w = 0, h = 0, base = 0, i, j, pass;
+    uint8_t *cov = MenuText_LineRender(0, text, cap, 2, &w, &h, &base);
+    int x0;
+    if (cov == NULL) {
+        return;
+    }
+    x0 = cx - (w < maxw ? w : maxw) / 2;
+    for (pass = 0; pass < 2; pass++) {
+        uint32_t r = pass ? (rgb & 0xFF) : 0, g = pass ? ((rgb >> 8) & 0xFF) : 0, b = pass ? ((rgb >> 16) & 0xFF) : 0;
+        for (j = 0; j < h; j++) {
+            int ty = y + j;
+            if (ty < 0 || ty >= fh) {
+                continue;
+            }
+            for (i = 0; i < w && i < maxw; i++) {
+                int a = cov[j * w + i], tx = x0 + i;
+                if (pass == 0) { /* (the outline: the most of the neighbours' coverage) */
+                    int dx, dy;
+                    a = 0;
+                    for (dy = -1; dy <= 1; dy++) {
+                        for (dx = -1; dx <= 1; dx++) {
+                            int ii = i + dx, jj = j + dy;
+                            if (ii >= 0 && jj >= 0 && ii < w && jj < h && cov[jj * w + ii] > a) {
+                                a = cov[jj * w + ii];
+                            }
+                        }
+                    }
+                }
+                if (a == 0 || tx < 0 || tx >= fw) {
+                    continue;
+                }
+                {
+                    uint32_t *d = px + (size_t)ty * pitch + tx, o = *d;
+                    uint32_t or_ = o & 0xFF, og = (o >> 8) & 0xFF, ob = (o >> 16) & 0xFF;
+                    or_ = (or_ * (255 - a) + r * a) / 255;
+                    og = (og * (255 - a) + g * a) / 255;
+                    ob = (ob * (255 - a) + b * a) / 255;
+                    *d = 0xFF000000u | (ob << 16) | (og << 8) | or_;
+                }
+            }
+        }
+    }
+    free(cov);
+}
+
+void Vita_NetLineHold(void) {
+    extern void Port_GsSync(void);
+    extern volatile unsigned gVitaShown; /* (vita_vgl.c: pictures the display has taken) */
+    SceDisplayFrameBuf fb;
+    unsigned long long t = now_us();
+    uint32_t *px;
+    int fw, fh, pitch, cap, step, i, pw, ph, x0, y0;
+    if (!gVitaNetHold || !gVitaNetLine) {
+        return;
+    }
+    if (t - sHoldLast < 33000ull) { /* (as the PC: at most 30 a second) */
+        return;
+    }
+    sHoldLast = t;
+    Port_GsSync(); /* (the renderer has nothing in hand) */
+    memset(&fb, 0, sizeof(fb));
+    fb.size = sizeof(fb);
+    if (sceDisplayGetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME) < 0 || fb.base == NULL || fb.pixelformat != SCE_DISPLAY_PIXELFORMAT_A8B8G8R8) {
+        return;
+    }
+    px = (uint32_t *)fb.base;
+    fw = (int)fb.width;
+    fh = (int)fb.height;
+    pitch = (int)fb.pitch;
+    if (fb.base != sHoldBase || gVitaShown != sHoldShown) { /* another picture on show: dimmed once (black at 150 of 255, as the PC) */
+        int x, y;
+        for (y = 0; y < fh; y++) {
+            uint32_t *row = px + (size_t)y * pitch;
+            for (x = 0; x < fw; x++) {
+                uint32_t o = row[x];
+                row[x] = 0xFF000000u | (((o >> 16 & 0xFF) * 105 / 255) << 16) | (((o >> 8 & 0xFF) * 105 / 255) << 8) | ((o & 0xFF) * 105 / 255);
+            }
+        }
+        sHoldBase = fb.base;
+        sHoldShown = gVitaShown;
+        sHoldVersion = sBanner.version - 1; /* (the window drawn again on it) */
+        gVitaHoldN[0]++;
+    }
+    if (sHoldVersion == sBanner.version) {
+        return;
+    }
+    sHoldVersion = sBanner.version;
+    if (sBanner.drawnVersion != sBanner.version) {
+        sBanner.drawnVersion = sBanner.version;
+        wrap(&sBanner);
+    }
+    /* the window: fixed in size (a shorter text after a longer one leaves nothing behind), dark navy with a gold edge,
+       in the middle; its lines gold, as the frames' banner */
+    cap = fh / 20;
+    step = cap * 2;
+    pw = fw * 8 / 10;
+    ph = step * LINE_MAX + cap;
+    x0 = (fw - pw) / 2;
+    y0 = (fh - ph) / 2;
+    hold_rect(px, pitch, x0 - 2, y0 - 2, x0 + pw + 2, y0 + ph + 2, 0xFF3C9CD8u);
+    hold_rect(px, pitch, x0, y0, x0 + pw, y0 + ph, 0xFF280E0Au);
+    for (i = 0; i < sBanner.lines; i++) {
+        int y = y0 + (ph - step * sBanner.lines) / 2 + step * i + cap / 4;
+        hold_text(px, pitch, fw, fh, sBanner.line[i], cap, fw / 2, y, pw - cap, i == 0 ? 0x78ECFFu : 0xFFFFFFu);
+    }
+    gVitaHoldN[1]++;
 }
