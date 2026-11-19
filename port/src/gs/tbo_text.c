@@ -20,6 +20,7 @@
 #include <SDL3/SDL.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -209,6 +210,16 @@ int PortTbo_TextInfo(int id, int what) {
 }
 
 #ifdef PORT_VITA
+/* (vita_tbo.c, a diagnostic) the words of line `id`, copied into out */
+void TboText_Words(uint32_t id, char *out, int size) {
+    out[0] = 0;
+    pthread_mutex_lock(&sLock);
+    if (id >= TBO_TEXT_BASE && id < TBO_TEXT_BASE + TBO_TEXT_SLOTS) {
+        const TboLine *l = &sLines[id - TBO_TEXT_BASE];
+        snprintf(out, (size_t)size, "%s (kind %d, cap %d, %d x %d, narrow %d/%d)", l->text, l->kind, l->cap, l->w, l->h, l->vsx, l->vsy);
+    }
+    pthread_mutex_unlock(&sLock);
+}
 /* (vita_tbo.c line_pixels, taguivita) how much narrower / shorter the line's picture is made, in thousandths: 1 when
    it is to be, 0 none */
 int TboText_VitaScale(uint32_t id, int *sx, int *sy) {

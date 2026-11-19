@@ -892,6 +892,12 @@ static void Ps_MsgDraw(f32 x, f32 y, char *str, f32 scale, s32 alpha,s32 literal
     id = str[0] == 0 ? -1 : literal ? PortTbo_TextIdLiteral(str, 1) : PortTbo_TextId(str, 1);
     Ps_VitaWant(0, 1000, 1000);
     if (id < 0) {
+        static s32 told;
+        if (str[0] != 0 && told < 16) { /* (a diagnostic: a line of the talk box's kind that could not be written) */
+            extern void Vita_Log(const char *fmt, ...);
+            told++;
+            Vita_Log("ps: the line \"%s\" could not be written (no font, no room)\n", str);
+        }
         sPsSnap = 0;
         return;
     }

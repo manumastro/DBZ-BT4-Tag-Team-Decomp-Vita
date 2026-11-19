@@ -221,7 +221,7 @@ typedef struct {
 #define TBO_NAME(id, name) name,
 static const char *const kTboNames[TBO_ART_COUNT] = {TBO_ART_LIST(TBO_NAME)};
 #undef TBO_NAME
-static TboTex sPic[TBO_ART_COUNT], sText[TBO_TEXT_SLOTS], sEmblem, sLetters[2];
+static TboTex sPic[TBO_ART_COUNT], sText[TBO_TEXT_SLOTS], sEmblem, sLetters[2], sGuideLetters[2];
 static TboTex sHudAtlas; /* (taghudvita: tbo/ui/tag_hud_vita.vt, 128 x 112, 56 KB, kept from its first use) */
 static TboTex sUiAtlas;  /* (taguivita: tbo/ui/tag_ui_vita.vt, 512 x 248, 496 KB, kept from the first seconds) */
 
@@ -1084,7 +1084,31 @@ void Vita_TboLineAsked(uint32_t id, uint32_t version) {
     line_asked(id, version, 1);
 }
 
+static unsigned tbo_line_(uint32_t id);
+/* (a diagnostic: a line asked for and not drawn for 2 s is written in the log, once a version; the Tag screens' footer
+   lost its "Change" this way, 2026-11-19) */
 static unsigned tbo_line(uint32_t id) {
+    static unsigned short missed[TBO_TEXT_SLOTS];
+    static uint32_t told[TBO_TEXT_SLOTS];
+    unsigned tex = tbo_line_(id), k = id - TBO_TEXT_BASE;
+    if (tex != 0) {
+        missed[k] = 0;
+    } else if (++missed[k] == 120) {
+        TboTex *t = &sText[k];
+        uint32_t v = TboText_Version(id);
+        if (told[k] != v) {
+            extern void TboText_Words(uint32_t id, char *out, int size);
+            char words[200];
+            told[k] = v;
+            TboText_Words(id, words, sizeof(words));
+            Vita_Log("tbo: line %u not drawn for 120 pictures: %s; version %u, its picture's %u, state %d, made %u, failed %u\n",
+                     (unsigned)id, words, (unsigned)v, (unsigned)t->version, (int)t->state, (unsigned)t->madeVersion,
+                     (unsigned)t->failVersion);
+        }
+    }
+    return tex;
+}
+static unsigned tbo_line_(uint32_t id) {
     static unsigned frame, made;
     TboTex *t = &sText[id - TBO_TEXT_BASE];
     uint32_t version = TboText_Version(id), w, h, *px;
@@ -1206,6 +1230,11 @@ static unsigned tbo_line(uint32_t id) {
    written in the Menu font (letter_fallback), so it always shows. */
 #define LETTER_HOME PORT_VITA_HOME "/gamedata"
 static unsigned char *sLetterPic[2];
+/* The Vita Guide's main-menu entry (src/menu/menu_a.c) in the same lettering: "Vita Guide" / "Guía Vita" (the i with
+   its accent made from the disc's i, bt4_main_lettering.inc), pictures TBO_VITA_GUIDE_OFF / ON */
+#define TBO_VITA_GUIDE_OFF 0x242
+#define TBO_VITA_GUIDE_ON 0x243
+static unsigned char *sGuidePic[2];
 static volatile int sLetterState; /* 0 not begun, 1 being made, 2 done (sLetterPic NULL: not made) */
 extern uint8_t *MenuText_LineRender(int kind, const char *text, int cap, int pad, int *w, int *h, int *base); /* menu_text.c */
 extern void MenuText_LinePrewarm(int kind, int cap);
@@ -1213,9 +1242,9 @@ extern int gVitaTboTextSize; /* tbo_text.c */
 
 /* "Tag Team" in the Menu font as a 512 x 32 picture of the main menu's row (straight RGBA): the letters left at the
    row's margin, their capitals 18 pixels, a gold fill (the chosen row a brighter one) with a dark brown edge. */
-static unsigned char *letter_fallback(int lit) {
+static unsigned char *letter_fallback(const char *text, int lit) {
     int w, h, base, x, y, dx, dy;
-    uint8_t *cov = MenuText_LineRender(0, "Tag Team", 18, 3, &w, &h, &base);
+    uint8_t *cov = MenuText_LineRender(0, text, 18, 3, &w, &h, &base);
     unsigned char *out;
     static const unsigned char top[2][3] = {{255, 244, 196}, {255, 255, 150}}, bottom[2][3] = {{232, 168, 56}, {255, 140, 16}},
                                 edge[2][3] = {{58, 28, 8}, {96, 30, 0}};
@@ -1267,7 +1296,17 @@ static int letter_thread(unsigned args, void *argp) {
     snprintf(root, sizeof(root), "%s/%s", LETTER_HOME, Port_GameProfileEnglish() ? "en" : "es");
     sceIoMkdir(LETTER_HOME, 0777);
     if (Vita_MemberFile("pzs4us1", 448, root) && Vita_MemberFile("pzs4us1", 449, root)) {
-        ok = MenuLabels_Bt4MainItem(root, "Tag Team", sLetterPic);
+        extern int MenuLabels_Bt4MainItems(const char *root, const char *const *labels, int count, unsigned char **out);
+        const char *labels[2] = {"Tag Team", Port_GameProfileEnglish() ? "Vita Guide" : "Gu\xC3\xAD" "a Vita"};
+        unsigned char *pics[4] = {NULL, NULL, NULL, NULL};
+        ok = MenuLabels_Bt4MainItems(root, labels, 2, pics);
+        sLetterPic[0] = pics[0];
+        sLetterPic[1] = pics[1];
+        sGuidePic[0] = pics[2];
+        sGuidePic[1] = pics[3];
+        if (ok && (pics[2] == NULL || pics[3] == NULL)) {
+            Vita_Log("tbo: the Vita Guide's lettering could not be put together from the disc (%s): written in the Menu font\n", root);
+        }
         if (!ok) {
             Vita_Log("tbo: the main menu's Tag Team lettering could not be put together from the disc (%s): written in the Menu font\n", root);
         }
@@ -1277,8 +1316,15 @@ static int letter_thread(unsigned args, void *argp) {
     if (!ok) {
         free(sLetterPic[0]);
         free(sLetterPic[1]);
-        sLetterPic[0] = letter_fallback(0);
-        sLetterPic[1] = letter_fallback(1);
+        sLetterPic[0] = letter_fallback("Tag Team", 0);
+        sLetterPic[1] = letter_fallback("Tag Team", 1);
+    }
+    if (sGuidePic[0] == NULL || sGuidePic[1] == NULL) {
+        const char *guide = Port_GameProfileEnglish() ? "Vita Guide" : "Gu\xC3\xAD" "a Vita";
+        free(sGuidePic[0]);
+        free(sGuidePic[1]);
+        sGuidePic[0] = letter_fallback(guide, 0);
+        sGuidePic[1] = letter_fallback(guide, 1);
     }
     __sync_synchronize();
     sLetterState = 2;
@@ -1304,8 +1350,9 @@ static void letters_start(void) {
     }
 }
 
-static unsigned tbo_letters(int lit) {
-    TboTex *t = &sLetters[lit];
+static unsigned tbo_letters(int lit, int guide) {
+    TboTex *t = guide ? &sGuideLetters[lit] : &sLetters[lit];
+    unsigned char *const *pic = guide ? sGuidePic : sLetterPic;
     uint32_t w = 512, h = 32, *px;
     size_t i;
 
@@ -1318,7 +1365,7 @@ static unsigned tbo_letters(int lit) {
         return 0; /* (not yet: the plate without its words for a moment) */
     }
     __sync_synchronize();
-    if (sLetterPic[lit] == NULL) {
+    if (pic[lit] == NULL) {
         t->missing = 1;
         return 0;
     }
@@ -1327,13 +1374,28 @@ static unsigned tbo_letters(int lit) {
         return 0;
     }
     for (i = 0; i < 512 * 32; i++) { /* (8-bit alpha to the GS's) */
-        const uint8_t *c = sLetterPic[lit] + i * 4;
+        const uint8_t *c = pic[lit] + i * 4;
         px[i] = (uint32_t)c[0] | ((uint32_t)c[1] << 8) | ((uint32_t)c[2] << 16) | ((((uint32_t)c[3] * 128 + 127) / 255) << 24);
     }
     if (MIP_ON()) {
         tbo_bleed(px, w, h);
     }
-    return tbo_make(t, px, w, h, lit ? "main menu lettering, chosen" : "main menu lettering", 0);
+    return tbo_make(t, px, w, h, guide ? (lit ? "Vita Guide lettering, chosen" : "Vita Guide lettering")
+                                       : (lit ? "main menu lettering, chosen" : "main menu lettering"), 0);
+}
+
+/* src/menu/menu_a.c: the Vita Guide entry's picture number (as it is / chosen), 0 while its lettering is not made yet
+   (the entry then written in the game's font) */
+unsigned Vita_GuideLetterId(int lit) {
+    if (!tbo_on()) {
+        return 0;
+    }
+    letters_start();
+    if (sLetterState != 2) {
+        return 0;
+    }
+    __sync_synchronize();
+    return sGuidePic[0] != NULL && sGuidePic[1] != NULL ? (lit ? TBO_VITA_GUIDE_ON : TBO_VITA_GUIDE_OFF) : 0;
 }
 
 /* (taguivita) tbo/ui/tag_ui_vita.vt, read on the drawing thread the first time (496 KB, no decoding) and kept */
@@ -1374,7 +1436,8 @@ static unsigned tbo_texture(uint32_t id, int *mip) {
         *mip = tex != 0 && sText[id - TBO_TEXT_BASE].mip;
         return gated ? 0 : tex;
     }
-    if (gated && id != TBO_MAIN_TAG_OFF && id != TBO_MAIN_TAG_ON && id != TBO_MAIN_TAG_EMBLEM) {
+    if (gated && id != TBO_MAIN_TAG_OFF && id != TBO_MAIN_TAG_ON && id != TBO_MAIN_TAG_EMBLEM && id != TBO_VITA_GUIDE_OFF &&
+        id != TBO_VITA_GUIDE_ON) {
         gVitaTboGated++;
         return 0;
     }
@@ -1382,8 +1445,13 @@ static unsigned tbo_texture(uint32_t id, int *mip) {
         unsigned tex;
         sPreAsked = gGsFrame; /* (the main menu, or the Duel menu's Tag type, is shown: the Tag Team screens' pictures are made ahead) */
         tbo_prefetch();
-        tex = tbo_letters(id == TBO_MAIN_TAG_ON);
+        tex = tbo_letters(id == TBO_MAIN_TAG_ON, 0);
         *mip = tex != 0 && sLetters[id == TBO_MAIN_TAG_ON].mip;
+        return tex;
+    }
+    if (id == TBO_VITA_GUIDE_OFF || id == TBO_VITA_GUIDE_ON) {
+        unsigned tex = tbo_letters(id == TBO_VITA_GUIDE_ON, 1);
+        *mip = tex != 0 && sGuideLetters[id == TBO_VITA_GUIDE_ON].mip;
         return tex;
     }
     if (id == TBO_TAG_MOVIE) {

@@ -16,6 +16,18 @@ extern int Port_MenuClipMoving(const char *name, int x, int top);
 extern int Port_MenuFree(int on);
 static int gPortFlashMeasure;  /* FlashDraw_Quad only measures (gPortFlashBox: the leftmost and rightmost x) */
 static float gPortFlashBox[2];
+#ifdef PORT_VITA
+/* A clip drawn by a port callback (Flash_ClipSetCustomDraw): the box its own shapes would cover, measured before the
+   callback, relative to its drawing state (Vita_FlashCustomBox: the main menu's Tag Team / Vita Guide rows). */
+static float sVitaFlashBoxY[2];
+static float sVitaCustomBox[4];
+static int sVitaCustomBoxOk;
+int Vita_FlashCustomBox(float box[4]) {
+    if (!sVitaCustomBoxOk) return 0;
+    box[0] = sVitaCustomBox[0]; box[1] = sVitaCustomBox[1]; box[2] = sVitaCustomBox[2]; box[3] = sVitaCustomBox[3];
+    return 1;
+}
+#endif
 #include "port_render_markers.h"
 static const void *sPortraitFade[2];
 static u64 sPortraitPrim;
@@ -705,6 +717,29 @@ void FlashSlot_Draw(FlashSlot *slot, FlashProp *parent, Flash *flash) {
         }
 #endif
         if (!(clip->flags & 0x10)) FlashTl_Draw(&clip->tl, &prop);
+#ifdef PORT_VITA
+        sVitaCustomBoxOk = 0;
+        if ((clip->flags & 0x10) && clip->drawOver != NULL) {
+            /* the shapes the callback stands in for, measured (nothing drawn): their box in the callback's terms,
+               (screen - the state's position) / its scale */
+            f32 sx = prop.mtx.m[0], sy = prop.mtx.m[4], ox = prop.mtx.m[2], oy = prop.mtx.m[5];
+            if (prop.flags & FLASH_OV_SCALE) { sx *= prop.scaleX; sy *= prop.scaleY; }
+            if (prop.flags & FLASH_OV_POS) { ox += prop.x; oy += prop.y; }
+            if (!(prop.flags & FLASH_OV_NO_OFS)) { ox += (f32)flash->ofs[0]; oy += (f32)flash->ofs[1]; }
+            gPortFlashMeasure = 1;
+            gPortFlashBox[0] = sVitaFlashBoxY[0] = 1e9f;
+            gPortFlashBox[1] = sVitaFlashBoxY[1] = -1e9f;
+            FlashTl_Draw(&clip->tl, &prop);
+            gPortFlashMeasure = 0;
+            if (gPortFlashBox[0] < gPortFlashBox[1] && sVitaFlashBoxY[0] < sVitaFlashBoxY[1] && sx > 1e-4f && sy > 1e-4f) {
+                sVitaCustomBox[0] = (gPortFlashBox[0] - ox) / sx;
+                sVitaCustomBox[1] = (sVitaFlashBoxY[0] - oy) / sy;
+                sVitaCustomBox[2] = (gPortFlashBox[1] - ox) / sx;
+                sVitaCustomBox[3] = (sVitaFlashBoxY[1] - oy) / sy;
+                sVitaCustomBoxOk = 1;
+            }
+        }
+#endif
         if (clip->drawOver != NULL) {
             clip->drawOver(clip->overArg, &prop);
         }
@@ -926,6 +961,10 @@ void FlashDraw_Quad(FlashTex *tex, FlashQuad *q) {
         for (i = 0; i < 4; i++) {
             gPortFlashBox[0] = q->pt[i][0] < gPortFlashBox[0] ? q->pt[i][0] : gPortFlashBox[0];
             gPortFlashBox[1] = q->pt[i][0] > gPortFlashBox[1] ? q->pt[i][0] : gPortFlashBox[1];
+#ifdef PORT_VITA
+            sVitaFlashBoxY[0] = q->pt[i][1] < sVitaFlashBoxY[0] ? q->pt[i][1] : sVitaFlashBoxY[0];
+            sVitaFlashBoxY[1] = q->pt[i][1] > sVitaFlashBoxY[1] ? q->pt[i][1] : sVitaFlashBoxY[1];
+#endif
         }
         return;
     }

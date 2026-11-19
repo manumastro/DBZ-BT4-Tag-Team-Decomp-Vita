@@ -54,6 +54,15 @@ extern int Vita_GuideOn(void), Vita_TagMenu(void), Vita_GuideIsOpen(void), Vita_
 extern void Vita_GuideOpen(void), Vita_GuideDraw(void), Vita_GuideMenuLabel(f32, f32, f32, f32, int, int);
 extern u16 *Vita_GuideMenuDescription(void);
 #define MAINMENU_VITA_GUIDE() (Vita_GuideOn() && Vita_TagMenu() != 2)
+/* The rows the port adds (the Vita Guide, Tag Team) drawn where the movie's own label and icon would be: the box their
+   shapes cover (src/sys/gfxm_c.c Vita_FlashCustomBox, measured each frame), so the lettering is the size of its
+   neighbours' and the icon the size of theirs. bt3.txt guidetest bit 128: the earlier fixed places, for comparing. */
+extern int Vita_FlashCustomBox(float box[4]);
+extern unsigned Vita_GuideLetterId(int lit);
+extern int gVitaGuideTest;
+static int PortMainMenu_Box(float box[4]) {
+    return !(gVitaGuideTest & 128) && Vita_FlashCustomBox(box);
+}
 #endif
 typedef struct OnlineLabelProp {
     u32 flags;f32 x,y,alpha,scaleX,scaleY,color;MFlashUv uv;
@@ -77,7 +86,14 @@ static void PortMainMenu_OnlineLabel(void *arg,OnlineLabelProp *p){
     if(p->flags&2){x+=p->x;y+=p->y;}
     if(p->flags&8)alpha=(s32)(alpha*p->alpha);
 #ifdef PORT_VITA
-    if(MAINMENU_VITA_GUIDE()){Vita_GuideMenuLabel(x,y,sx,sy,alpha,arg!=NULL);return;}
+    if(MAINMENU_VITA_GUIDE()){
+        float box[4];unsigned id=PortMainMenu_Box(box)?Vita_GuideLetterId(arg!=NULL):0;
+        if(!id){Vita_GuideMenuLabel(x,y,sx,sy,alpha,arg!=NULL);return;}
+        /* "Vita Guide" in the menu's own lettering (put together from the disc's letters), over the row's label box */
+        Ps_PageSet();Ps_SetShift(0);
+        Ps_Sprite(id,Ps_Left()+x+box[0]*sx,y+box[1]*sy,Ps_Left()+x+box[2]*sx,y+box[3]*sy,0,0,1,1,PortMainMenu_LabelTint(p),alpha);
+        return;
+    }
 #endif
     Ps_PageSet();Ps_SetShift(0);
     /* The long name stays inside the plate's cursor end cap, while retaining
@@ -110,6 +126,18 @@ static void PortMainMenu_TagSprite(void *arg,TagSpriteProp *p) {
     if(p->flags&2){x+=p->x;y+=p->y;}
     if(p->flags&8)alpha=(s32)(alpha*p->alpha);
     Ps_PageSet();Ps_SetShift(0);
+#ifdef PORT_VITA
+    {float box[4];
+     if(PortMainMenu_Box(box)){
+        if(icon==1){ /* the emblem in the icon's own box (as large as the other rows' icons), its shape's proportions */
+            f32 w=(box[2]-box[0])*sx,h=(box[3]-box[1])*sy,s=(w<h?w:h)*.92f,cx=x+(box[0]+box[2])*.5f*sx,cy=y+(box[1]+box[3])*.5f*sy;
+            Ps_Sprite(TBO_MAIN_TAG_EMBLEM,Ps_Left()+cx-s*.49f,cy-s*.5f,Ps_Left()+cx+s*.49f,cy+s*.5f,0,0,1,1,PortMainMenu_LabelTint((const OnlineLabelProp *)p),alpha);
+        }else{
+            Ps_Sprite(icon==2?TBO_MAIN_TAG_ON:TBO_MAIN_TAG_OFF,Ps_Left()+x+box[0]*sx,y+box[1]*sy,Ps_Left()+x+box[2]*sx,y+box[3]*sy,0,0,1,1,PortMainMenu_LabelTint((const OnlineLabelProp *)p),alpha);
+        }
+        return;
+     }}
+#endif
     if(icon==1)return; /* the emblem shares the label's baseline and fade */
     Ps_Sprite(TBO_MAIN_TAG_EMBLEM,Ps_Left()+x-35*sx,y-3*sy,Ps_Left()+x-3.8f*sx,y+31*sy,0,0,1,1,PortMainMenu_LabelTint((const OnlineLabelProp *)p),alpha);
     /* Keep the icon's rim outside the text crop; use the selected artwork

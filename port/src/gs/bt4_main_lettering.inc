@@ -1,11 +1,13 @@
 /* Compose the port-owned entry from the installed BT4 menu's own glyphs.
  * The original disc textures remain unchanged. */
-int MenuLabels_Bt4MainItem(const char *root,const char *label,unsigned char *out[2]) {
+/* (several labels at once: out[2 * j + k], label j, k 0 the row as it is, 1 chosen) */
+static int bt4_main_items(const char *root,const char *const *labels,int count,unsigned char **out) {
     static const char *es[]={"Nido del Tiempo","Gira Mundial","Duelo","Entrenamiento","Palacio de Baba","Opciones"};
     static const char *en[]={"Dragon History","Time Nest","Dragon World Tour","Duel Mode","UNUSED","Evolution Z","Ultimate Training","Baba's Palace","Zuno's Temple","Options","Dragon Balls"};
     extern int Port_GameProfileEnglish(void);
     MlCtx *c=calloc(1,sizeof(*c));MlBuf main,select;int ok=0,w,h;
-    out[0]=out[1]=NULL;if(!c)return 0;
+    for(int j=0;j<2*count;j++)out[j]=NULL;
+    if(!c)return 0;
     pthread_mutex_lock(&sMlCutter);
     for(int number=448;number<=449;number++){
         char path[1800];snprintf(path,sizeof(path),"%s/pzs4us1/%05d.bin",root,number);
@@ -43,6 +45,32 @@ int MenuLabels_Bt4MainItem(const char *root,const char *label,unsigned char *out
                 }
             }g->sy0=l->sy0;g->sy1=n->sy1;
         }
+#ifdef PORT_VITA
+        /* an i with an acute accent (Spanish "Guía"), as '`' (the menus' letters have none): the i, its dot slanted */
+        if(!st->g['`'].px&&st->g['i'].px){
+            NfGlyph *i=&st->g['i'],*g=&st->g['`'];
+            int top=-1,gap=-1;
+            for(int y=0;y<i->h&&gap<0;y++){int any=0;
+                for(int x=0;x<i->w;x++)if(i->px[(y*i->w+x)*4+3]>40){any=1;break;}
+                if(any&&top<0)top=y;else if(!any&&top>=0)gap=y;}
+            if(top>=0&&gap>top&&gap<i->h){
+                int up=top>=2?2:top,w=i->w+3,h=i->h;
+                *g=*i;g->w=(short)w;g->px=calloc((size_t)w*h,4);
+                if(!g->px)goto done;
+                for(int y=0;y<h;y++)for(int x=0;x<i->w;x++){
+                    const unsigned char *s0=i->px+(y*i->w+x)*4;
+                    if(y>=gap){memcpy(g->px+(y*w+x)*4,s0,4);continue;}
+                    if(s0[3]==0)continue;
+                    /* the dot's rows shifted right the more the higher, the top row drawn again up to two rows above */
+                    for(int k2=0;k2<=(y==top?up:0);k2++){
+                        int ty=y-k2,tx=x+(gap-ty+1)/2;
+                        if(ty>=0&&tx<w){unsigned char *d=g->px+(ty*w+tx)*4;if(s0[3]>d[3])memcpy(d,s0,4);}
+                    }
+                }
+                g->sy0=(short)(i->sy0-up);
+            }
+        }
+#endif
         int baseline=st->g['e'].sy1;
         for(int ch=33;ch<127;ch++)if(st->g[ch].px){
             NfGlyph *g=&st->g[ch];int shift=baseline-g->sy1;
@@ -62,11 +90,31 @@ int MenuLabels_Bt4MainItem(const char *root,const char *label,unsigned char *out
                 }
             }
         }
-        out[k]=MenuLabels_NameCompose_(style,label,&w,&h);
-        if(!out[k]||w!=512||h!=32){fprintf(stderr,"bt4 lettering: compose unavailable %d\n",k);goto done;}
+        for(int j=0;j<count;j++){
+            const char *label=labels[j];
+#ifdef PORT_VITA
+            char plain[64];int n=0;
+            for(const char *t=label;*t&&n<63;t++){
+                if((unsigned char)t[0]==0xC3&&(unsigned char)t[1]==0xAD){plain[n++]='`';t++;}else plain[n++]=*t;}
+            plain[n]=0;label=plain;
+#endif
+            out[2*j+k]=MenuLabels_NameCompose_(style,label,&w,&h);
+            if(!out[2*j+k]||w!=512||h!=32){fprintf(stderr,"bt4 lettering: compose unavailable %d (%s)\n",k,labels[j]);
+                free(out[2*j+k]);out[2*j+k]=NULL;if(j==0)goto done;}
+        }
     }
     ok=1;
 done:
-    if(!ok){free(out[0]);free(out[1]);out[0]=out[1]=NULL;}
+    if(!ok){for(int j=0;j<2*count;j++){free(out[j]);out[j]=NULL;}}
     ml_cutter_clear();pthread_mutex_unlock(&sMlCutter);ml_free(c);free(c);return ok;
 }
+
+int MenuLabels_Bt4MainItem(const char *root,const char *label,unsigned char *out[2]) {
+    return bt4_main_items(root,&label,1,out);
+}
+#ifdef PORT_VITA
+/* (the Vita: the Tag Team entry's and the Vita Guide's labels from one read of the disc's members) */
+int MenuLabels_Bt4MainItems(const char *root,const char *const *labels,int count,unsigned char **out) {
+    return bt4_main_items(root,labels,count,out);
+}
+#endif
