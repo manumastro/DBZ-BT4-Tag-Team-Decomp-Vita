@@ -216,6 +216,7 @@ typedef struct {
     uint32_t *px, w, h, pxVersion, failVersion, retry, readyFrame;
     uint32_t madeVersion; /* (tbotext=1, a line: the version whose picture was made by Vita_TboLineAsked; 0 none) */
     unsigned char mip;    /* the texture has its smaller copies (tbomip=1): sampled with them */
+    unsigned lineTries;   /* (a line: times in a row its picture could not be made) */
 } TboTex;
 
 #define TBO_NAME(id, name) name,
@@ -1076,7 +1077,21 @@ static void line_asked(uint32_t id, uint32_t version, int game) {
     t->state = px != NULL ? 2 : 3;
     t->failVersion = made;
     t->readyFrame = gGsFrame;
+    if (px != NULL) {
+        t->lineTries = 0;
+    } else if (++t->lineTries <= 60) {
+        /* (nothing made, e.g. asked while the fonts were changing: TboText_Pixels finds the line measured otherwise. Kept
+           as "made", the line was never asked again and never drawn: the Tag screens' footer lost its "Change" this way.
+           Asked again, at most 60 times a version.) */
+        t->madeVersion = 0;
+    }
     pthread_mutex_unlock(&sMaker);
+    if (px == NULL && (t->lineTries == 1 || t->lineTries == 61)) {
+        extern void TboText_Words(uint32_t id, char *out, int size);
+        char words[200];
+        TboText_Words(id, words, sizeof(words));
+        Vita_Log("tbo: line %u: no picture made (try %u): %s\n", (unsigned)id, (unsigned)t->lineTries, words);
+    }
     gVitaTboLines[0]++;
     gVitaTboLines[1] += (unsigned)(sceKernelGetProcessTimeWide() - t0);
 }
