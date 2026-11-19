@@ -43,6 +43,15 @@ extern void Font_PrintAt(s32 x, s32 y, u16 *str);
 extern s32 Font_GetWidth(u16 *str);
 extern void Font_FlushAll(void);
 extern void FontIcon_SetPadType(s32 type);
+extern void Font_SetClip(s32 x0, s32 y0, s32 x1, s32 y1);
+extern void Font_SetFlags(s32 flags);
+extern void Font_SetBeginCallback(s32 (*fn)(s32));
+extern void Font_SetTagCallback(void *fn, void *arg);
+extern s32 Font_GetCmdCount(void);
+extern s32 FontIcon_Begin(s32 vramBase);
+extern void FontTag_Handle();
+extern s32 gFontIconPadType;
+static void style_base(void);
 extern void FontIcon_ResetAnim(void);
 extern u64 *Dma_BeginDirect(void);
 extern void Dma_EndDirect(u64 *pkt);
@@ -183,9 +192,7 @@ static int wrap(const char *text, int width, f32 scale) {
         *d = 0;
     }
     Font_PushStyle(); /* (Font_GetWidth measures with the style's scale and spacing: scale 1 here, `scale` below) */
-    Font_SetScaleXY(1.0f, 1.0f);
-    Font_SetScale(1.0f);
-    Font_SetSpacing(0, 0);
+    style_base();
     sLineCount = 0;
     line = sLine[0];
     p = buf;
@@ -278,7 +285,9 @@ static void to_u16(const char *s, u16 *out, int max) {
 }
 
 /* ---- the window: untextured quads in the GS's packet, as the game's own direct packets are made ---- */
+static int sQuads; /* (the log's count of the guide's first pictures) */
 static void quad(u64 **p, int x0, int y0, int x1, int y1, u32 rgba) {
+    sQuads++;
     x0 += 0x700;
     x1 += 0x700;
     y0 += 0x720;
@@ -297,10 +306,11 @@ static void quad(u64 **p, int x0, int y0, int x1, int y1, u32 rgba) {
 static u64 *quads_begin(void) {
     u64 *p = Dma_BeginDirect();
     Gfx_PutDefaultEnv(&p);
-    p[0] = 0x1000000000008002ULL; /* TEST_1 0, ZBUF_1 no depth writes (as the battle menu's box) */
+    p[0] = 0x1000000000008002ULL; /* TEST_1: alpha and depth tests always pass; ZBUF_1 no depth writes (the game's own
+                                     fade rectangle's state, sys/fade.c Fade_DrawRect, drawn over every menu) */
     p[1] = 0xE;
     p += 2;
-    p[0] = 0;
+    p[0] = 0x30000;
     p[1] = 0x47;
     p += 2;
     p[0] = 0x1310000E0ULL;
@@ -321,8 +331,10 @@ static const VgTopic *topics(void) { return gVitaBt4English ? kVgEn : kVgEs; }
 
 int Vita_GuideIsOpen(void) { return sOpen; }
 
+static int sLogFrames; /* the guide's first pictures, each logged (what it handed the renderer) */
 void Vita_GuideOpen(void) {
     sOpen = 1;
+    sLogFrames = 4;
     sTopic = -1; /* the contents */
     sPage = 0;
     Snd_PlaySe(1, 1);
@@ -398,7 +410,26 @@ int Vita_GuideInput(void) {
     return 1;
 }
 
+/* Every field of the font's style set here: Font_PushStyle copies the style of whoever drew last, and the main menu's
+   message window leaves its own (a clip box that grows letter by letter, its scale): text drawn with it came out
+   clipped to a sliver and scaled wrong (the console's first run: a black screen, glyphs as huge sprites, scissor
+   0 0 113 1). As the game's own pages do (dialog.c, pad_watch.c), nothing is taken from before. */
+static void style_base(void) {
+    Font_SetScaleXY(1.0f, 1.0f);
+    Font_SetScale(1.0f);
+    Font_SetSpacing(0, 0);
+    Font_SetAlign(0);
+    Font_SetFlags(0);
+    Font_SetClip(0, 0, 0x200, 0x1C0);
+    Font_SetShadowMode(0);
+    Font_SetShadowOffset(1, 1);
+    Font_SetColorRGBA(0xFF, 0xFF, 0xFF, 0x80);
+    Font_SetBeginCallback(FontIcon_Begin);           /* the <PAD=> icons, as FontIcon_Init hooks them at boot */
+    Font_SetTagCallback((void *)FontTag_Handle, &gFontIconPadType);
+}
+
 static void style_body(void) {
+    style_base();
     Font_SetAlign(0);
     Font_SetScale(GL_SCALE);
     Font_SetSpacing(0, 0);
@@ -409,6 +440,7 @@ static void style_body(void) {
 }
 
 static void style_heading(void) {
+    style_base();
     Font_SetAlign(0);
     Font_SetScale(1.0f);
     Font_SetSpacing(0, 0);
@@ -428,6 +460,7 @@ void Vita_GuideDraw(void) {
         return;
     }
     Font_FlushAll(); /* (the menu's own letters under the window) */
+    sQuads = 0;
     Port_MenuPage(50); /* the 4:3 page in the middle, at its true shape (as the language picker, port_language.c) */
     Port_MenuFill(1); /* (the part's marker before the packet, not inside it) */
     p = quads_begin();
@@ -501,6 +534,18 @@ void Vita_GuideDraw(void) {
     Font_SetColorRGBA(0xD0, 0xE0, 0xF0, 0x80);
     Font_PrintAt(GL_TEXT_X, GL_Y1 - 25, sFoot);
     Font_PopStyle();
+    if (sLogFrames > 0) {
+        int k, letters = 0;
+        sLogFrames--;
+        for (k = 0; k < (sTopic < 0 ? 0 : sLineCount); k++) {
+            const u16 *c = sLine[k];
+            while (*c) {
+                letters += *c++ != ' ';
+            }
+        }
+        Vita_Log("vita: guide: picture: %d quads, %d text commands queued, topic %d page %d (%d lines, %d letters)\n", sQuads,
+                 (int)Font_GetCmdCount(), sTopic, sPage, sTopic < 0 ? VG_TOPICS : sLineCount, letters);
+    }
     Font_FlushAll();
     Port_MenuPage(0);
 }
@@ -514,7 +559,7 @@ void Vita_GuideMenuLabel(f32 x, f32 y, f32 sx, f32 sy, int alpha, int lit) {
     to_u16(gVitaBt4English ? "Vita Guide" : "Guía Vita", sLabel, 32);
     FontIcon_SetPadType(0);
     Font_PushStyle();
-    Font_SetAlign(0);
+    style_base();
     Font_SetScaleXY(1.30f * sx, 1.30f * sy); /* the plate's row is 32 high: capitals as tall as its neighbours' */
     Font_SetScale(1.0f);
     Font_SetSpacing(0, 0);
@@ -554,9 +599,11 @@ u16 *Vita_GuideFightItemText(void) {
     return t;
 }
 
+static int sFightLog;
 void Vita_GuideFightBegin(int tag) {
     sTagFight = tag;
     sFightPage = 0;
+    sFightLog = 3;
 }
 
 /* the page's item, every frame while it is open: LEFT / RIGHT the Tag Team page, SQUARE the reminder (as the skill
@@ -609,6 +656,11 @@ void Vita_GuideFightPage(int x0, int x1, int y0, int y1) {
     Font_SetColorRGBA(0xD0, 0xE0, 0xF0, 0x80);
     Font_PrintAt(x0 + 4, y1 - 20, sFightFoot);
     Font_PopStyle();
+    if (sFightLog > 0) {
+        sFightLog--;
+        Vita_Log("vita: guide: Vita Controls page %d: box %d,%d-%d,%d, %d lines, %d text commands queued\n", sFightPage, x0, y0, x1, y1, n,
+                 (int)Font_GetCmdCount());
+    }
 }
 
 /* ---- the fight's reminder line (src/battle/battle.c, after the HUD, before the font is flushed) ---- */
@@ -649,6 +701,7 @@ void Vita_GuideHudHint(int visible) {
     }
     FontIcon_SetPadType(0);
     Font_PushStyle();
+    style_base();
     Font_SetAlign(1);
     Font_SetScale(0.7f);
     Font_SetSpacing(0, 0);
