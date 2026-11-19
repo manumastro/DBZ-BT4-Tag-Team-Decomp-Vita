@@ -4,7 +4,7 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 ## Unreleased
 
-- **Vita Guide in the main menu** (`vitaguide=1`, not yet run on the console): everything about playing on the Vita,
+- **Vita Guide in the main menu** (`vitaguide=1`): everything about playing on the Vita,
   in the game, in English or Spanish: the controls and the touch buttons, a full Tag Team guide (how to start, the
   setup, targeting, revive, Senzu, fusion, the HUD), Unlock All, every Vita Settings option, the anime soundtrack, the
   right game files and where they go, mods, what to send when something breaks, and what is not there yet. It is the
