@@ -532,6 +532,9 @@ void TagBattle_DrawRoster(void){
     view=TagFusion_ViewActor(view);
 #endif
     target=TagBattle_Target(view);count=TagBattle_Count();
+#ifdef PORT_VITA
+    Port_GsMarker(0x58); /* (bt3.txt taghudnative: from here the picture is drawn at the screen's 960 x 544, port/vita/vita_vgl.c) */
+#endif
     Ps_PageSet();Ps_SetShift(0);Ps_Align(0);Port_GsMarker(0x13);
     Vu0Cur_ResetStack();Vu0Cur_LoadIdentity();
     left=Ps_Left();

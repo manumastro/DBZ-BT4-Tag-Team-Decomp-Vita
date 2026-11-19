@@ -1252,6 +1252,13 @@ static void tbl_exec(const uint8_t *p);
 #define TGT_FOG 11             /* the fog byte worked out once from the depth (GfxDepthFog_Draw) */
 #define TGT_XF 10              /* the cross-fade's copy of the picture shown last */
 #define TGT_FXL 9              /* the effects' picture of lower resolution (fxlow, below "Additive groups") */
+#define TGT_NAT_D 8            /* (taghudnative, below "The Tag Team HUD at the screen's size") the display buffer as 960 x 544 */
+#define TGT_NAT_T 7            /* ... and the copy of the fight's picture before the HUD */
+static int sNatOn;             /* (the thread that draws) the picture's rest goes to the display buffer seen as 960 x 544 */
+static int sNatDraw;           /* (the drawing thread) the same, from the marker on, in the list's order */
+static GLuint sNatTex, sNatFbo, sNatDFbo;
+unsigned gVitaNat[4];          /* for the log: pictures done so, refused, effect markers left out after it, page reads given the copy */
+static void nat_exec(void), nat_close(void);
 static GLuint sFxlFbo, sFxlTex;
 static int sFxlTw, sFxlTh;     /* (the thread that draws) its size */
 static void fxl_begin_exec(const uint8_t *p), fxl_end_exec(void);
@@ -1400,8 +1407,17 @@ unsigned gVglScissorN; /* for the log: scissor changes (vitaGL draws two full-pi
 static void run_add(int k, int n, float area);
 /* a state's scissor: the picture's in GS pixels (state_of_), turned into the display's at the size of the
    moment; a work target's or the work page's in their own pixels */
+#define NAT_W SCR_W_MENU
+#define NAT_H SCR_H_MENU
+#define NAT_VW (gVitaWide ? NAT_W : NAT_W * 725 / 960)
+#define NAT_VX ((NAT_W - NAT_VW) / 2)
 static void scissor_of(const State *s) {
-    if (s->target == 0) {
+    if (s->target == 0 && sNatOn) { /* (taghudnative: the display buffer as a 960 x 544 target, whose rows vitaGL's
+                                        scissor counts from the top) */
+        int x0 = s->sx, y0 = s->sy, x1 = s->sw, y1 = s->sh;
+        int px = NAT_VX + x0 * NAT_VW / 512, py = y0 * NAT_H / 448;
+        scissor(px, py, NAT_VX + (x1 * NAT_VW + 511) / 512 - px, (y1 * NAT_H + 447) / 448 - py);
+    } else if (s->target == 0) {
         int x0 = s->sx, y0 = s->sy, x1 = s->sw, y1 = s->sh;
         int px = VIEW_X + x0 * VIEW_W / 512;
         int py = (448 - y1) * VIEW_H / 448; /* OpenGL counts from the bottom */
@@ -1640,6 +1656,17 @@ static void target_set(int t) {
     } else if (t >= WT_BASE) { /* a work target */
         glBindFramebuffer(GL_FRAMEBUFFER, sWt[(t - WT_BASE) % WT_MAX].fbo);
         glViewport(0, 0, sWt[(t - WT_BASE) % WT_MAX].w, sWt[(t - WT_BASE) % WT_MAX].h);
+    } else if (t == TGT_NAT_T) { /* (taghudnative) the copy of the fight's picture */
+        glBindFramebuffer(GL_FRAMEBUFFER, sNatFbo);
+        glViewport(0, 0, SCR_W, SCR_H);
+    } else if (t == TGT_NAT_D || (t == 0 && sNatOn)) { /* (taghudnative) the display buffer as 960 x 544 */
+        glBindFramebuffer(GL_FRAMEBUFFER, sNatDFbo);
+        if (t == 0) { /* the picture's draws: turned over by the view (a negative height), so that row 0 of the GS is
+                         the buffer's first row as on the display; the stretch (TGT_NAT_D) is a picture of ours */
+            glViewport(NAT_VX, NAT_H, NAT_VW, -NAT_H);
+        } else {
+            glViewport(0, 0, NAT_W, NAT_H);
+        }
     } else if (t != 0) { /* (1 + the page's slot) */
         glBindFramebuffer(GL_FRAMEBUFFER, sWpFboK[(t - 1) % WP_SLOTS]);
         glViewport(0, 0, 256, 256);
@@ -3089,6 +3116,7 @@ int Vita_VglTables(char *out, int size) {
 static inline void wt_swap(void) {
     unsigned long long t0 = sceKernelGetProcessTimeWide();
     rt_sync();
+    nat_close(); /* (taghudnative) */
     gVitaDrawWhere = 3;
     pace_swap(0);
     vglSwapBuffers(GL_FALSE);
@@ -3111,6 +3139,7 @@ static void pace_swap_rt(const RtSwap *s, int phase);
 static void rt_swap_exec(const RtSwap *s) {
     unsigned long long t0 = sceKernelGetProcessTimeWide();
     target_set(0); /* (the picture bound again before the swap) */
+    nat_close(); /* (taghudnative) */
     pace_swap_rt(s, 0);
     vglSwapBuffers(GL_FALSE);
     pace_swap_rt(s, 1);
@@ -3372,6 +3401,7 @@ static void flush_run(const FlushIn *in) {
 #define RT_FXB 9 /* the effects' picture of lower resolution: begun (fxlow) */
 #define RT_FXE 10 /* ... and added to the picture */
 #define RT_SWAP 11 /* the swap and the next picture's clear (rtswap) */
+#define RT_NAT 14 /* (taghudnative) the fight's picture stretched to 960 x 544, the rest drawn there */
 typedef struct RtHdr { uint32_t size, op, pad_[2]; } RtHdr;
 static uint8_t *sRtRing;
 static volatile uint32_t sRtHead, sRtTail; /* bytes handed over / done, counting on (the ring's place: & (RT_RING - 1)) */
@@ -3585,6 +3615,8 @@ static int rt_exec_one(void) {
             tex_rt_exec((const RtTex *)(const void *)(h + 1));
         } else if (h->op == RT_PFILL) {
             tex_pool_rt_exec((const RtPFill *)(const void *)(h + 1));
+        } else if (h->op == RT_NAT) {
+            nat_exec();
         }
         sRtWhere = 0;
         gVitaRt[6] += sceKernelGetProcessTimeWide() - t0;
@@ -4629,7 +4661,7 @@ static int state_of_(int ctx, int type, State *d) {
         }
         sTexDeferOk = sTexMayDefer && abe && !pageTex;
         sTexDeferredNow = 0;
-        d->tex = pageTex == 1 ? sWpTexK[pageSlot] : pageTex == 2 ? wtS->tex : pageTex == 3 ? sOlTex[gxm_back_buffer_index % 3] : texture_get(ctx);
+        d->tex = pageTex == 1 ? sWpTexK[pageSlot] : pageTex == 2 ? wtS->tex : pageTex == 3 ? (sNatDraw && sNatTex != 0 ? (gVitaNat[3]++, sNatTex) : sOlTex[gxm_back_buffer_index % 3]) : texture_get(ctx); /* (taghudnative: the picture before the HUD, the buffer being 960 x 544 now) */
         if (pageTex) { /* a picture drawn here: its alpha as stored (0x80 = 1), not the uploads' (the shader scales those) */
             d->pad_[0] = ((t0 >> 34) & 1) ? 1 : 2;
         }
@@ -7324,6 +7356,222 @@ static void xf_marker(uint32_t arg) {
         xf_exec((const uint8_t *)op);
     }
 }
+/* ---- The Tag Team HUD at the screen's size (bt3.txt taghudnative: 0 off, the default until compared on the
+   console; 1 on; 2 the soak's B battles). A fight is drawn at 640 x 368 and the system stretches it to the screen,
+   so the Tag Team HUD (upstream's src/battle/tag_team_hud.inc, drawn last in the HUD) landed in that small picture:
+   its labels' capitals 4-10 pixels, its thinnest strokes under one. With it, at the HUD's marker (0x58, put by
+   TagBattle_DrawRoster under PORT_VITA): the fight's picture so far is copied into a picture of ours (640 x 368),
+   the display buffer, whose memory is made for the menus' 960 x 544 (menuhi=1), is bound as a 960 x 544 target and
+   the copy stretched over it (bilinear, as the system stretched it), and the rest of the list (the HUD, anything
+   after it) is drawn into it at the screen's own size: the GS's 512 x 448 page laid on 960 x 544 as the menus are,
+   so the layout and proportions are the ones of the 640 x 368 picture, only sharper. Before the swap a small display
+   scene follows (it changes nothing: its blend keeps every pixel; it carries the buffer's sync object, so the picture
+   is shown only after the stretch and the HUD are done), and the display is told that buffer is 960 x 544 (the
+   wrapped sceDisplaySetFrameBuf below; vitaGL would describe it as 640 x 368). Not in the menus, not with msaa, not
+   with fightres above 640 x 368's sizes below 960 x 544, not with menuhi=0. The chip's cost: a copy of 640 x 368, a
+   stretch to 960 x 544, the HUD at 2.25 times its pixels, one more scene. Memory: the copy (0.9 MB) and the 960 x 544
+   target's depth (vitaGL makes one for every target: 2 MB). ---- */
+int gVitaTagHudNative = 0;
+static GLuint sNatDTex[3];  /* the three display buffers seen as 960 x 544 textures (their memory, never let go) */
+static int sNatReady;       /* 0 not made yet, 1 made, -1 could not be made */
+static volatile uint8_t sNatBuf[3]; /* (read by the display's callback) the buffer holds a 960 x 544 picture */
+/* (any thread: the game's, src/battle/tag_team_hud.inc through vita_tbo.c; the drawing thread at the marker) */
+int Vita_TagHudNative(void) {
+    extern int gVitaAbSide, gPortMenuMode, Vita_InBattle(void);
+    int on = gVitaTagHudNative == 2 ? gVitaAbSide == 1 : gVitaTagHudNative != 0;
+    return on && gVitaMenuHi && gVitaMsaa == 0 && gVitaFightW < SCR_W_MENU && !gPortMenuMode && Vita_InBattle();
+}
+/* (the drawing thread, the render thread idle) the copy, its target, the display buffers as a 960 x 544 target */
+static int nat_make(void) {
+    extern void *gxm_color_surfaces_addr[];
+    int i;
+    if (sNatReady != 0) {
+        return sNatReady > 0;
+    }
+    sNatReady = -1;
+    if (sFxProg[0] == 0 || sFxU[0][0] < 0) {
+        Vita_Log("vgl: taghudnative: no copy shader, off\n");
+        return 0;
+    }
+    for (i = 0; i < 3; i++) {
+        if (gxm_color_surfaces_addr[i] == NULL) {
+            Vita_Log("vgl: taghudnative: display buffer %d unknown, off\n", i);
+            return 0;
+        }
+    }
+    glGenTextures(1, &sNatTex);
+    glBindTexture(GL_TEXTURE_2D, sNatTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, SCR_W_FIGHT, SCR_H_FIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenFramebuffers(1, &sNatFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, sNatFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sNatTex, 0);
+    for (i = 0; i < 3; i++) {
+        glGenTextures(1, &sNatDTex[i]);
+        glBindTexture(GL_TEXTURE_2D, sNatDTex[i]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        vglSetupTexture(GL_TEXTURE_2D, gxm_color_surfaces_addr[i], SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, SCE_GXM_TEXTURE_LINEAR, NAT_W, NAT_H, 1);
+    }
+    glGenFramebuffers(1, &sNatDFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, sNatDFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sNatDTex[0], 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    sTgtCur = -1; /* (bound again before the next draw) */
+    GLC_RESET();
+    if (sNatTex == 0 || sNatFbo == 0 || sNatDFbo == 0 || sNatDTex[0] == 0 || sNatDTex[1] == 0 || sNatDTex[2] == 0) {
+        Vita_Log("vgl: taghudnative: targets NOT made, off\n");
+        return 0;
+    }
+    sNatReady = 1;
+    Vita_Log("vgl: taghudnative: the Tag Team HUD drawn at %d x %d over the fight's %d x %d picture stretched (copy %u, targets %u %u)\n",
+             NAT_W, NAT_H, SCR_W_FIGHT, SCR_H_FIGHT, (unsigned)sNatTex, (unsigned)sNatFbo, (unsigned)sNatDFbo);
+    return 1;
+}
+/* (the thread that draws, in the draws' order) the picture so far copied, the buffer bound as 960 x 544, the copy
+   stretched over it; target 0 is that from now on (target_set, scissor_of) until nat_close */
+static void nat_exec(void) {
+    GLuint view = ol_view();
+    unsigned b = gxm_back_buffer_index % 3;
+    if (view == 0 || sNatReady <= 0) {
+        gVitaNat[1]++;
+        return;
+    }
+    target_set(TGT_NAT_T); /* (the display's scene ends: the chip stores it before it begins the copy) */
+    glUseProgram(sFxProg[0]);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, view);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    if (sFxU[0][1] >= 0) {
+        glUniform1i(sFxU[0][1], 0);
+    }
+    glUniform4f(sFxU[0][0], 0.0f, 1.0f, -1.0f, 0.0f); /* (into a picture of ours: turned over, its rows the display's, as ids_exec) */
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    scissor(0, 0, SCR_W, SCR_H);
+    fx_quad();
+    /* the display buffer being drawn, as the 960 x 544 target */
+    glBindFramebuffer(GL_FRAMEBUFFER, sNatDFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sNatDTex[b], 0);
+    sTgtCur = -1;
+    target_set(TGT_NAT_D);
+    glUseProgram(sFxProg[0]);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sNatTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    if (sFxU[0][1] >= 0) {
+        glUniform1i(sFxU[0][1], 0);
+    }
+    glUniform4f(sFxU[0][0], 0.0f, 1.0f, -1.0f, 0.0f); /* (a picture of ours into a picture of ours: row for row) */
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    scissor(0, 0, NAT_W, NAT_H);
+    fx_quad();
+    GLC_RESET();
+    sNatOn = 1; /* (target_set(0) binds this target again, turned over as the display: TGT_NAT_D is not 0) */
+    gVitaNat[0]++;
+}
+/* (the thread that draws, just before the swap; the render thread's or the drawing thread with the render thread
+   idle) a picture done so: a display scene that keeps every pixel, for the buffer's sync object; the display told */
+static void nat_close(void) {
+    static const float kDot[8] = {-1.0f, -1.0f, -0.99f, -1.0f, -1.0f, -0.99f, -0.99f, -0.99f};
+    unsigned b = gxm_back_buffer_index % 3;
+    if (!sNatOn) {
+        sNatBuf[b] = 0;
+        return;
+    }
+    sNatOn = 0;
+    if (sTgtCur == 0) {
+        sMainZ = 0;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0); /* (not target_set's: its depth is not wanted again) */
+    glViewport(VIEW_X, 0, VIEW_W, VIEW_H);
+    vglBt3Dirty();
+    GLC_RESET();
+    sScissor[0] = sScissor[1] = sScissor[2] = sScissor[3] = -1;
+    sTgtCur = 0;
+    glUseProgram(sFxProg[0]);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sNatTex);
+    if (sFxU[0][1] >= 0) {
+        glUniform1i(sFxU[0][1], 0);
+    }
+    glUniform4f(sFxU[0][0], 0.0f, 1.0f, -1.0f, 0.0f);
+    glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);
+    glBlendFunc(GL_ZERO, GL_ONE); /* (the buffer's pixels as they are) */
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    scissor(0, 0, SCR_W, SCR_H);
+    glEnableVertexAttribArray(0);
+    glDisableVertexAttribArray(1);
+    glDisableVertexAttribArray(2);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, kDot);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    GLC_RESET();
+    sNatBuf[b] = 1;
+}
+/* (the drawing thread, GsGpu_Native 0x58) the Tag Team HUD begins: from here the picture at 960 x 544 */
+static void nat_marker(void) {
+    if (sNatDraw || gVitaGsSkip || !Vita_TagHudNative() || sScrW != SCR_W_FIGHT || sScrH != SCR_H_FIGHT) {
+        return;
+    }
+    if (sGlowSkip || sMidOn) { /* (a glow's passes open; the log's film of the picture's middle) */
+        gVitaNat[1]++;
+        return;
+    }
+    flush();
+    flush_bins_c(15); /* (everything before it drawn first, in its order) */
+    if (sNatReady == 0) {
+        rt_sync(); /* (vitaGL this thread's for the making) */
+        nat_make();
+    }
+    if (sNatReady <= 0) {
+        gVitaNat[1]++;
+        return;
+    }
+    sNatDraw = 1;
+    sFxlOn = 0; /* (the effects' groups after it drawn as they are, not into the smaller picture) */
+    if (sRtOn) {
+        rt_reserve(RT_NAT, 16);
+        rt_commit();
+    } else {
+        nat_exec();
+    }
+}
+/* The system's display call (vitaGL's display queue callback, a thread of its own): a buffer drawn as above is
+   960 x 544, whatever vitaGL describes (build.py: --wrap). */
+extern int __real_sceDisplaySetFrameBuf(const SceDisplayFrameBuf *p, SceDisplaySetBufSync sync);
+int __wrap_sceDisplaySetFrameBuf(const SceDisplayFrameBuf *p, SceDisplaySetBufSync sync) {
+    extern void *gxm_color_surfaces_addr[];
+    int i;
+    if (p != NULL && sNatReady > 0) {
+        for (i = 0; i < 3; i++) {
+            if (sNatBuf[i] && p->base == gxm_color_surfaces_addr[i]) {
+                SceDisplayFrameBuf f = *p;
+                f.pitch = NAT_W;
+                f.width = NAT_W;
+                f.height = NAT_H;
+                return __real_sceDisplaySetFrameBuf(&f, sync);
+            }
+        }
+    }
+    return __real_sceDisplaySetFrameBuf(p, sync);
+}
 /* ---- The effects at a lower resolution (fxlow; see "Additive groups"): the smaller picture begun, cleared to black;
    then the group's draws into it (State.target TGT_FXL); then the picture added to the display's. ---- */
 static void fxl_begin_exec(const uint8_t *p) { /* (the thread that draws) */
@@ -8128,6 +8376,7 @@ void GsGpu_FrameEnd(void) {
     sTblRun = 0;
     sGlowSkip = 0; /* */
     sOlTail = 0; /* */
+    sNatDraw = 0; /* (taghudnative: the next picture says again) */
     sMainZ = 1;
     sSeeThru = 0;
     sTblZero = 0;
@@ -11668,6 +11917,14 @@ __attribute__((hot)) void GsGpu_DrawVu6(int ctx, const float *vertices, uint32_t
 static int sAnchor; /* 0 none, 1 left, 2 right, 3 centre, 4 by position */
 void GsGpu_Native(int effect) {
     ag_close(); /* the additive group before anything else */
+    if (effect == 0x58) { /* (taghudnative) the Tag Team HUD begins (src/battle/tag_team_hud.inc) */
+        nat_marker();
+        return;
+    }
+    if (sNatDraw && (effect == 1 || effect == 0x41 || effect == 0x50)) {
+        gVitaNat[2]++; /* (taghudnative) the passes that read and write the 640 x 368 picture: not after it */
+        return;
+    }
     if (effect == 1) {
         ol_marker(); /* the outline */
         return;

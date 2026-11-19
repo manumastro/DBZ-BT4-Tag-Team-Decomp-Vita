@@ -1677,6 +1677,7 @@ void Vita_VBlank(unsigned vblanks) {
                                             { extern unsigned gVitaOrderRuns[2]; logf_("vita:   kept parts' draws: %u runs begun anew to keep their order, %u put with an earlier run of their state\n", gVitaOrderRuns[0], gVitaOrderRuns[1]); gVitaOrderRuns[0] = gVitaOrderRuns[1] = 0; }
                                             { extern void Vita_Tex1Log(void); Vita_Tex1Log(); }
                                             { extern void Vita_UpLog(void); Vita_UpLog(); }
+                                            { extern unsigned gVitaNat[4]; if (gVitaNat[0] | gVitaNat[1] | gVitaNat[2] | gVitaNat[3]) { logf_("vita:   taghudnative: %u pictures with the Tag Team HUD at 960 x 544, %u refused (a glow open, no targets), %u effect markers after it left out, %u page reads given the copy\n", gVitaNat[0], gVitaNat[1], gVitaNat[2], gVitaNat[3]); memset(gVitaNat, 0, sizeof(gVitaNat)); } }
                                             { extern unsigned gVitaXf[3]; if (gVitaXf[0] | gVitaXf[1] | gVitaXf[2]) { logf_("vita:   the intro's cross-fade: %u pictures copied, %u fade draws, %u left out\n", gVitaXf[0], gVitaXf[1], gVitaXf[2]); memset(gVitaXf, 0, sizeof(gVitaXf)); } }
                                             { extern unsigned gVitaCc[4]; logf_("vita:   model calls: %u sent from copies, %u read the long way and recorded, %u kept, %u dropped (changed)\n", gVitaCc[0], gVitaCc[1], gVitaCc[2], gVitaCc[3]); memset(gVitaCc, 0, sizeof(gVitaCc)); }
                                             { extern unsigned gVitaDp[8], gVitaDpMerge[2]; logf_("vita:   model parts drawn directly: %u (%u draws in %u states), %u parts walked (%u kept now, %u refused, %u found in another state), %u KB of indices on the chip; the stage's draws: %u merged into %u\n", gVitaDp[0], gVitaDp[1], gVitaDp[2], gVitaDp[6], gVitaDp[3], gVitaDp[4], gVitaDp[5], gVitaDp[7], gVitaDpMerge[0], gVitaDpMerge[1]); gVitaDpMerge[0] = gVitaDpMerge[1] = 0; { unsigned kb = gVitaDp[7]; memset(gVitaDp, 0, sizeof(gVitaDp)); gVitaDp[7] = kb; } }
@@ -2314,6 +2315,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "taghudfine") == 0) { /* the Tag Team fight's HUD for the 640 x 368 picture: its lines written at their size, no stroke under 1.25 pixels (vita_tbo.c): 0 (default) off, 1 on, 2 the soak's B battles */
             extern int gVitaTagHudFine;
             gVitaTagHudFine = atoi(eq);
+        } else if (strcmp(line, "taghudnative") == 0) { /* the Tag Team fight's HUD drawn at the screen's 960 x 544 over the fight's picture stretched by the chip (vita_vgl.c nat_*): 0 (default) the system stretches the 640 x 368 picture with the HUD in it, 1 on, 2 the soak's B battles */
+            extern int gVitaTagHudNative;
+            gVitaTagHudNative = atoi(eq);
         } else if (strcmp(line, "tbotextsize") == 0) { /* BT4decomp's screens' lines written at the Vita's size (capitals 40 / 24, tbo_text.c): 1 (default), 0 the PC's 80 / 48 then halved */
             extern int gVitaTboTextSize;
             gVitaTboTextSize = atoi(eq) != 0;

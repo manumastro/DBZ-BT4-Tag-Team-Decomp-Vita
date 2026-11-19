@@ -168,6 +168,19 @@ stick (`tagtarget=1`; the PC's L3 is a rear touch corner here); the Select Fight
 controls and where L2 / R2 / L3 / R3 are (English, Spanish, Portuguese: `online_language.c`, PORT_VITA). Console
 check: `psvita-agent/sets/bt4/tagscale_menu_{on,off}.txt` (with `.inputs.json`) and `tagscale_2v2_{on,off}.txt`.
 
+### The fight's HUD at the screen's size (2026-11-19, branch `wip/taghud-native`)
+
+The developer on the console: in a Tag Team fight the HUD is grainy and its proportions are off next to the normal
+battle HUD. The cause: a fight is drawn at 640 x 368 and the system stretches it to 960 x 544, and upstream's Tag Team
+HUD (`src/battle/tag_team_hud.inc`) was drawn inside that picture, with labels of 4-10 pixel capitals sampled down
+from their lines and the target's inner ring under a pixel wide. `taghudnative=1` (default 0 until compared on the
+console) draws it at 960 x 544: at the HUD's marker the renderer stretches the fight's picture into the display
+buffer seen as 960 x 544 and draws the HUD (and anything after it in the list) there, the GS page laid on the screen
+as the menus' is. The HUD's code and layout stay upstream's; only where it is drawn changes. Details and costs:
+`docs/vita/development.md`. Console check: `psvita-agent/sets/bt4/taghudnative_2v2_{on,off}.txt` (2 vs 2 demo):
+the labels, the target's rings and arrow, the radar, the allies' column against the release; the fps (2 vs 2 must
+stay about 30); the log's `taghudnative` line and `vgl: taghudnative:` at the start.
+
 ### Entering Tag Team and the English disc's entry (2026-11-18, branch `wip/v14rel`)
 
 The developer's run on the English B14 Rev2 (extracted folder) after v1.4:

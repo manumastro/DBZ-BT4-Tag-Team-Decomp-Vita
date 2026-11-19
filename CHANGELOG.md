@@ -2,6 +2,14 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## Unreleased
+
+- **Tag Team's fight HUD at the screen's full sharpness (setting `taghudnative=1`, off by default until tested)**: a
+  fight is drawn at 640 x 368 and stretched to the screen, and the Tag Team HUD was drawn inside that small picture,
+  so its words and thin lines came out grainy. With the setting the fight's picture is stretched first and the HUD
+  drawn on top at 960 x 544, as the menus are; its thinnest lines are at least one screen pixel wide. Built, not yet
+  run on the console.
+
 ## v1.4.1 (2026-11-18)
 
 - **No more freeze going back to character select after a fight**: now and then (Duel or Tag Team, with or without

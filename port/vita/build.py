@@ -366,6 +366,8 @@ PORT_WRAPS = "Progress_Main main exit Port_GsVif1Chain sceMpegGetPicture GsVu1_C
 PORT_WRAPS += ["__getreent", "pte_osTlsGetValue", "memcmp"]
 # Every long sleep of the watched threads noted, who asked for it (vita_main.c: the watchdog names it in a hang)
 PORT_WRAPS += ["sceKernelDelayThread"]
+# The display call: a fight picture whose Tag Team HUD was drawn at 960 x 544 told as that size (vita_vgl.c, taghudnative)
+PORT_WRAPS += ["sceDisplaySetFrameBuf"]
 # The file calls, the C library's included: the disc's files read from its .iso as it is (vita_iso.c, arielxflores's)
 PORT_WRAPS += """sceIoOpen sceIoClose sceIoRead sceIoPread sceIoLseek sceIoLseek32 sceIoGetstat sceIoGetstatByFd sceIoDopen sceIoDread
     sceIoDclose""".split()

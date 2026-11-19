@@ -132,13 +132,18 @@ int Vita_TagHudFine(void) {
     extern int Vita_InBattle(void);
     return tbo_ab(gVitaTagHudFine) && Vita_InBattle();
 }
+/* (bt3.txt taghudnative, vita_vgl.c) the HUD drawn at the screen's 960 x 544: taghudfine's capitals as much larger
+   (12 x 544 / 368), and no stroke thinner than one pixel of the screen even without taghudfine (the target's inner
+   ring, 0.55 units, is 0.67 pixels there; on the PC's 1080 lines 1.3) */
+extern int Vita_TagHudNative(void);
 int Vita_TagHudCap(void) { /* (tbo_text.c: 0 for the usual capitals) */
-    return Vita_TagHudFine() ? TAGHUD_CAP : 0;
+    return Vita_TagHudFine() ? (Vita_TagHudNative() ? TAGHUD_CAP * 544 / 368 : TAGHUD_CAP) : 0;
 }
 float Vita_TagHudMinStroke(void) { /* (tag_team_hud.inc) in page units; 0 off */
     extern int gVitaFightW;
-    int h = gVitaFightW >= 960 ? 544 : gVitaFightW >= 720 ? 408 : 368;
-    return Vita_TagHudFine() ? 1.25f * 448.0f / (float)h : 0.0f;
+    int native = Vita_TagHudNative();
+    int h = native || gVitaFightW >= 960 ? 544 : gVitaFightW >= 720 ? 408 : 368;
+    return Vita_TagHudFine() ? 1.25f * 448.0f / (float)h : native ? 448.0f / (float)h : 0.0f;
 }
 static int tbo_pot(uint32_t v) {
     return v != 0 && (v & (v - 1)) == 0;
