@@ -1,6 +1,11 @@
 # Online play in BT4decomp, and what porting it to the Vita would take
 
-An analysis (2026-11-13), nothing built yet. It reads the online code of BT4decomp (NauTaro's BT4 adaptation of
+An analysis (2026-11-13), then the first milestone's tools (2026-11-18: the section "M0" below, branch
+`wip/online-m0`). The fuller study of 2026-11-17 (the PC client step by step, the Vita's equivalents, the plan M0-M6,
+the questions for NauTaro) is in the agent's notes (psvita-agent `notes/online/vita-online-study.md`); where this
+document and that one differ, the study is the newer (its section 9 lists what is out of date here: the tree is now
+upstream's `a8c140d`, 0.1.39.6 R1 1.3, client `0.1.39.6-R1.4`, family `BT4-B14-Rev2-sim8` `0xa93bcad79ac47a51`;
+offline Tag Team is in the build). It reads the online code of BT4decomp (NauTaro's BT4 adaptation of
 z3xox's Tenkaichi3Decomp PC port) as merged into this tree, and says what a Vita port needs for two goals: **Vita
 against Vita** (ad-hoc, local network, internet) and **Vita against PC** (against BT4decomp's PC release). The BT3
 PC port's online play, which BT4decomp builds on, is in [online.md](online.md); this document says what BT4decomp
@@ -271,10 +276,14 @@ Tag Team is a different model (`shared/tag_kernel.c`, `port/src/tag_team.c`, `po
 - The PC build runs all of the game's code on the port's soft-float (`port/tools/undefined.py`: `-msoft-float
   -mno-sse`, `softfloat_ps2.c`), the PS2's results on any processor, as the BT3 port did. Online play relies on it:
   1 vs 1's exact digest, and Tag Team's identical simulation on every machine.
-- The Vita runs the game's floats on the hardware with the PS2's rules (`port/vita/vita_float.c`: round toward zero,
-  denormals as zero, the adder's cut done on the bits, `__port_fdiv`; "It gives the same bits as the exact model"),
-  `-ffp-contract=off`, and the same PS2 maths library (`port/third_party/newlib_libm`). The development build's
-  self-test compares it with the PC's sums on a sample. A sample is not a proof.
+- The Vita runs the game's floats on the float unit, round toward zero, denormals as zero (`Vita_FloatMode`),
+  `-ffp-contract=off`, with the same PS2 maths library (`port/third_party/newlib_libm`) built for the float unit.
+  **This is not the PC's arithmetic** (corrected 2026-11-17, psvita-agent `notes/online/vita-online-study.md`
+  section 4): `vita_float.c`'s helpers (the adder's cut, the nearest division) are called by nothing in the game
+  (`nm`), and the start-up self-test checks only them. Additions and subtractions miss the adder's cut, divisions
+  round toward zero where the PC's round to nearest, a negative float converted to unsigned saturates where the PC's
+  wraps, doubles run toward zero. The build variant of the M0 section below (`BT4_PS2FLOAT=1`, `ps2float=1`) gives
+  the game's code the PC's arithmetic.
 - Tag Team's tolerance on positions is evidence that BT4decomp has seen small float differences between PCs (the
   comment in `tag_team_online.inc`); only positions are tolerated, and a persistent difference ends the room.
 - Vita-only changes inside the game's code (`#ifdef PORT_VITA` in `src/`) must not change the simulation or the
@@ -286,6 +295,187 @@ Tag Team is a different model (`shared/tag_kernel.c`, `port/src/tag_team.c`, `po
 - The 1 vs 1 session depends on tick-driven sound (`BT3_SOUND_TICKS`, `snd_adx.c`, `by_ticks`), so that voice waits
   in the battle sequence do not depend on the audio device. `snd_adx.c` is already compiled on the Vita; it turns
   this on when `Port_NetSession()` or `Port_TagNetwork()` is 1.
+
+## M0: the same simulation as the PC, offline
+
+The first milestone of the plan (study section 7): the Vita's game must compute the PC's fight blank for blank before
+any network work matters. Branch `wip/online-m0` (2026-11-18) has the tools; nothing of it has run on a console yet.
+
+### How the PC gets the PS2's arithmetic
+
+- Every game source, the PS2's maths library (`port/third_party/newlib_libm`) and the port's game-side files are
+  compiled with `-msoft-float -mno-sse -mno-mmx -ffp-contract=off` (`port/tools/undefined.py`, `CC`; clang on the 64-bit
+  builds, and on arm64 Macs IR through `llc -mattr=-fp-armv8,-neon`). The compiler emits no float instruction: every
+  float operation is a call (`__addsf3`, `__subsf3`, `__mulsf3`, `__divsf3`, `__fixsfsi`, `__fixunssfsi`, `__floatsisf`,
+  `__floatunsisf`, the comparisons) into `port/src/softfloat_ps2.c`, the PCSX2 model by default (no build script sets
+  `PORT_FLOAT_MODEL`): the adder's cut of the smaller operand then truncation, truncating multiply, division rounded
+  to nearest, overflow and x / 0 the largest number, float to unsigned the PS2 compiler's sequence (a negative value
+  wraps).
+- Doubles (rare: the port's `headless.c`, the vector library's `vu0_b.c`): `port/src/plat_libm.c`, the host's IEEE
+  arithmetic, round to nearest, with denormals.
+- The vector library's references (`src/port/vu0_a.c`, `vu0_b.c`) take the vector unit's add, multiply and divide from
+  `softfloat_ps2.c` (`RefVu0_*Bits`: no cut, truncating).
+
+### How the Vita gets it now: the `BT4_PS2FLOAT` build and `ps2float`
+
+Building the game with `-mfloat-abi=soft` is not the Vita's way: it changes the calling convention at every boundary
+with the hard-float code (the vector library, the C library, the port's own files, function pointers), with no
+error where a boundary is missed. So the closest thing that builds for ARM is done after the compiler:
+
+- `BT4_PS2FLOAT=1 BT3_VITA_DEV=1 port/vita/tools/docker_build.sh` builds a variant (objects `port/build/obj_vita_dev_pf`,
+  package `port/build/vita_dev_pf`, `BT4-Vita-dev-pf.vpk`). The game's objects are compiled to assembly as usual (the
+  same flags and register allocation, plus `-mrestrict-it`, so that no float instruction sits in an IT block), and
+  `port/vita/ps2float.py` replaces each float instruction whose result can differ from the PC's with a `b.w` to a
+  piece of code at the end of its section (the same 4 bytes: nothing the compiler laid out moves). The piece saves
+  r0-r5, ip and lr, passes the operands' bits to the model's entry point (`port/vita/vita_ps2float_a.S`, which keeps
+  the flags, every float register and the float unit's status), puts the result in the destination and jumps back.
+- Replaced (the variant of 2026-11-18: 8,057 instructions in 312 objects, the check's own 14 among them): `vadd.f32` 1,911, `vsub.f32` 1,983,
+  `vdiv.f32` 1,320, `vmla.f32` 1,712, `vmls.f32` 249, `vnmls.f32` 144, `vnmla.f32` 5 (the product by the float unit,
+  the sum by the model), `vcvt.u32.f32` 352, `vcvt.f32.u32` 201; doubles (`vadd`/`vmul`/`vdiv`/`vmla`/`vnmls.f64`,
+  `vcvt` between float and double: 180) run with the float unit at round to nearest without flush to zero, the PC's
+  doubles.
+- Left alone: `vmul.f32` (truncating on both: the PC's `__mulsf3` and the float unit at round toward zero; the variant
+  `BT4_PS2FLOAT=mul` replaces the multiplies too, as a check of that), conversions to and from signed integers
+  (truncating on both), comparisons, negation, absolute value; the vector library's references (`pc_vu0_a.o`,
+  `pc_vu0_b.o`) and `port_vufast.c` get their doubles replaced only, since their float operations are the vector
+  unit's (no cut, truncating: the float unit's own); `port_fast.c`'s stand-ins for game functions are treated as game
+  code.
+- `bt3.txt` `ps2float=0` (default): the pieces do the float unit's own operation (the same results as the default
+  build: this measures the detour's cost); `ps2float=1`: the PS2's results. The model is `port/vita/vita_ps2float.c`
+  (the PC's add and multiply cores, `softfloat_ps2_inl.h`, and its division and unsigned conversions written out, built
+  with `-mgeneral-regs-only`); the entry points take short ways where they give its bits
+  (`port/vita/vita_ps2float_a.S`): an add or subtract is the adder's cut done on the bits and then the float unit's
+  add (round toward zero, the game thread's mode); a division the float unit's at round to nearest; the C model for
+  operands with the largest exponent, a zero or denormal divisor, a quotient that overflowed or is tiny.
+  `ps2float=3`: the C model always (a check of the short ways). The default build is unchanged and ignores `ps2float`
+  (one log line says so).
+- Checked, without a console:
+  - the build runs `port/vita/tools/pfcheck_host.c`: the Vita's model against `port/src/softfloat_ps2.c`, both built for
+    the build machine, 4,000,000 operand pairs, six operations each: 0 differ (a difference stops the build);
+  - `port/vita/tools/ps2float_emu.py` (an ARM emulator, Unicorn, in WSL): the start-up check below with `ps2float` 0,
+    1 and 3: 0 differ; the add, subtract and divide entry points' short ways against the C model on 60,000 operand
+    pairs (special patterns, tiny, huge, close exponents, any): 0 differ; each kind of replaced instruction (14) from
+    40 random states each, in the three modes: every register but the destination, the flags and the float unit's
+    status kept, the result the float unit's (0) or the model's (1, 3);
+  - at start, the variant runs `Vita_PfSelfTest` (`port/vita/vita_pftest.c`, compiled once as game code and once as
+    the float unit's): one log line `ps2float: check (ps2float=N): 2112 operations, 0 differ`.
+- Open points: `src/battle/btl_cam.c:452` `__builtin_sqrtf` is a `vsqrt.f32` on the Vita (round toward zero) and a call
+  of `sqrtf` on the PC (which one the PC's link picks is to be checked); the PC's own conversion of a float to unsigned
+  on x86-64 and arm64 (`__fixunssfsi`, or a 64-bit conversion then truncation: the same for values below 2^32);
+  operands with the largest exponent in comparisons (the PS2 has no infinity; the Vita's compare sees one).
+
+### The cost
+
+The model is chosen at run time, so the console measures three things on the same fight: the default build, the
+variant at `ps2float=0` (the detour) and at `ps2float=1` (the model). The variant logs, every 600 blanks, the model's
+operations per blank (`ps2float=N: per blank add .. sub .. mul .. div .. f2u .. u2f ..`), the other factor.
+
+Estimate per replaced operation, from the code (Cortex-A9 at 444 MHz, not measured): the detour (`ps2float=0`) is
+about 25 instructions (8-register push and pop, four moves between the float unit and the core registers, three
+branches, the counter), some 30-50 cycles against 1-14 for the instruction itself (a division 14). `ps2float=1` adds
+the short way: about 20 more instructions for an add or subtract (the flags kept, the exponents compared, the mask),
+some 15 for a division (the float unit's mode set and put back twice): about 50-80 cycles in all, 0.11-0.18 us per
+operation; the C model (rare operands, and the unsigned conversions) about 150-300 cycles. The game thread takes
+19 ms a step in the heavy 1 vs 1 and 27-31 ms in 2 vs 2, against 29.2 ms a step at 114%. So at 10,000 replaced
+operations a step the model costs some 1.1-1.8 ms (+6-9% in 1 vs 1), at 30,000 3.3-5.4 ms. The number of operations
+a step is the unknown: the variant logs it. If it is too much: the pieces of code could do the short ways themselves
+(no call, no 8-register save: about half the detour), and the counters could go.
+
+### The state log, the inputs and a session-like start
+
+- `BT3_HASH=<file>` (as on the PC; `port/vita/vita_m0.c`, which replaces the stub of `vita_bt4.c`): one line per
+  vertical blank in the PC's format (`port/src/gs/state.c`): the blank, a memory checksum (0 on the Vita: the two
+  programs' memory differs anyway), the XXH3 of the fight's values and, during a fight, both fighters' health and
+  position bits, the battle clock, the C library generator's state (`port/src/headless.c` `Port_Trace` builds them,
+  the same file on both).
+- `port/vita/tools/m0_compare.py A B`: the fight lines of two logs lined up (from each file's first fight line, or
+  `--offset`), the first blank and value where they part, with the blanks around it.
+- The inputs: `BT3_PAD_REC` / `BT3_PAD_PLAY` (18 bytes per pad read, `port/src/plat_stub.c`, the same code on both)
+  already worked on the Vita; `BT3_PAD_TABLE=<file>` (36 bytes per blank: both pads as read during that blank) is now
+  written on the Vita too, and `BT3_PAD_TABLE_PLAY=<file>` plays such a table back by blanks (Vita only, read whole at
+  start).
+- `m0=1`: a start like an online session's, as far as the offline test needs: `asyncread=0` (a load takes the same
+  blanks every run), an empty save folder of its own (`ux0:data/bt4/m0save`, emptied at each start, only when it holds
+  the mode's mark file: never the player's saves), sound lengths by blanks (`BT3_SOUND_TICKS=1`, as a session), the
+  PC's key configuration (the console's default in `Save_PortKeys` / `Save_PortDefaultKeys`, `src/sys/save.c` under
+  `PORT_VITA`: the Vita's Normal swaps L1 and L2's actions, so the same pad record gave other actions), the attract
+  demo's own pairing with `mode=demo` (`Demo_SetupBattle`, as the PC's `BT3_DEMO=1`, not the Vita's list),
+  `BT3_HASH=ux0:data/bt4/m0hash.txt` unless another is named. The seed is the PC's fixed one (`BT3_SEED` changes it).
+
+### The `PORT_VITA` audit
+
+Every `PORT_VITA` block of the game's text (`src/`, `include/`; 2026-11-18, 70 files differ from upstream), read for
+what it can change in the simulation: timing (blanks), the random generators' draws, skipped work in update or draw,
+state. Most blocks are drawing only. The ones that matter:
+
+| Where | What the Vita does | Default | Effect | Verdict | Fix for a session |
+|---|---|---|---|---|---|
+| `src/battle/btl_input.c:521` `BtlInput_GetKeyMask`, `src/sys/save.c` `Save_PortKeys`, `Save_PortDefaultKeys` | The control type "Normal" (Ki Charge on L): actions 4 and 5 (L1, L2) swapped against the PS2's and PC's default; custom sets from the Vita's controller page | on | the same pad gives other actions | breaks | **done**: `m0=1` (`gVitaSimExact`) gives the console's set and ignores custom sets; online needs the same (or the actions sent, not the pads) |
+| `src/battle/eft_m.c:1412` `EftAura_StepFlames` | A flame that cannot respawn (pool full) is removed; the PC retries it forever | always | state, only where the PC hangs | breaks only where the PC hangs | keep; report upstream |
+| `src/battle/btl_char_move.c:1414`, `1484` | NaN / infinite / huge height or jump speed set to 0 | always | state, only for such values | risk | none while values stay finite (the model gives no infinity: the PS2's largest number) |
+| `src/battle/btl_char_member.c:467` | `demoult` keeps health at 1 or more | off | health | breaks if on | never in a session |
+| `src/battle/battle_work.c:631` | `demochara3..10` replace the extra fighters | off | roster | breaks if on | never in a session |
+| `src/sys/heap.c:282` `Heap_Alloc` | A block that does not fit comes from the C library (logged) | when the heap is full | pointers, possibly state | risk | in a session: a desync (end the match) |
+| `src/sys/gfxm_e_b.c:764` `ObjShadow_BeginRender` | The silhouette pass skipped (no ground triangles, faded, or kept from the picture before) | on | drawing; `ObjShadow_LoadProg` is skipped with it (writes the shadow view's colour, draws the parts flat) | risk (to check that nothing of the game reads what it writes) | if M0's logs part near shadows: take the PC's path under `gVitaSimExact` |
+| `src/sys/movie.c:276`, `333` | A touch on the screen skips a film | on | blanks | risk in a session with a film | off in a session |
+| `src/menu/menu_a_b.c:72`, `menu_i_c.c:197`, `212` | `startmode=` skips the start-up menus, logos and opening film | off | start-up blanks (the arrival blank) | breaks if set | 0 in a session; `Port_NetFixedStart` is a stub (0) on the Vita: it must be 1 in a session (logos, intro, copyright always shown, whatever the player's skip settings) |
+| `src/menu/menu_x_c.c` Vita Settings (clash assist, stick dead zone, 2nd pad, mods, touch spots, Unlock All, the reset of defaults) | Device settings that change the fight's input or the save | off / neutral | input, save, data | breaks if they differ between the sides | forced to the neutral values in a session (assist off, dead zone 0, 2nd pad off, no mods), Unlock All blocked |
+| `src/menu/port_screen.c:823`, `890`, `port_tbo.c:1583` | Tag Team: no online section; the online hub replaced by the local setup | on | menu flow | (offline: right) | the PC's paths when online play exists |
+| `port/src/headless.c` (`PORT_VITA`, the test fight) | The third archive opened before a test fight (the menus do it otherwise); the Vita's list of pairings | test fights | blanks before the fight; the pairing | (test only) | `m0=1` takes the PC's pairing; the archive's open is kept (blanks before the fight are not compared) |
+| `port/vita/build.py` `FAST_WRAPS`, `VUFAST_WRAPS` (`--wrap`, not `src/`) | `BtlTaskList_Update`, the stage's culling, the effects' list and 39 vector functions replaced by faster stand-ins, checked at start against the library on samples | on | simulation where they compute (`BtlTaskList_Update`, the vector ones) | risk | in the variant `port_fast.c` gets the model as game code; the vector stand-ins are the vector unit's arithmetic; if M0's logs part, a link without them is the check |
+| `include/sys/timer.h`, `dma.h`, `src/sys/dma.c`, `gfx*.c`, `vu1_packet.c`, `col_c*.c`, `view_*.c`, `stg_*.c`, `stgm_a.c`, `eft_c.c`, `eft_d.c`, `hud_c_b.c`, `tag_team_*.inc`, `btl_seq.c`, `btl_obj.c`, `bobj_a.c`, `btl_cam.c:851`, `mcflow_a.c`, `adx.c`, `file.c`, `menu_*` art and text | Drawing, markers for the renderer, logs, counters, register arrays, text and art | | none: no generator drawn or skipped, no game state written (the surfaces' culling in `eft_c.c` / `eft_d.c` skips only triangles the PC clips to nothing; the cross-fade's capture in `stg_b.c` keeps its buffers) | safe | none |
+
+Outside `src/`: the Vita's `Port_VBlank` (`port/src/plat_stub.c`) has no online tick, rollback or state save (no
+session yet: M2); `snd_adx.c`'s `disc_blanks` gives 0 for a voice file missing from its table (the length then comes
+from the local file: online voice timing needs the table complete).
+
+### The PC's reference
+
+The PC port builds and runs on the developer's Windows PC (2026-11-18): upstream `a8c140d` (the commit merged here),
+the 64-bit Linux variant (`BT3_CC=clang64`, software float, `BT3_SKELETON=1`), in WSL's Docker (image
+`bt4-pc-build:local`), with the game data extracted from the developer's Spanish B14 Rev2 image (the Vita sets' disc)
+into the clone's git-ignored `port/build/gamedata`. Headless (`BT3_GS=none BT3_DEMO=1`), a demo fight takes about 30
+seconds. psvita-agent `agent-tools/bt4_pcref.sh` (`setup`, `build`, `run <name> [VAR=value ...]`) repeats it; the logs
+are in `port/build/m0ref/` (git-ignored, with a README of each run's command line; a gzipped copy in psvita-agent
+`notes/online/m0ref/`):
+
+| Run | Environment | Blanks | Fight lines |
+|---|---|---|---|
+| `R1_demo_seed_default` | `BT3_DEMO=1` (the default seed, 0x12345678) | 3196 | 3010 (from blank 187) |
+| `R2_demo_seed_0x1234`, `R2_demo_seed_0x5678` | `BT3_SEED=...` | 3198, 3662 | 3012, 3476 |
+| `R3_demo_seed_default_soundticks` | `BT3_SOUND_TICKS=1` | 3196 | 3010 |
+| `R4_demo_seed_0x1234_soundticks` | `BT3_SEED=0x1234 BT3_SOUND_TICKS=1` | 3198 | 3012 |
+
+R1 run twice is byte for byte the same. R3's fight values are R1's in every blank; its memory checksum parts from
+blank 865 on (the sound players' state, counted in blanks): in this fight the sound's timing did not reach the
+fighters, in others it can, so the Vita's `m0=1` (sound by blanks) is compared with R3 and R4. A fight recorded on the console
+(`online_m0_rec`) is played on the PC with `bt4_pcref.sh run <name> BT3_PAD_PLAY=<the .rec> BT3_SOUND_TICKS=1` (from the
+title, the real menus, no window).
+
+### What the console runs must show
+
+The sets are in psvita-agent `sets/bt4/online_m0_*.txt` (each with a `.fetch` list: `run_batch.sh` fetches the state
+logs, `vita_agent_run.py --fetch`, both on this branch). Two batches:
+
+1. The variant (`port/build/vita_dev_pf`): `online_m0_demo_pf0`, `online_m0_demo_pf1`, `online_m0_demo_pf1b`,
+   `online_m0_seed1234_pf1`, `online_m0_cost_h_pf0`, `online_m0_cost_h_pf1`, `online_m0_cost_t_pf0`,
+   `online_m0_cost_t_pf1`.
+2. The default build of this branch (`port/build/vita_dev`): `online_m0_demo_def`, `online_m0_cost_h_def`,
+   `online_m0_cost_t_def`.
+
+What each must show:
+- the log's `ps2float: check (ps2float=0|1): 2112 operations, 0 differ` line in every run of the variant (a
+  difference there is a bug of the variant: stop);
+- `m0_demo_pf0` = `m0_demo_def` line for line (`m0_compare.py`: "the same in every fight blank"): the variant with the
+  model off changes nothing;
+- `m0_demo_pf1` = `m0_demo_pf1b`: two runs of the same start give the same fight (asyncread=0, the empty save);
+- `m0_demo_pf1` against `m0_demo_pf0`: where the model first changes the fight (expected to part: that is the point);
+- `m0_demo_pf1` against the PC's log of the same seed, disc and commit (below: `R3_demo_seed_default_soundticks.txt`,
+  since `m0=1` counts sound in blanks; `m0_seed1234_pf1` against `R4_demo_seed_0x1234_soundticks.txt`): the same, or the first value and blank where they part;
+- the cost: the game thread's ms per step (`perfsum.py --parts`) of `_def`, `_pf0`, `_pf1` in the heavy 1 vs 1 and in
+  2 vs 2, and the operations per blank of the `ps2float=1:` lines: the detour's and the model's cost;
+- a fight played by the developer (`online_m0_rec`, by hand, then `online_m0_play_pf1` and `online_m0_playtab_pf1`
+  played back): the three state logs the same; the recording also drives the PC's `BT3_PAD_PLAY` run.
 
 ## Versions and compatibility
 

@@ -357,8 +357,7 @@ void Port_LobbySay(const char *text) {}
 /* (port/src/gs/stage_art.c) */
 unsigned Port_StageArt(int stage,int kind) { return 0; }
 
-/* (port/src/gs/state.c) */
-void Port_StateLog(unsigned vblank, const void *fight, unsigned fightSize) {}
+/* (port/src/gs/state.c: Port_StateLog is port/vita/vita_m0.c's) */
 
 /* (port/src/gs/tag_team_net.c): the local room is port/vita/vita_tag.c */
 

@@ -50,6 +50,7 @@ unsigned int sceUserMainThreadStackSize = 0x00100000;
 char gVitaDisc[256] = HOME "/disc";
 static FILE *sLog;
 static int sHeapCdram, sFloatChoice = -1; /* -1: ask */
+static int sM0, sPs2Float; /* bt3.txt m0, ps2float (vita_m0.c, vita_ps2float.c) */
 static unsigned long long sStart, sBattleStart, sLastDraw;
 static int sTagMenu = 1; /* bt3.txt tagteam: 0 no Tag Team entry in the main menu, 1 BT4decomp's own screens, 2 the earlier
                             text setup (Vita_TagMenu, below) */
@@ -2678,6 +2679,12 @@ static void read_settings(void) {
         } else if (strcmp(line, "adxasync") == 0) { /* a sound stream's first piece read by the reading thread, the stream begun there: 0 off (the game's thread reads it), 1 on, 2 in the soak's B battles (snd_adx.c) */
             extern int gVitaAdxAsync;
             gVitaAdxAsync = atoi(eq);
+        } else if (strcmp(line, "m0") == 0) { /* online play, M0: a start like a session's, for comparing the simulation
+                                                 with the PC's (vita_m0.c: asyncread=0, an empty save, the PC's keys) */
+            sM0 = atoi(eq);
+        } else if (strcmp(line, "ps2float") == 0) { /* the PS2's float arithmetic: 0 the float unit's, 1 the PS2's (the PC's);
+                                                       only in the BT4_PS2FLOAT=1 build (port/vita/ps2float.py, vita_ps2float.c) */
+            sPs2Float = atoi(eq);
         } else if (strcmp(line, "asyncread") == 0) { /* 0: reads on the caller's thread (vita_read.c) */
             extern int gVitaAsyncRead;
             gVitaAsyncRead = atoi(eq) != 0;
@@ -2712,6 +2719,25 @@ static void read_settings(void) {
         logf_("vita: setting %s=%s\n", line, eq);
     }
     fclose(fp);
+    {   /* online play, M0 (vita_m0.c) and the PS2 float model (vita_ps2float.c), after every line is read */
+        extern void Vita_M0Start(int on);
+        extern void PortPF_Init(int on);
+        Vita_M0Start(sM0);
+        PortPF_Init(sPs2Float);
+#ifdef BT4_PS2FLOAT_BUILD
+        {
+            extern int Vita_PfSelfTest(void (*log)(const char *fmt, ...));
+            logf_("vita: ps2float=%d: the game's float instructions that can differ from the PS2's go through the model's"
+                  " entry points (the BT4_PS2FLOAT build); %s\n", sPs2Float, sPs2Float == 0 ? "the float unit's own results" :
+                  sPs2Float == 3 ? "the PS2's results, by the C model alone" : "the PS2's results");
+            Vita_PfSelfTest(Vita_Log);
+        }
+#else
+        if (sPs2Float) {
+            logf_("vita: ps2float ignored: this build has no PS2 float model (build with BT4_PS2FLOAT=1)\n");
+        }
+#endif
+    }
     if (getenv("BT3_SOAK") != NULL && !sweepSet) {
         /* the soak goes from battle to battle itself: the sweep's start again after 32 s would put it back to its first
            battle every time (a sweep= line still has its say) */
@@ -3186,6 +3212,9 @@ static void start_screen(void) {
     }
     if (sMode == 1) {
         setenv("BT3_DEMO", "1", 1);
+        if (sM0 && getenv("BT3_DEMO_PICK") == NULL) { /* (m0=1: the attract demo's own pairing, as the PC's BT3_DEMO) */
+            setenv("BT3_DEMO_PICK", "-1", 1);
+        }
         if (getenv("BT3_DEMO_PICK") == NULL && kDemoPick >= 0) { /* (one pairing, the heavy one, while it is worked on) */
             char b[8];
             snprintf(b, sizeof(b), "%d", kDemoPick);

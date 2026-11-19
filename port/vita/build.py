@@ -26,6 +26,10 @@ Environment:
                        self-test; bt3.txt online, online_test, docs/vita/online-bt4.md). Default: 1 in the development
                        build, 0 in the release (whose program then has none of it)
     python3 port/vita/build.py netcheck   BT4decomp's network files compiled for the Vita, not linked: what builds
+    BT4_PS2FLOAT=1     the PS2 float model's variant (online play, docs/vita/online-bt4.md): the game's float instructions whose
+                       result can differ from the PC's are replaced by calls of the model (port/vita/ps2float.py), chosen at
+                       run time by bt3.txt ps2float=0/1; objects and package in their own folders (*_pf); =mul also the
+                       multiplies (*_pfm), a check of the "the float unit's multiply is the PS2's" assumption
     BT3_PGO=use        a build laid out by those counts: port/vita/pgo/<rel or dev>/*.gcda (port/vita/pgo_merge.sh),
                        copied next to the objects (*_pgouse); a file without counts is built as usual
 
@@ -47,7 +51,13 @@ PGO = os.environ.get("BT3_PGO", "")
 ONLINE = os.environ.get("BT4_VITA_ONLINE", "1" if DEV else "0") == "1"
 if PGO not in ("", "gen", "use"):
     raise SystemExit("BT3_PGO: gen or use")
-TAG = ("_dev" if DEV else "_rel") + ("_pgo" + PGO if PGO else "")
+# BT4_PS2FLOAT: the PS2 float model's variant (port/vita/ps2float.py)
+PS2F = os.environ.get("BT4_PS2FLOAT", "")
+if PS2F not in ("", "0", "1", "mul"):
+    raise SystemExit("BT4_PS2FLOAT: 1 or mul")
+PS2F = "" if PS2F == "0" else PS2F
+PF_TAG = {"1": "_pf", "mul": "_pfm"}.get(PS2F, "")
+TAG = ("_dev" if DEV else "_rel") + ("_pgo" + PGO if PGO else "") + PF_TAG
 PGO_DIR = ROOT / "port/vita/pgo" / ("dev" if DEV else "rel")
 OBJ = ROOT / ("port/build/obj_vita" + TAG)
 OUT = ROOT / ("port/build/vita" + TAG)
@@ -58,7 +68,7 @@ SAMPLES = pathlib.Path(os.environ.get("VITA_SAMPLES", SDK.parent / "samples"))  
 # sits beside the BT3 port and never touches its files or saves
 TITLE_ID = os.environ.get("BT3_VITA_TITLE_ID") or ("BTFV00008" if DEV else "BTFV00010")
 TITLE = os.environ.get("BT3_VITA_TITLE") or ("BT4 (development)" if DEV else "Dragon Ball Z: BT4")
-VPK = os.environ.get("BT3_VITA_VPK") or ("BT4-Vita-dev.vpk" if DEV else "BT4-Vita.vpk").replace(".vpk", ("-pgo" + PGO if PGO else "") + ".vpk")
+VPK = os.environ.get("BT3_VITA_VPK") or ("BT4-Vita-dev.vpk" if DEV else "BT4-Vita.vpk").replace(".vpk", ("-pgo" + PGO if PGO else "") + PF_TAG.replace("_", "-") + ".vpk")
 APP_VER = "01.41"  # the version the LiveArea and VitaShell show (README "Changes")
 
 # A few names exist both in the game's side and in the SDK's libraries with other meanings: the internals of the
@@ -91,6 +101,8 @@ if PGO == "gen":
     COMMON += ["-fprofile-generate", "-fprofile-update=single", "-fprofile-info-section=gcov_info", "-DBT3_PGO_GEN=1"] + PGO_KIND
 elif PGO == "use":
     COMMON += ["-fprofile-use", "-fprofile-partial-training", "-fprofile-correction", "-Wno-missing-profile", "-Wno-coverage-mismatch"] + PGO_KIND
+if PS2F:
+    COMMON += ["-DBT4_PS2FLOAT_BUILD=1"]
 # As in the PC build, no call of the C library is replaced by the compiler's own idea of it; the memory functions are
 # allowed (small memcpy / memset calls become inline code).
 NOBUILTIN = ["-fno-builtin-" + n for n in "sinf cosf tanf asinf acosf atanf atan2f sqrtf powf floorf ceilf fabsf fmodf expf logf sin cos tan sqrt "
@@ -145,6 +157,42 @@ def fresh(o, *srcs):
         return False
 
 
+def pf_policy(o):
+    """BT4_PS2FLOAT: which float instructions of object o are replaced (port/vita/ps2float.py). "f32": the PS2's
+    single-precision arithmetic and the PC's doubles (the game's code, the PS2's maths library, the port's game-side
+    files; port_fast.c's stand-ins replace game functions, so they count as game code); "f64": the doubles only (the
+    vector library's references and port_vufast.c, whose single-precision operations are the vector unit's, with no
+    cut and truncating, which the float unit already does); None: left alone (the model itself)."""
+    if not PS2F:
+        return None
+    n = o.name
+    if n in ("pc_softfloat_ps2.o",):
+        return None
+    if n in ("pc_vu0_a.o", "pc_vu0_b.o", "pc_port_vufast.o"):
+        return "f64"
+    return "f32"
+
+
+def pf_compile(cmd, o, policy):
+    """cmd (a gcc command with -c and -o o) through assembly: compiled with -S (and -mrestrict-it: no float instruction
+    in an IT block), the instructions replaced (ps2float.py), assembled. The counts go to <object>.pf."""
+    import ps2float
+    s = o.with_suffix(".s")
+    c = [a for a in cmd if a != "-c"]
+    c[c.index("-o") + 1] = str(s)
+    r = subprocess.run(c + ["-S", "-mrestrict-it"], cwd=ROOT, capture_output=True, text=True)
+    if r.returncode:
+        return r
+    try:
+        text, counts = ps2float.rewrite(s.read_text(encoding="latin-1"), f32=policy == "f32", mul=PS2F == "mul")
+    except ps2float.Error as e:
+        return subprocess.CompletedProcess(cmd, 1, "", f"error: ps2float: {e}\n")
+    s.write_text(text, encoding="latin-1")
+    o.with_suffix(".pf").write_text("".join(f"{k} {v}\n" for k, v in sorted(counts.items())))
+    inc = [f"-Wa,{a}" for a in cmd if a.startswith("-I")]  # (.include "labels.inc" of inline assembly: include/)
+    return subprocess.run([P + "gcc", "-c"] + inc + [str(s), "-o", str(o)], cwd=ROOT, capture_output=True, text=True)
+
+
 def compile_ee(cmd, src, o, game=False):
     """Preprocess, rewrite the float constants as the PS2 compiler read them (eeconst.py) and, for the game's
     sources, the calls whose arguments have side effects (r2l), compile."""
@@ -159,6 +207,9 @@ def compile_ee(cmd, src, o, game=False):
         except Exception as e:  # no libclang, or text it cannot parse
             return subprocess.CompletedProcess(cmd, 1, "", f"error: r2l: {e}\n")
     i.write_text(text, encoding="latin-1")
+    policy = pf_policy(o)
+    if policy:
+        return rename(pf_compile(cmd + ["-fpreprocessed", str(i), "-o", str(o)], o, policy), o)
     return rename(subprocess.run(cmd + ["-fpreprocessed", str(i), "-o", str(o)], cwd=ROOT, capture_output=True, text=True), o)
 
 
@@ -273,11 +324,17 @@ def port_sources():
             # the film behind the Tag Team screens (bt3.txt tbomovie): the hardware player (SceAvPlayer)
             (V / "vita_tagmovie.c", "hard"), (V / "vita_tagmovie_sw.c", "hard"),
             # the network (bt3.txt online, online_test; docs/vita/online-bt4.md): without BT4_VITA_ONLINE only its settings
-            (V / "vita_net.c", "net")]
+            (V / "vita_net.c", "net"),
+            # the PS2 float model (bt3.txt ps2float; its calls only in the BT4_PS2FLOAT variant, with its check)
+            (V / "vita_ps2float.c", "nofp"), (V / "vita_ps2float_a.S", "asm"),
+            # online play, M0: the state log in the PC's format, the session-like start (bt3.txt m0)
+            (V / "vita_m0.c", "hard")]
     if ONLINE:  # the SDL calls of BT4decomp's network files, its signaling client (and the pieces of its update code that
                 # the client's route checks call), built unchanged but for cloudflare_signal.inc's PORT_VITA lines
         out += [(V / "vita_sdl.c", "net"), (S / "gs/supabase_signal.cpp", "netcpp"), (S / "gs/update_sign.c", "net"),
                 (S / "gs/update_crypto.c", "net"), (S / "gs/update_monocypher.c", "net")]
+    if PS2F:
+        out += [(V / "vita_pftest.c", "ee"), (V / "vita_pftest.c", "pfcheck")]
     return out
 
 
@@ -297,7 +354,7 @@ def net_cmd(f, o):
 
 def cc_port(item):
     f, kind = item
-    o = OBJ / (("gs_" if kind == "gs" else "pc_") + f.stem + ".o")
+    o = OBJ / (("gs_" if kind == "gs" else "pc_") + f.stem + ("_check" if kind == "pfcheck" else "") + ".o")
     if fresh(o, f):
         return o, f, ""
     base = [P + "gcc", "-std=gnu99", "-c"] + COMMON + ["-Iinclude", "-Iport/include", "-Iport/src", "-Iport/vita"]
@@ -313,11 +370,18 @@ def cc_port(item):
             fast += [f"-DRefVu0_{n}=VitaVuF_{n}" for n in ("Add", "Sub", "Mul", "Div")]
         mode = ["-O3", "--param", "inline-unit-growth=2000", "--param", "max-inline-insns-auto=400", "--param", "max-inline-insns-single=400",
                 "--param", "large-function-growth=2000", "--param", "large-unit-insns=100000"]
-        r = rename(subprocess.run(base + deps(o) + ABI + mode + fast + ["-include", "math.h", "-include", "stdlib.h", "-include", "port_libm.h",
-                                                               "-include", "vu0_names.h", "-DREF_VU0_EXTERN_ARITH", str(f), "-o", str(o)],
-                                  cwd=ROOT, capture_output=True, text=True), o)
+        vcmd = base + deps(o) + ABI + mode + fast + ["-include", "math.h", "-include", "stdlib.h", "-include", "port_libm.h",
+                                                     "-include", "vu0_names.h", "-DREF_VU0_EXTERN_ARITH", str(f), "-o", str(o)]
+        policy = pf_policy(o)
+        r = rename(pf_compile(vcmd, o, policy) if policy else subprocess.run(vcmd, cwd=ROOT, capture_output=True, text=True), o)
     elif kind in ("net", "netcpp"):
         r = subprocess.run(net_cmd(f, o)[:-3] + deps(o) + net_cmd(f, o)[-3:], cwd=ROOT, capture_output=True, text=True)
+    elif kind == "nofp":  # the PS2 float model's C half: no float register touched (vita_ps2float.c)
+        r = subprocess.run(base + deps(o) + ["-O2", "-mgeneral-regs-only", str(f), "-o", str(o)], cwd=ROOT, capture_output=True, text=True)
+    elif kind == "asm":
+        r = subprocess.run([P + "gcc", "-c"] + deps(o) + [str(f), "-o", str(o)], cwd=ROOT, capture_output=True, text=True)
+    elif kind == "pfcheck":  # the PS2 float model's check: its float unit half and the check (vita_pftest.c)
+        r = subprocess.run(base + deps(o) + ABI + ["-O2", "-DPF_CHECK=1", str(f), "-o", str(o)], cwd=ROOT, capture_output=True, text=True)
     else:
         r = compile_ee(base + ABI + NOBUILTIN + ["-include", "math.h", "-include", "stdlib.h", "-include", "port_libm.h"], f, o)
     return (o if r.returncode == 0 else None), f, r.stderr
@@ -374,12 +438,29 @@ def float_expected():
     (GEN / "vita_float_expected.h").write_text(subprocess.run([str(GEN / "floattest")], check=True, capture_output=True, text=True).stdout)
 
 
+def pf_host_check():
+    """BT4_PS2FLOAT: the model's C half (vita_ps2float.c) against the PC's (port/src/softfloat_ps2.c), compiled for this
+    computer, on a few million operands (port/vita/tools/pfcheck_host.c). A difference stops the build."""
+    ren = [f"-D__{n}=PortX_{n}" for n in X_DEFS] + [f"-D{a}={b}" for a, b in RENAME_SOFTFLOAT.items()]
+    cc = ["gcc", "-O2", "-w", "-Iinclude", "-Iport/include", "-Iport/src", "-Iport/vita"]
+    for src, extra, o in (("port/src/softfloat_ps2.c", ren, "pf_soft.o"), ("src/port/vu0_a.c", ["-DREF_VU0_EXTERN_ARITH"] + ren, "pf_vu0.o"),
+                          ("port/vita/vita_ps2float.c", ["-DPF_NO_ENV"], "pf_model.o"), ("port/vita/tools/pfcheck_host.c", [], "pf_main.o")):
+        subprocess.run(cc + extra + ["-c", src, "-o", str(GEN / o)], cwd=ROOT, check=True)
+    subprocess.run(["gcc", "-o", str(GEN / "pfcheck")] + [str(GEN / o) for o in ("pf_main.o", "pf_soft.o", "pf_vu0.o", "pf_model.o")] + ["-lm"], check=True)
+    r = subprocess.run([str(GEN / "pfcheck")], capture_output=True, text=True)
+    print(r.stdout.strip())
+    if r.returncode:
+        raise SystemExit("ps2float: the model (port/vita/vita_ps2float.c) differs from port/src/softfloat_ps2.c")
+
+
 def compile_all():
     OBJ.mkdir(parents=True, exist_ok=True)
     GEN.mkdir(parents=True, exist_ok=True)
     if not (SAMPLES / "common/debugScreen.c").exists():
         raise SystemExit(f"{SAMPLES}: the vitasdk samples are needed (git clone https://github.com/vitasdk/samples; VITA_SAMPLES=<folder>)")
     float_expected()
+    if PS2F:
+        pf_host_check()
     data = data_tables()
     if PGO == "use":  # the counts next to the objects, where gcc looks for them (<object>.gcda)
         n = 0
@@ -402,6 +483,14 @@ def compile_all():
         print("FAILED", f.name, first_error(e))
     objs = [str(o) for o, _, _ in res if o] + data
     (OBJ / "objects.txt").write_text("\n".join(objs) + "\n")
+    if PS2F:
+        total, files = {}, 0
+        for p in OBJ.glob("*.pf"):
+            files += 1
+            for l in p.read_text().splitlines():
+                k, v = l.split()
+                total[k] = total.get(k, 0) + int(v)
+        print(f"ps2float: {sum(total.values())} instructions replaced in {files} objects: " + " ".join(f"{k} {v}" for k, v in sorted(total.items())))
     print(f"{len(objs)} objects, {len(bad)} failed")
     return not bad
 
