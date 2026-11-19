@@ -336,6 +336,20 @@ extern const char *Port_TagPlayerName(int seat), *Port_TagCode(void), *Port_TagE
 #define TB_TAG_FUSION 18
 #define TB_TAG_BATTLE_RULES 19
 #define TB_TAG_SHARED 20
+#ifdef PORT_VITA
+/* The Vita's Ad Hoc rows (port/vita/vita_adhoc.c; bt3.txt adhoc_menu): Create Match > Connection "Ad Hoc" (the group
+   made through the system's dialog, the lobby hosted on it as By Address), Join > "AD HOC" (a group joined, its rooms
+   listed, one joined as By Address). The lobby, the match and their screens are the PC's. */
+#include "../../port/vita/vita_adhoc.h"
+#define TB_ADHOC 21
+#define TB_KEY_ADHOC 8
+static s32 sTbAdhocWait, sTbAdhocCur;
+static s32 Tb_VitaAdhocCreateWait(void);
+static void Tb_VitaAdhocCreate(void);
+static void Tb_VitaAdhocUpdate(s32 live);
+static void Tb_DrawVitaAdhoc(void);
+static void Tb_DrawVitaAdhocText(void);
+#endif
 #define TB_FIGHTERS 161
 #define TB_TOURNAMENT_STAGE 4 /* the World Tournament Stage, at noon */
 
@@ -565,6 +579,12 @@ static void Tb_SetMode(s32 mode) {
         sTb->modeT = 0;
         if(mode==TB_TAG_ROOM){sTb->note=0;sTb->noteLine[0]=0;}
     }
+#ifdef PORT_VITA
+    if (mode == TB_HUB || mode == TB_CREATE || mode == TB_JOIN) {
+        Vita_AdhocMenuEnd(0);
+        sTbAdhocWait = 0;
+    }
+#endif
     sTb->mode = mode;
 }
 
@@ -1936,6 +1956,11 @@ static void Tb_CreateUpdate(s32 live) {
     if (!live) {
         return;
     }
+#ifdef PORT_VITA
+    if (Tb_VitaAdhocCreateWait()) {
+        return;
+    }
+#endif
     Ps_Move(&sTb->crCur, CR_COUNT);
     side = Ps_Side();
     if (sTb->crCur == CR_ADDR && (pad->gameRepeat & (PADG_R1 | PADG_L1))) { /* the port in hundreds */
@@ -1946,7 +1971,11 @@ static void Tb_CreateUpdate(s32 live) {
         Snd_PlaySe(1, 0);
     } else if(side) {
         switch(sTb->crCur){
-        case CR_METHOD:sTb->createAddress=!sTb->createAddress;break;
+        case CR_METHOD:
+#ifdef PORT_VITA
+            if(Vita_AdhocMenuOn()){sTb->createAddress=Ps_Wrap(sTb->createAddress+side,0,2);break;}
+#endif
+            sTb->createAddress=!sTb->createAddress;break;
         case CR_BATTLE:sTb->battle=Ps_Wrap(sTb->battle+side,0,4);break;
         case CR_TIME:sTb->time=Ps_Wrap(sTb->time+side,0,4);break;
         case CR_SPEED:sTb->speed=Ps_Wrap(sTb->speed+side,100,150);break;
@@ -1956,7 +1985,11 @@ static void Tb_CreateUpdate(s32 live) {
         Snd_PlaySe(1,0);
     }
     if (pad->gamePressed & (PADG_CROSS | PADG_START)) {
-        if(sTb->crCur==CR_OPEN || (pad->gamePressed&PADG_START))Tb_LobbyCreate(!sTb->createAddress);
+        if(sTb->crCur==CR_OPEN || (pad->gamePressed&PADG_START)){
+#ifdef PORT_VITA
+            if(sTb->createAddress==2){Tb_VitaAdhocCreate();return;}
+#endif
+            Tb_LobbyCreate(!sTb->createAddress);}
         else {sTb->crCur=(sTb->crCur+1)%CR_COUNT;Snd_PlaySe(1,0);}
     } else if (pad->gamePressed & PADG_TRIANGLE) {
         Snd_PlaySe(1, 2);
@@ -1970,6 +2003,15 @@ static void Tb_CreateUpdate(s32 live) {
    / left / right move, cross presses; circle switches the PC keyboard to typing and back. */
 static const TbKeyBtn sTagJoinBtn[3]={{"DELETE",0,2,TB_KEY_DELETE},{"PASTE",3,5,TB_KEY_PASTE},{"JOIN",6,8,TB_KEY_OK}};
 static const TbKeyBtn sTbJoinBtn[4] = {{"DELETE", 0, 2, TB_KEY_DELETE, 0}, {"PASTE", 3, 5, TB_KEY_PASTE, 0}, {"JOIN", 6, 8, TB_KEY_OK, 0}, {"BY ADDRESS", 0, 8, TB_KEY_ADDR, 1}};
+#ifdef PORT_VITA
+static const TbKeyBtn sTbJoinBtnAdhoc[5] = {{"DELETE", 0, 2, TB_KEY_DELETE, 0}, {"PASTE", 3, 5, TB_KEY_PASTE, 0}, {"JOIN", 6, 8, TB_KEY_OK, 0},
+                                            {"BY ADDRESS", 0, 4, TB_KEY_ADDR, 1}, {"AD HOC", 5, 8, TB_KEY_ADHOC, 1}};
+#define TB_JOIN_BTNS (Vita_AdhocMenuOn() ? sTbJoinBtnAdhoc : sTbJoinBtn)
+#define TB_JOIN_BTN_N (Vita_AdhocMenuOn() ? 5 : 4)
+#else
+#define TB_JOIN_BTNS sTbJoinBtn
+#define TB_JOIN_BTN_N 4
+#endif
 static const TbKeyBtn sTbNameBtn[4] = {{"Aa", 0, 1, TB_KEY_CASE}, {"SPACE", 2, 4, TB_KEY_SPACE}, {"DELETE", 5, 6, TB_KEY_DELETE}, {"DONE", 7, 8, TB_KEY_OK}};
 #define NAME_ROWS 5
 static char sTbNameKeys[2][NAME_ROWS][KEY_COLS + 1] = {{"ABCDEFGHI", "JKLMNOPQR", "STUVWXYZ0", "123456789", "-_.!?#&*+"},
@@ -2138,7 +2180,7 @@ static void Tb_JoinUpdate(s32 live) {
             }
         }
     }
-    c = Tb_PadUpdate(KEY_ROWS,sTbKeys,sTb->tagJoin?sTagJoinBtn:sTbJoinBtn,sTb->tagJoin?3:4);
+    c = Tb_PadUpdate(KEY_ROWS,sTbKeys,sTb->tagJoin?sTagJoinBtn:TB_JOIN_BTNS,sTb->tagJoin?3:TB_JOIN_BTN_N);
     if (c > 0) {
         Tb_CodeAdd(c);
         if (sTb->codeLen == CODE_LEN) { /* full: the cursor goes to JOIN */
@@ -2154,6 +2196,13 @@ static void Tb_JoinUpdate(s32 live) {
         Tb_CodeBack();
     } else if (c == -TB_KEY_ADDR) {
         Tb_AddrOpen();
+#ifdef PORT_VITA
+    } else if (c == -TB_KEY_ADHOC) {
+        Snd_PlaySe(1, 1);
+        sTbAdhocCur = 0;
+        Vita_AdhocMenuBegin(0, Port_NetNameGet(), 0);
+        Tb_SetMode(TB_ADHOC);
+#endif
     } else if (c == -TB_KEY_OK || (pad->gamePressed & PADG_START)) {
         Tb_JoinTry();
     } else if (pad->gamePressed & PADG_SQUARE) {
@@ -2643,7 +2692,11 @@ static char *sTbCreateLabel[CR_COUNT]={"Connection","Battle","Time Limit","Game 
 static void Tb_CreateValue(char *out, s32 i) {
     out[0] = 0;
     switch(i){
-    case CR_METHOD:Ps_Copy(out,sTb->createAddress?"By Address":"Room Code",32);break;
+    case CR_METHOD:Ps_Copy(out,sTb->createAddress?"By Address":"Room Code",32);
+#ifdef PORT_VITA
+        if(sTb->createAddress==2)Ps_Copy(out,"Ad Hoc",32);
+#endif
+        break;
     case CR_BATTLE:{static char *names[5]={"One on One","Teams","10 DP","15 DP","20 DP"};Ps_Copy(out,names[sTb->battle],32);break;}
     case CR_TIME:Ps_Copy(out,sTbTime[sTb->time],32);break;
     case CR_SPEED:sprintf(out,"%d%%",sTb->speed);break;
@@ -3017,8 +3070,118 @@ static void Tb_DrawJoinText(void) {
         Ps_TextRaw(x, Ps_TextTop(86.0f, 1.0f), one, 1.0f, 36.0f, c < sTb->codeLen ? 3 : 0); /* (what is typed: a value) */
     }
     Ps_Align(0);
-    Tb_Keypad(24.0f+shift, 138.0f, KEY_ROWS, sTbKeys, sTb->tagJoin?sTagJoinBtn:sTbJoinBtn, sTb->tagJoin ? 3 : 4, 34.0f);
+    Tb_Keypad(24.0f+shift, 138.0f, KEY_ROWS, sTbKeys, sTb->tagJoin?sTagJoinBtn:TB_JOIN_BTNS, sTb->tagJoin ? 3 : TB_JOIN_BTN_N, 34.0f);
 }
+
+#ifdef PORT_VITA
+/* ---- the Vita's Ad Hoc rows ---- */
+/* Create Match with Connection "Ad Hoc": the group first (the system's dialog, on vita_adhoc.c's thread), then the
+   lobby as By Address on this port, its datagrams on the group, advertised to the Vitas around. */
+static void Tb_VitaAdhocCreate(void) {
+    if (!Tb_Vanilla(0)) {
+        return;
+    }
+    Snd_PlaySe(1, 1);
+    Tb_SaveChoices();
+    sTbAdhocWait = Vita_AdhocMenuBegin(1, Port_NetNameGet(), sTb->port);
+    if (!sTbAdhocWait) {
+        Tb_Note("AD HOC COULD NOT BE STARTED");
+    }
+}
+/* 1 while the group's dialog is up (the screen does nothing else) */
+static s32 Tb_VitaAdhocCreateWait(void) {
+    s32 st;
+
+    if (!sTbAdhocWait) {
+        return 0;
+    }
+    st = Vita_AdhocMenuState();
+    if (st == 1) {
+        return 1;
+    }
+    sTbAdhocWait = 0;
+    if (st == 2) {
+        Vita_AdhocArm("1");
+        Tb_LobbyCreate(0);
+    } else {
+        Vita_AdhocMenuEnd(0);
+        Tb_Note("NO AD HOC GROUP: NOTHING WAS CREATED");
+    }
+    return 1;
+}
+
+#define ADHOC_ROWS 6
+#define ADHOC_Y 98.0f
+#define ADHOC_STEP 34.0f
+static VitaAdhocRoom sTbAdhocRooms[ADHOC_ROWS];
+static s32 sTbAdhocN;
+
+/* Join > AD HOC: the rooms heard on the group; cross joins one as By Address */
+static void Tb_VitaAdhocUpdate(s32 live) {
+    Pad *pad = &gPad[0];
+    s32 st = Vita_AdhocMenuState();
+
+    sTbAdhocN = st == 2 ? Vita_AdhocRooms(sTbAdhocRooms, ADHOC_ROWS) : 0;
+    if (sTbAdhocN > 0) {
+        Ps_Prompt(0, "Join");
+    }
+    Ps_Prompt(2, "Back");
+    if (!live || st == 1) { /* (the group's dialog is up) */
+        return;
+    }
+    if (sTbAdhocCur >= sTbAdhocN) {
+        sTbAdhocCur = sTbAdhocN > 0 ? sTbAdhocN - 1 : 0;
+    }
+    if (sTbAdhocN > 0) {
+        Ps_Move(&sTbAdhocCur, sTbAdhocN);
+    }
+    if ((pad->gamePressed & PADG_CROSS) && sTbAdhocN > 0 && Tb_Vanilla(0)) {
+        static char where[16]; /* (static: handed to the network's side) */
+        VitaAdhocRoom *r = &sTbAdhocRooms[sTbAdhocCur];
+
+        Snd_PlaySe(1, 1);
+        Ps_Copy(where, r->addr, 16);
+        Vita_AdhocMenuEnd(1); /* (the list's beacons stop; the group stays for the lobby) */
+        Port_LobbyCancel();
+        Port_NetNameSet(Port_NetNameGet());
+        Vita_AdhocArm(r->mac);
+        Port_LobbyJoin(where, r->port);
+        Port_LobbyView(&sTbLv);
+        Tb_LobbyOpen();
+    } else if (pad->gamePressed & PADG_TRIANGLE) {
+        Snd_PlaySe(1, 2);
+        Tb_SetMode(TB_JOIN);
+    }
+}
+
+static void Tb_DrawVitaAdhoc(void) {
+    Tb_Hosts(TBO_HOSTS_BINOCULARS, 432.0f, 350.0f, 200.0f);
+    if (sTbAdhocN > 0) {
+        Tb_DrawRowsAt(sTbAdhocN, sTbAdhocCur, ADHOC_Y, ADHOC_STEP);
+    } else {
+        Ps_Panel(TBO_KIT_WINDOW, 14.0f, ADHOC_Y - 14.0f, 300.0f, ADHOC_Y + 60.0f, 0x80);
+    }
+}
+
+static void Tb_DrawVitaAdhocText(void) {
+    s32 i, st = Vita_AdhocMenuState();
+    char port[16];
+
+    Ps_Text(26.0f, Ps_TextTop(70.0f, 0.62f), "AD HOC ROOMS NEARBY", 0.62f, 300.0f, 2);
+    if (sTbAdhocN == 0) {
+        Ps_Text(30.0f, Ps_TextTop(ADHOC_Y + 22.0f, 0.5f), st == 1 ? "JOINING A GROUP..." : st == 2 ? "LOOKING FOR ROOMS..." : "NO AD HOC GROUP",
+                0.5f, 260.0f, st < 0 ? 4 : 0);
+        return;
+    }
+    for (i = 0; i < sTbAdhocN; i++) {
+        f32 y = ADHOC_Y + ADHOC_STEP * (f32)i;
+
+        Ps_TextRaw(36.0f, Ps_TextTop(y + 13.0f, 0.62f), sTbAdhocRooms[i].name, 0.62f, 170.0f, i == sTbAdhocCur ? 1 : 0);
+        sprintf(port, "PORT %d", sTbAdhocRooms[i].port);
+        Ps_Text(206.0f, Ps_TextTop(y + 13.0f, 0.44f), port, 0.44f, 64.0f, 3);
+    }
+}
+#endif
 
 static void Tb_DrawAddr(void) {
     Tb_Hosts(TBO_HOSTS_PUZZLED, 432.0f, 350.0f, 200.0f);
@@ -5157,6 +5320,10 @@ static char *Tb_Help(void) {
         return sTb->createAddress?"Host a lobby by address. Share your address and port with the other players.":"Choose the match rules, create a room and share its code.";
     case TB_ADDR:
         return "Enter the host address and port, then choose Join.";
+#ifdef PORT_VITA
+    case TB_ADHOC:
+        return "Rooms hosted by PS Vita systems nearby (Ad Hoc). Choose one to join its lobby.";
+#endif
     case TB_BRACKET:
         return Tb_BracketHelp();
     case TB_JOIN:
@@ -5286,11 +5453,16 @@ static void Tb_Speak(void) {
     case TB_ADDR:
         Ps_Copy(focus,"Join by Address",160);
         break;
+#ifdef PORT_VITA
+    case TB_ADHOC:
+        Ps_Copy(focus,"Join Ad Hoc",160);
+        break;
+#endif
     case TB_BRACKET:
         Tb_BracketFocus(focus);
         break;
     case TB_JOIN:
-        Tb_KeyFocus(focus, KEY_ROWS, sTbKeys, sTb->tagJoin?sTagJoinBtn:sTbJoinBtn, 3);
+        Tb_KeyFocus(focus, KEY_ROWS, sTbKeys, sTb->tagJoin?sTagJoinBtn:TB_JOIN_BTNS, 3);
         Ps_Copy(now, sTb->code, 40);
         break;
     case TB_NAME:
@@ -5580,6 +5752,11 @@ static void Tb_Draw(void) {
     case TB_ADDR:
         Tb_DrawAddr();
         break;
+#ifdef PORT_VITA
+    case TB_ADHOC:
+        Tb_DrawVitaAdhoc();
+        break;
+#endif
     case TB_WAIT:
         Tb_DrawWait();
         break;
@@ -5671,6 +5848,11 @@ static void Tb_DrawText(void) {
     case TB_ADDR:
         Tb_DrawAddrText();
         break;
+#ifdef PORT_VITA
+    case TB_ADHOC:
+        Tb_DrawVitaAdhocText();
+        break;
+#endif
     case TB_WAIT:
         Tb_DrawWaitText();
         break;
@@ -6023,6 +6205,11 @@ s32 PortTbo_Run(void) {
         case TB_ADDR:
             Tb_AddrUpdate(live);
             break;
+#ifdef PORT_VITA
+        case TB_ADHOC:
+            Tb_VitaAdhocUpdate(live);
+            break;
+#endif
         case TB_WAIT:
             Tb_WaitUpdate(live);
             break;

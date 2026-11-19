@@ -281,7 +281,8 @@ static int mods_on(void) {
         extern int Port_Setting(const char *name, int def);
         extern void Vita_Log(const char *fmt, ...);
         int i;
-        sModsOn = Port_Setting("mods", 1) != 0;
+        extern int gVitaNetNeutral; /* (vita_gfx.c: an online session plays the disc's data, no mods) */
+        sModsOn = Port_Setting("mods", 1) != 0 && !gVitaNetNeutral;
         if (sModsOn) {
             packs_find();
             mod_scan(MODS_DIR "/disc/DATA", 8);

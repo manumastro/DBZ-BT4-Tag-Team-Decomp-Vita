@@ -9,6 +9,12 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
   float arithmetic (built, not run on the console); **Ad Hoc** (Vita to Vita without internet) started: the system's
   group dialog and a first check between Vitas (`adhoc_test`, not run on the console yet); BT4decomp's online menus
   and its 1 vs 1 network code built for the Vita (a separate development build, `online_menu`; matches cannot start yet).
+- **Multiplayer, next steps** (development build, all off by default, not run on the console yet): a session starts
+  by restarting the app with a session file, as the PC restarts its program; the online messages ("Connecting to your
+  rival...", a desync) drawn in the port screens' own window and letters (`online_line`); **Ad Hoc rooms** in the PC's
+  menus: Create Match > Connection "Ad Hoc" and Join > "AD HOC", a list of the rooms nearby, the PC's lobby and match
+  carried over Ad Hoc (`adhoc_menu`, needs two Vitas); in a session the Vita Settings that change the pad are neutral
+  (`online_neutral`) and a room's speed above 100 % is kept (`online_speed`).
 
 ## v1.4.1 (2026-11-18)
 

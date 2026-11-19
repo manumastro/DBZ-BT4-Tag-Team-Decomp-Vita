@@ -172,10 +172,29 @@ base files (the disc folder, or the disc image through `vita_iso.c`'s wrapped fi
 `PortTbo_Run` (`src/menu/port_screen.c`, `menu_a.c`, `PORT_VITA` blocks). With `online=1` and `online_server=` the hub's
 nickname and room calls go to the server named there (never BT4decomp's own in these builds).
 
-Still to do for M2a: the session start (`sceAppMgrLoadExec` with a session file instead of `relaunch`'s `execv`, or a
-start in the same process from the menus, as `state.c` does on 64-bit PCs); `Port_VBlank`'s online tick
-(`port/src/plat_stub.c`); the banner and notice drawn Vita-native; then a 1 vs 1 by
-address (Vita vs Vita on the same build first: not blocked by M0).
+Built since (not run on the console): the session start (`relaunch`'s `execv` writes `ux0:data/bt4/net/session.txt`
+and restarts the app with `sceAppMgrLoadExec`; `Vita_SessionLoad` reads it at the next start); `Port_VBlank`'s online
+tick (the start-up warp unpaced); the banner and the notices drawn with the port screens' kit (`port/vita/vita_netline.c`,
+`online_line`); the Vita Settings that change the pad neutral in a session (`online_neutral`); a room's speed above
+100 % paced (`online_speed`). Still to do: the waiting banner while the game's thread waits (the Vita draws nothing
+then; the PC draws its last picture again: `Gs_HoldFrame`); the sound's pitch at a speed above 100 %; the players'
+names under the health bars (the PC's `ui.cpp` draws them); then a 1 vs 1 by address (Vita vs Vita on the same build
+first: not blocked by M0).
+
+### A1: Ad Hoc as a transport of the PC's lobby and match (built, not run: needs two Vitas)
+
+`bt3.txt adhoc_menu=1` (with `online_menu=1`, build `BT4_VITA_NETLINK=1`): Create Match > Connection gets "Ad Hoc"
+after "Room Code" and "By Address"; Join gets "AD HOC" beside "BY ADDRESS". Create Room on "Ad Hoc" opens the system's
+group dialog (create), then hosts the PC's lobby By Address on the chosen port and advertises its name and port on the
+group (beacons, PDP port 26013, twice a second). AD HOC opens the dialog (join), then lists the rooms heard (the hub's
+rows: name, port); cross joins one By Address. From there everything is the PC's: the lobby, its page, the launch,
+the match. `gs/net.c` is unchanged: build.py compiles it with `port/vita/vita_adhocnet.h`, which sends its socket calls
+to `vita_adhoc.c` (`VitaNet_*`); outside Ad Hoc each is the C library's; in Ad Hoc, net.c's datagram socket is a PDP
+socket on the group (an address `10.m3.m4.m5` is the Vita whose MAC ends in m3:m4:m5; a joiner's own port 26014). The
+session's restart carries `BT3_NET_ADHOC` ("1" the host, the host's MAC a joiner) and `BT3_NET_ADHOC_PORT` in
+`session.txt`. Open: whether the group outlives that restart (A0b, `adhoc_test=3`); if not, the session must join the
+group again at its start (the system dialog needs the game's frames: before net.c's first socket, or the session
+started in the same process).
 
 ## What a player has (PC)
 

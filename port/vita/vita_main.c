@@ -840,7 +840,24 @@ void Vita_VBlank(unsigned vblanks) {
             __sync_synchronize();
             gVitaGridVb = nextVc;
         }
+#ifdef BT4_VITA_NETLINK
+        {   /* an online session faster than 100 % (vita_netglue.c Vita_NetPaceMilli, bt3.txt online_speed): the grid
+               advances by 1000/speed of a screen blank a game blank, so some game blanks do not wait */
+            extern int Vita_NetPaceMilli(void);
+            static unsigned acc;
+            int sp = Vita_NetPaceMilli();
+            if (sp > 1000) {
+                acc += 1000000u / (unsigned)sp;
+                nextVc += acc / 1000u;
+                acc %= 1000u;
+            } else {
+                nextVc++;
+                acc = 0;
+            }
+        }
+#else
         nextVc++;
+#endif
         sStallEndT = now_us();
         sStallEndVc = Vita_Vcount();
         Vita_Pace((int)late); /* (vita_gfx.c: is the next frame drawn?) */

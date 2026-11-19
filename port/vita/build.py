@@ -332,6 +332,8 @@ def port_sources():
             (V / "vita_net.c", "net"),
             # Ad Hoc, Vita to Vita without an access point (bt3.txt adhoc_test; the transport of online play the Vita adds)
             (V / "vita_adhoc.c", "net"),
+            # the online session's banner and notices drawn with the port screens' kit (bt3.txt online_line)
+            (V / "vita_netline.c", "hard"),
             # the PS2 float model (bt3.txt ps2float; its calls only in the BT4_PS2FLOAT variant, with its check)
             (V / "vita_ps2float.c", "nofp"), (V / "vita_ps2float_a.S", "asm"),
             # online play, M0: the state log in the PC's format, the session-like start (bt3.txt m0)
@@ -360,7 +362,9 @@ def net_cmd(f, o):
     inc = ["-Iinclude", "-Iport/include", "-Iport/src", "-Iport/vita", f"-I{ROOT / 'port/src/gs'}", f"-I{ROOT / 'port/vita/sdlshim'}"]
     if f.suffix == ".cpp":
         return [P + "g++", "-std=gnu++17", "-c"] + COMMON + inc + ["-O2", str(f), "-o", str(o)]
-    return [P + "gcc", "-std=gnu99", "-c"] + COMMON + inc + ["-O2", str(f), "-o", str(o)]
+    # gs/net.c: its socket calls through vita_adhoc.c (vita_adhocnet.h: the Ad Hoc transport of milestone A1)
+    adhoc = ["-include", "vita_adhocnet.h"] if f.name == "net.c" and f.parent.name == "gs" else []
+    return [P + "gcc", "-std=gnu99", "-c"] + COMMON + inc + adhoc + ["-O2", str(f), "-o", str(o)]
 
 
 def cc_port(item):

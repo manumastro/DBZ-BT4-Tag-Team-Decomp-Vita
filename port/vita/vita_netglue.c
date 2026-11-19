@@ -5,8 +5,8 @@
  * process restart. Only in a build with BT4_VITA_NETLINK=1 (online milestone M2a, docs/vita/online-bt4.md); there
  * vita_bt4.c's stand-ins of those files are renamed away (vita_netlink_rename.h) and upstream's own run.
  *
- * Each answer here is the Vita's for now: a log line where the PC would show something (the Vita-made look of the
- * banner and the notice comes with the menus, M2a's next step), nothing for voice, no restart.
+ * Each answer here is the Vita's for now: a log line where the PC would show something (the banner and the notice:
+ * vita_netline.c), nothing for voice.
  */
 #include <errno.h>
 #include <pthread.h>
@@ -23,17 +23,7 @@ extern int Update_OnlineRequired(void); /* vita_net.c: the server said UPDATE_RE
 void Gs_HoldFrame(void) {}
 void Gs_NetworkWait(int waiting) { (void)waiting; }
 
-/* ---- the F1 window's lines (ui.cpp): logged for now ---- */
-void Port_UiNotice(const char *text) {
-    if (text != NULL && text[0] != '\0') {
-        Vita_Log("net: notice: %s\n", text);
-    }
-}
-void Port_UiBanner(const char *text, int ms) {
-    if (text != NULL && text[0] != '\0') {
-        Vita_Log("net: banner (%d ms): %s\n", ms, text);
-    }
-}
+/* ---- the F1 window's lines (ui.cpp): Port_UiNotice and Port_UiBanner are vita_netline.c's (drawn the Vita's way) ---- */
 void Port_UiDragonBallFound(const char *finder, unsigned stars) {
     Vita_Log("net: Dragon Ball found (%u stars) by %s\n", stars, finder != NULL ? finder : "?");
 }
@@ -93,7 +83,8 @@ void Sign_SelfTest(void) {}
 #endif
 static const char *const kSessionEnv[] = {"BT3_NET_HOST", "BT3_NET_JOIN", "BT3_NET_SPECTATE", "BT3_NET_SESSION", "BT3_NET_NAME",
                                           "BT3_NET_LOCALPORT", "BT3_NET_PUNCH", "BT3_NET_RULES", "BT3_SOUND_TICKS", "BT3_NOMOVIE",
-                                          "BT3_NET_VOICE", "BT3_NET_OPTS", "BT3_SAVES", "BT3_NET_SPEED"};
+                                          "BT3_NET_VOICE", "BT3_NET_OPTS", "BT3_SAVES", "BT3_NET_SPEED",
+                                          "BT3_NET_ADHOC", "BT3_NET_ADHOC_PORT"}; /* (the last two: an Ad Hoc session, vita_adhoc.c) */
 int execv(const char *path, char *const argv[]) {
     extern int sceAppMgrLoadExec(const char *appPath, char *const argv[], void *optParam);
     extern int sceIoMkdir(const char *dir, int mode);
@@ -124,6 +115,22 @@ int execv(const char *path, char *const argv[]) {
     remove(SESSION_FILE);
     errno = ENOSYS;
     return -1;
+}
+
+extern int gVitaNetNeutralWanted, gVitaNetSpeedOn; /* bt3.txt online_neutral, online_speed (vita_net.c) */
+
+/* vita_main.c's pacing: the game's pace in a session, 1000 = the screen's 60 blanks a second. The PC paces a
+   session's blanks by net.c's speed (plat_stub.c Port_SpeedMilli: 1000, or 1140 / 1200 when the room says so); with
+   bt3.txt online_speed=1 the Vita does the same (its grid of screen blanks advanced by 1000/speed of a blank a game
+   blank); 0: the old way, 60 a second whatever the room says (rooms at 100 % only). */
+int Vita_NetPaceMilli(void) {
+    extern int Port_NetSession(void), Port_NetSpeedMilli(void);
+    int sp;
+    if (!gVitaNetSpeedOn || !Port_NetSession()) {
+        return 1000;
+    }
+    sp = Port_NetSpeedMilli();
+    return sp > 1000 && sp <= 2000 ? sp : 1000;
 }
 
 /* vita_main.c, after bt3.txt: the session's variables (above), and what a session needs of the Vita (as m0=1:
@@ -161,6 +168,14 @@ int Vita_SessionLoad(void) {
     }
     gVitaAsyncRead = 0;
     gVitaSimExact = 1;
+    if (gVitaNetNeutralWanted) {
+        extern int gVitaNetNeutral;
+        gVitaNetNeutral = 1; /* (vita_gfx.c, vita_file.c: the PC's neutral Vita Settings, no mods) */
+    }
+    {
+        extern void Vita_AdhocSessionLoad(void); /* (vita_adhoc.c: BT3_NET_ADHOC, net.c's socket on the group) */
+        Vita_AdhocSessionLoad();
+    }
     Vita_Log("net: an online session starts (%s%s%s), saves %s; reads on the game's thread, the PC's keys\n",
              getenv("BT3_NET_HOST") != NULL ? "host, port " : getenv("BT3_NET_JOIN") != NULL ? "joining " : "watching ",
              getenv("BT3_NET_HOST") != NULL ? getenv("BT3_NET_HOST") : getenv("BT3_NET_JOIN") != NULL ? getenv("BT3_NET_JOIN") : "",

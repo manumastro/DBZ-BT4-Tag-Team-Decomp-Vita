@@ -197,6 +197,11 @@ void Gfx_EndFrame(s32 vsyncs) {
     /* The PC exit question uses the game's animated memory-card dialog above the current screen. */
     extern void PortQuit_Draw(int vsyncs);
     PortQuit_Draw(vsyncs); /* (the blanks this frame lasts: a fight's frame is two) */
+#ifdef PORT_VITA
+    /* the online session's banner and notices (port/vita/vita_netline.c; the PC draws them in its ui.cpp layer) */
+    extern void Vita_NetLineDraw(int vsyncs);
+    Vita_NetLineDraw(vsyncs);
+#endif
 #endif
     FontIcon_Tick(vsyncs);
     PadWatch_Update();
