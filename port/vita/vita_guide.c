@@ -182,8 +182,18 @@ static int wrap(const char *text, int width, f32 scale) {
         for (b = 1; b < 4; b++) {
             same &= Vita_TouchGetSpot(b) == s0;
         }
-        if (same) {
-            snprintf(touch, sizeof(touch), "{L2} {R2} {L3} {R3}: %s.", spot[s0 < 0 || s0 > 2 ? 0 : s0]);
+        static const char *const cornerEn[4] = {"top left", "top right", "bottom left", "bottom right"};
+        static const char *const cornerEs[4] = {"arriba izq.", "arriba der.", "abajo izq.", "abajo der."};
+        const char *const *corner = gVitaBt4English ? cornerEn : cornerEs;
+        if (same && s0 == 2) {
+            snprintf(touch, sizeof(touch), "{L2} {R2} {L3} {R3}   %s", spot[2]);
+            snprintf(where, sizeof(where), "%s", spot[2]);
+        } else if (same) {
+            /* the spots are the same corners on the rear pad and on the screen: whole pairs, two a line (the
+               console's run vgr5: one sentence wrapped a word alone) */
+            snprintf(touch, sizeof(touch), "%s:\n{L2}   %s        {R2}   %s\n{L3}   %s        {R3}   %s",
+                     s0 == 1 ? (gVitaBt4English ? "Screen corners" : "Esquinas de la pantalla") : (gVitaBt4English ? "Rear touch pad" : "Panel trasero"),
+                     corner[0], corner[1], corner[2], corner[3]);
             snprintf(where, sizeof(where), "%s", spot[s0 < 0 || s0 > 2 ? 0 : s0]);
         } else {
             static const char *const nm[4] = {"{L2}", "{R2}", "{L3}", "{R3}"};
@@ -191,7 +201,8 @@ static int wrap(const char *text, int width, f32 scale) {
             touch[0] = 0;
             for (b = 0; b < 4; b++) {
                 int s = Vita_TouchGetSpot(b);
-                o += snprintf(touch + o, sizeof(touch) - (size_t)o, "%s %s%s", nm[b], spotShort[s < 0 || s > 2 ? 0 : s], b < 3 ? "  " : "");
+                o += snprintf(touch + o, sizeof(touch) - (size_t)o, "%s   %s%s", nm[b], spotShort[s < 0 || s > 2 ? 0 : s],
+                              b == 0 || b == 2 ? "        " : b == 1 ? "\n" : "");
             }
             snprintf(where, sizeof(where), "%s", gVitaBt4English ? "Vita Settings > Touch" : "Vita Settings > Touch");
         }
@@ -534,9 +545,14 @@ static void page_breaks(void) {
             h += lh;
         }
         end = l;
-        if (end < sLineCount && sKind[end] != LK_HEAD) {
-            if (lastHead > start + 1) {
-                end = lastHead; /* (the group that does not fit begins the next page) */
+        if (end < sLineCount && sKind[end] != LK_HEAD && lastHead > start + 1) {
+            int hh = 0, k;
+            for (k = start; k < lastHead; k++) {
+                hh += line_h(k, k == start);
+            }
+            if (hh * 4 >= GL_H * 3 || end - lastHead < 3) {
+                end = lastHead; /* (the group that does not fit begins the next page; a page 3/4 full is not filled
+                                   with a group's first lines, nor is a heading left with fewer than two) */
             }
         }
         while (end - 1 > start && sKind[end - 1] == LK_HEAD) {
@@ -551,12 +567,32 @@ static void page_breaks(void) {
     sLastPages = pages;
 }
 
+/* one action column for each page (the console's review: actions started at a different place in every group): the
+   widest first cell of the page's lines of one pair (a first cell wider than ~45 % keeps its own, after it) */
+static void page_columns(int width) {
+    int pg, l;
+    for (pg = 0; pg < sLastPages; pg++) {
+        int col = 0;
+        for (l = sPageStart[pg]; l < sPageStart[pg + 1]; l++) {
+            if (sKind[l] == LK_TEXT && sCellN[l] >= 2 && sCellN[l] < 4 && sW0[l] <= width * 45 / 100 && sW0[l] > col) {
+                col = sW0[l];
+            }
+        }
+        for (l = sPageStart[pg]; l < sPageStart[pg + 1]; l++) {
+            if (sCellN[l] < 4) {
+                sColA[l] = (s16)(col + 18);
+            }
+        }
+    }
+}
+
 /* one topic's lines (cached: wrapped again only when the topic changes) */
 static void topic_lines(int t) {
     if (t != sLastTopic) {
         wrap(topics()[t].body, GL_X1 - GL_X0 - 44, GL_SCALE);
         line_cells(GL_SCALE, GL_X1 - GL_X0 - 44);
         page_breaks();
+        page_columns(GL_X1 - GL_X0 - 44);
         sLastTopic = t;
     }
     sPages = sLastPages;
@@ -869,8 +905,8 @@ static u16 sFightTitle[48], sFightFoot[160];
 void Vita_GuideFightPage(int x0, int x1, int y0, int y1) {
     const char *body = (gVitaBt4English ? kVgFightEn : kVgFightEs)[sTagFight ? sFightPage : 0];
     char foot[200];
-    int i, n, y, step = 23, width = x1 - x0 - 12;
-    f32 scale = 0.85f;
+    int i, n, y, step = 24, width = x1 - x0 - 12;
+    f32 scale = 0.88f;
 
     wrap(body, width, scale);
     line_cells(scale, width);
@@ -886,6 +922,10 @@ void Vita_GuideFightPage(int x0, int x1, int y0, int y1) {
     Font_PrintAt((x0 + x1) / 2, y0 + 2, sFightTitle);
     style_body();
     Font_SetScale(scale);
+    shadow_mode(2); /* (the pause menu's items: light letters with a dark outline on the orange window; plain white
+                       with a soft shadow was low-contrast there, the console's run vgr5) */
+    Font_SetShadowColorRGBA(0x30, 0x10, 0x00, 0x80);
+    Font_SetColorRGBA(0xFF, 0xF4, 0xD0, 0x80);
     n = 0;
     y = y0 + 36;
     for (i = 0; i < sLineCount && y + step <= y1 - 30; i++) {

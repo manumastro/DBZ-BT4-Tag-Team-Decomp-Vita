@@ -396,7 +396,7 @@ def link():
     # vita-elf-create needs room behind the first segment for its own tables; when the segment ends just before a page
     # boundary there is none ("segment 1 overlaps"), and a few constant bytes are added until it fits
     pad = []
-    for size in range(0, 4096, 512):
+    for size in list(range(0, 4096, 512)) + list(range(4096, 69633, 4096)):
         if size:
             (GEN / "pad.c").write_text(f"const char gVitaPad[{size}] = {{1}};\n")
             subprocess.run([P + "gcc", "-c", str(GEN / "pad.c"), "-o", str(OBJ / "pad.o")], check=True)
@@ -404,7 +404,11 @@ def link():
         r = subprocess.run(link_cmd(objs, [str(so)] + pad), capture_output=True, text=True)
         if r.returncode != 0:
             break
-        t = subprocess.run([str(SDK / "bin" / "vita-elf-create"), str(OUT / "bt3.elf"), str(OUT / "probe.velf")], capture_output=True, text=True)
+        # (probed on a stripped copy, as vpk() makes it: the unstripped file passed while the stripped one did not,
+        # "Cannot allocate 4316 bytes for SCE data at end of segment 0; segment 1 overlaps", 2026-11-19)
+        shutil.copy(OUT / "bt3.elf", OUT / "probe.elf")
+        subprocess.run([P + "strip", "-g", str(OUT / "probe.elf")], check=True)
+        t = subprocess.run([str(SDK / "bin" / "vita-elf-create"), str(OUT / "probe.elf"), str(OUT / "probe.velf")], capture_output=True, text=True)
         if t.returncode == 0:
             break
     errs = [l for l in r.stderr.splitlines() if "multiple definition" in l or "undefined reference" in l or "rror" in l]

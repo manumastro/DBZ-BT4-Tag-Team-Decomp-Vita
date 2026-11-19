@@ -354,8 +354,8 @@ static const char *const kVgFightEn[2] = {
     "{X}   Dash              {O}   Guard\n"
     "{L1}   Charge ki       {R1}   Fly up\n"
     "{L2}   Blast wave     {R2}   Fly down\n"
-    "%TOUCH%\n"
-    "Hold {ST} + {SEL}   Quit the game",
+    "Hold {ST} + {SEL}   Quit the game\n"
+    "%TOUCH%",
     "Right stick   Change your target\n"
     "Next to a fallen ally   Revive him\n"
     "Hold {L2} + press {SEL}   Senzu Bean\n"
@@ -367,8 +367,8 @@ static const char *const kVgFightEs[2] = {
     "{X}   Impulso           {O}   Defensa\n"
     "{L1}   Cargar ki       {R1}   Subir\n"
     "{L2}   Onda              {R2}   Bajar\n"
-    "%TOUCH%\n"
-    "Mantén {ST} + {SEL}   Cerrar el juego",
+    "Mantén {ST} + {SEL}   Cerrar el juego\n"
+    "%TOUCH%",
     "Stick derecho   Cambia de objetivo\n"
     "Junto a un aliado caído   Lo reanimas\n"
     "Mantén {L2} + pulsa {SEL}   Semilla\n"
