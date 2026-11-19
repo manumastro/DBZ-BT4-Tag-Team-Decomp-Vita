@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "voice.h"
 
@@ -80,13 +81,99 @@ int Sign_Request(const char *method, const char *path, int release, long long wh
 }
 void Sign_SelfTest(void) {}
 
-/* ---- the session's restart (net.c relaunch): no execv on the Vita; the Vita's way (sceAppMgrLoadExec with a session
-   file, study 3.5) is M2a's next step. Failing here makes net.c report the session as not started. ---- */
+/* ---- the session's start and end (net.c relaunch): the PC sets its BT3_NET_* environment and starts the program
+   again (execv). The Vita does the same with a file: the environment written to ux0:data/bt4/net/session.txt, then
+   the application started again (sceAppMgrLoadExec); at the next start Vita_SessionLoad (vita_main.c, after bt3.txt)
+   sets those variables and removes the file, and net.c finds its session as on the PC (Port_NetActive). The end of a
+   session (role 0) restarts the same way into the player's own game. ---- */
+#define SESSION_DIR PORT_VITA_HOME "/net"
+#define SESSION_FILE SESSION_DIR "/session.txt"
+#ifndef PORT_VITA_HOME
+#define PORT_VITA_HOME "ux0:data/bt4"
+#endif
+static const char *const kSessionEnv[] = {"BT3_NET_HOST", "BT3_NET_JOIN", "BT3_NET_SPECTATE", "BT3_NET_SESSION", "BT3_NET_NAME",
+                                          "BT3_NET_LOCALPORT", "BT3_NET_PUNCH", "BT3_NET_RULES", "BT3_SOUND_TICKS", "BT3_NOMOVIE",
+                                          "BT3_NET_VOICE", "BT3_NET_OPTS", "BT3_SAVES", "BT3_NET_SPEED"};
 int execv(const char *path, char *const argv[]) {
+    extern int sceAppMgrLoadExec(const char *appPath, char *const argv[], void *optParam);
+    extern int sceIoMkdir(const char *dir, int mode);
+    FILE *f;
+    unsigned i;
+    int r;
+    (void)path;
     (void)argv;
-    Vita_Log("net: a session restart was asked (%s): not on the Vita yet\n", path != NULL ? path : "?");
+    sceIoMkdir(SESSION_DIR, 0777);
+    f = fopen(SESSION_FILE, "w");
+    if (f == NULL) {
+        Vita_Log("net: the session file %s could not be written\n", SESSION_FILE);
+        errno = EIO;
+        return -1;
+    }
+    for (i = 0; i < sizeof(kSessionEnv) / sizeof(kSessionEnv[0]); i++) {
+        const char *v = getenv(kSessionEnv[i]);
+        if (v != NULL) {
+            fprintf(f, "%s=%s\n", kSessionEnv[i], v);
+        }
+    }
+    fclose(f);
+    Vita_Log("net: %s: the application starts again (%s)\n", getenv("BT3_NET_SESSION") != NULL ? "a session begins" : "the session is over",
+             SESSION_FILE);
+    fflush(NULL);
+    r = sceAppMgrLoadExec("app0:eboot.bin", NULL, NULL);
+    Vita_Log("net: sceAppMgrLoadExec failed: 0x%08X\n", (unsigned)r);
+    remove(SESSION_FILE);
     errno = ENOSYS;
     return -1;
+}
+
+/* vita_main.c, after bt3.txt: the session's variables (above), and what a session needs of the Vita (as m0=1:
+   reads on the game's thread so that loads take the same blanks on both sides, the PC's key table). 1: a session */
+int Vita_SessionLoad(void) {
+    extern int gVitaAsyncRead, gVitaSimExact;
+    extern int sceIoMkdir(const char *dir, int mode);
+    char line[256];
+    FILE *f;
+    int n = 0;
+    if (getenv("BT3_NET_SAVES") == NULL) { /* (net.c's session save folder; emptied by net.c at each session start) */
+        sceIoMkdir(SESSION_DIR, 0777);
+        sceIoMkdir(SESSION_DIR "/saves", 0777);
+        setenv("BT3_NET_SAVES", SESSION_DIR "/saves", 1);
+    }
+    f = fopen(SESSION_FILE, "r");
+    if (f == NULL) {
+        return 0;
+    }
+    while (fgets(line, sizeof(line), f) != NULL) {
+        char *eq = strchr(line, '=');
+        line[strcspn(line, "\r\n")] = '\0';
+        if (eq == NULL) {
+            continue;
+        }
+        *eq = '\0';
+        setenv(line, eq + 1, 1);
+        n++;
+    }
+    fclose(f);
+    remove(SESSION_FILE); /* (once: a crash in a session does not bring the next start back into it) */
+    if (getenv("BT3_NET_SESSION") == NULL) {
+        Vita_Log("net: back from a session (%d settings from %s)\n", n, SESSION_FILE);
+        return 0;
+    }
+    gVitaAsyncRead = 0;
+    gVitaSimExact = 1;
+    Vita_Log("net: an online session starts (%s%s%s), saves %s; reads on the game's thread, the PC's keys\n",
+             getenv("BT3_NET_HOST") != NULL ? "host, port " : getenv("BT3_NET_JOIN") != NULL ? "joining " : "watching ",
+             getenv("BT3_NET_HOST") != NULL ? getenv("BT3_NET_HOST") : getenv("BT3_NET_JOIN") != NULL ? getenv("BT3_NET_JOIN") : "",
+             getenv("BT3_NET_SPECTATE") != NULL ? getenv("BT3_NET_SPECTATE") : "", getenv("BT3_SAVES") != NULL ? getenv("BT3_SAVES") : "?");
+    return 1;
+}
+
+/* plat_stub.c's Port_VBlank on the Vita: an online session's start-up runs ahead to the versus menu without waiting
+   for the screen's blanks (net.c Port_NetWarp), as the PC's Port_VBlank does; vita_main.c's pacing reads this */
+volatile int gVitaNetWarp;
+void Vita_NetVBlank(void) {
+    extern int Port_NetSession(void), Port_NetWarp(void);
+    gVitaNetWarp = Port_NetSession() && Port_NetWarp();
 }
 
 /* ---- match_supabase.cpp ends a stuck request thread; the Vita's pthread has no cancel ---- */
@@ -95,9 +182,9 @@ int pthread_cancel(pthread_t thread) {
     return ENOSYS;
 }
 
-/* ---- the files the gameplay identity reads (build_identity.c: "disc/SLUS_219.78", "disc/BIN/DBZ4.BIN", ...):
-   the extracted disc folder (bt3.txt disc=). A disc image (.iso) is not read here yet: the identity then says
-   "missing" and the online menu refuses, as the PC does with a missing file. ---- */
+/* ---- the files the gameplay identity reads (build_identity.c: "disc/SLUS_219.78", "disc/BIN/DBZ4.BIN", ...),
+   under gVitaDisc: the extracted disc folder, or the mounted disc image (.iso): vita_iso.c wraps the C library's file
+   calls, so <image>/BIN/DBZ4.BIN reads the file inside the image. ---- */
 FILE *Port_FileOpenHost(const char *rel, char *path, size_t n) {
     FILE *fp;
     const char *tail = rel;

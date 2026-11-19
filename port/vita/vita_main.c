@@ -802,7 +802,12 @@ void Vita_VBlank(unsigned vblanks) {
         if ((int)(vc - nextVc) > 2) { /* (more than two blanks late: the grid moves along with the game) */
             nextVc = vc - 2;
         }
+#ifdef BT4_VITA_NETLINK
+        extern volatile int gVitaNetWarp; /* (vita_netglue.c: an online session's start-up runs ahead, no wait) */
+        if ((int)(vc - nextVc) < 0 && !gVitaNetWarp) {
+#else
         if ((int)(vc - nextVc) < 0) {
+#endif
             extern volatile unsigned char gProfGame;
             gProfGame = 1;
             {   /* (never more than the two blanks of a frame and a little: a grid out of reach starts anew) */
@@ -2725,6 +2730,12 @@ static void read_settings(void) {
         logf_("vita: setting %s=%s\n", line, eq);
     }
     fclose(fp);
+#ifdef BT4_VITA_NETLINK
+    {   /* an online session's start (port/vita/vita_netglue.c: the variables net.c's relaunch left for this start) */
+        extern int Vita_SessionLoad(void);
+        Vita_SessionLoad();
+    }
+#endif
     {   /* online play, M0 (vita_m0.c) and the PS2 float model (vita_ps2float.c), after every line is read */
         extern void Vita_M0Start(int on);
         extern void PortPF_Init(int on);

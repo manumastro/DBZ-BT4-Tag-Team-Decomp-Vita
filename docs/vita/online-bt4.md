@@ -166,7 +166,7 @@ PC-only files: the renderer's hold (`Gs_HoldFrame`, `Gs_NetworkWait`: nothing), 
 log line for now; the Vita-made look comes with the menus), voice (none), the update gate (`UPDATE_REQUIRED` from the
 server: "install the latest release"), the old Worker's signature (unused path), `execv` and `state.c`'s session and
 rollback (none: no session can start yet), `pthread_cancel` (none), and `Port_FileOpenHost` for the identity's three
-base files (the extracted disc folder; a disc image is not read yet, so the hub then says the data is missing).
+base files (the disc folder, or the disc image through `vita_iso.c`'s wrapped file calls).
 
 `bt3.txt online_menu=1` shows the PC's hub: the main menu's "Tenkaichi Budokai Online" after Tag Team, and
 `PortTbo_Run` (`src/menu/port_screen.c`, `menu_a.c`, `PORT_VITA` blocks). With `online=1` and `online_server=` the hub's
@@ -174,7 +174,7 @@ nickname and room calls go to the server named there (never BT4decomp's own in t
 
 Still to do for M2a: the session start (`sceAppMgrLoadExec` with a session file instead of `relaunch`'s `execv`, or a
 start in the same process from the menus, as `state.c` does on 64-bit PCs); `Port_VBlank`'s online tick
-(`port/src/plat_stub.c`); the banner and notice drawn Vita-native; the identity from a disc image; then a 1 vs 1 by
+(`port/src/plat_stub.c`); the banner and notice drawn Vita-native; then a 1 vs 1 by
 address (Vita vs Vita on the same build first: not blocked by M0).
 
 ## What a player has (PC)

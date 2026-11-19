@@ -377,6 +377,12 @@ static void late_wait(void) {
    count and the sound players' state by blanks (plat_sndstate.c). */
 static void vita_pad_table_write(void);
 void Port_VBlank(void) {
+#ifdef BT4_VITA_NETLINK
+    {
+        extern void Vita_NetVBlank(void); /* port/vita/vita_netglue.c: an online session's start-up runs ahead */
+        Vita_NetVBlank();
+    }
+#endif
     vita_pad_table_write(); /* (BT3_PAD_TABLE, as the PC's below: the pads of the blank that ends here) */
     gPortVBlanks++;
     gPortLiveBlanks++;
