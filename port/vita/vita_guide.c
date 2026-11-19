@@ -372,7 +372,7 @@ void Vita_GuideOpen(void) {
 enum { LK_EMPTY, LK_TEXT, LK_HEAD };
 static u8 sKind[LINES_MAX], sCellN[LINES_MAX];
 static u8 sCellAt[LINES_MAX][4];
-static s16 sColA[LINES_MAX], sColB[LINES_MAX];
+static s16 sColA[LINES_MAX], sColB[LINES_MAX], sW0[LINES_MAX], sW2[LINES_MAX];
 
 static int cell_width(const u16 *s, f32 scale) { /* (the style at scale 1 pushed: letters measured, marks by their size) */
     u16 letters[LINE_CHARS];
@@ -441,6 +441,8 @@ static void line_cells(f32 scale, int width) {
             }
         }
         sCellN[l] = (u8)(sKind[l] == LK_TEXT ? n : 1);
+        sW0[l] = (s16)(sCellN[l] >= 2 ? cell_width(s + sCellAt[l][0], scale) : 0);
+        sW2[l] = (s16)(sCellN[l] >= 4 ? cell_width(s + sCellAt[l][2], scale) : 0);
     }
     for (a = 0; a < sLineCount; a = b) { /* the columns of each heading's group */
         int colA = 0, colB = 0;
@@ -479,12 +481,14 @@ static void line_draw(int l, int x, int y, int width) {
     }
     for (k = 0; k < sCellN[l]; k++) {
         int cx = x;
+        /* (a first cell wider than its group's column: the next one after it, never over it; console run vgr2) */
+        int c1 = sColA[l] > sW0[l] + 12 ? sColA[l] : sW0[l] + 12;
         if (k == 1) {
-            cx = x + sColA[l];
+            cx = x + c1;
         } else if (k == 2) {
             cx = x + width / 2;
         } else if (k == 3) {
-            cx = x + width / 2 + sColB[l];
+            cx = x + width / 2 + (sColB[l] > sW2[l] + 12 ? sColB[l] : sW2[l] + 12);
         }
         Font_PrintAt(cx, y, sLine[l] + sCellAt[l][k]);
     }
@@ -685,9 +689,9 @@ void Vita_GuideDraw(void) {
     }
     if (!(gVitaGuideTest & 1)) {
     p = quads_begin();
-    quad(&p, GL_X0, GL_Y0, GL_X1, GL_Y1, RGBA(0x04, 0x10, 0x30, 0x7C));      /* the window (~97 %: the menu behind it
+    quad(&p, GL_X0, GL_Y0, GL_X1, GL_Y1, RGBA(0x04, 0x10, 0x30, 0x80));      /* the window (~97 %: the menu behind it
                                                                                     showed through the letters at 0x74) */
-    quad(&p, GL_X0, GL_Y0, GL_X1, GL_Y0 + 34, RGBA(0x10, 0x30, 0x68, 0x7C)); /* its title band */
+    quad(&p, GL_X0, GL_Y0, GL_X1, GL_Y0 + 34, RGBA(0x10, 0x30, 0x68, 0x80)); /* its title band */
     quad(&p, GL_X0, GL_Y0 + 34, GL_X1, GL_Y0 + 36, RGBA(0x89, 0xC3, 0xE5, 0x70));
     quad(&p, GL_X0, GL_Y1 - 32, GL_X1, GL_Y1 - 30, RGBA(0x89, 0xC3, 0xE5, 0x50));
     if (sTopic < 0) { /* the cursor's bar */

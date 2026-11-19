@@ -2869,8 +2869,9 @@ static void Tb_DrawVitaLegend(void){
 static void Tb_DrawVitaLegendText(void){
     f32 x0,x1,y1;s32 i;
     if(!Tb_VitaLegendBox(&x0,&x1,&y1))return;
-    Ps_Text(x0+12,Ps_TextTop(92,.50f),(char*)Vita_GuideTagLegend(0),.50f,x1-x0-24,3);
-    for(i=1;i<8;++i)Ps_Text(x0+12,Ps_TextTop(92+i*24.0f,.42f),(char*)Vita_GuideTagLegend(i),.42f,x1-x0-24,0);
+    /* (0.50 / 0.42 before: capitals of ~9 pixels, too small to read on the console, run vgr2) */
+    Ps_Text(x0+12,Ps_TextTop(96,.66f),(char*)Vita_GuideTagLegend(0),.66f,x1-x0-24,3);
+    for(i=1;i<8;++i)Ps_Text(x0+12,Ps_TextTop(98+i*29.0f,.58f),(char*)Vita_GuideTagLegend(i),.58f,x1-x0-24,0);
 }
 #endif
 static void Tb_DrawTag(void){
