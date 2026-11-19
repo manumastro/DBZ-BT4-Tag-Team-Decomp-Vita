@@ -34,6 +34,7 @@
 #define u64 unsigned long long
 #include "sys/pad.h"
 #include "vita_guide_text.h"
+#include "vita_remap.h"
 #include "battle/col_c.h"
 
 extern void Font_PushStyle(void);
@@ -177,7 +178,8 @@ static int wrap(const char *text, int width, f32 scale) {
         const char *const *spotShort = gVitaBt4English ? shortEn : shortEs;
         char touch[200], where[80];
         int s0 = Vita_TouchGetSpot(0), same = 1, b;
-        const char *src = text;
+        static char keys[2048]; /* (the player's controls first: %K:<name>%, %KEYLINES%, vita_remap.c) */
+        const char *src = Vita_RemapExpand(text, keys, sizeof(keys), 0);
         char *d = buf;
         for (b = 1; b < 4; b++) {
             same &= Vita_TouchGetSpot(b) == s0;
@@ -366,6 +368,18 @@ static u16 sTitle[96], sFoot[160], sCount[32];
 
 static const VgTopic *topics(void) { return gVitaBt4English ? kVgEn : kVgEs; }
 
+/* The contents: the topics, then (bt3.txt remap) "Vita Buttons", the editor of the Vita's own controls (below);
+   with it the rows are a little closer, so that the fourteen fit over the footer */
+#define TOPIC_BUTTONS (-2)
+static int content_rows(void) { return VG_TOPICS + (Vita_RemapOn() ? 1 : 0); }
+static int content_step(void) { return content_rows() > VG_TOPICS ? 23 : GL_ROW; }
+static const char *content_title(int i) {
+    return i < VG_TOPICS ? topics()[i].title : gVitaBt4English ? "Vita Buttons: change them" : "Botones Vita: cámbialos";
+}
+static int buttons_input(void);
+static void buttons_draw(void);
+static int sFromOptions; /* the editor opened from Vita Settings: closing it goes back there */
+
 int Vita_GuideIsOpen(void) { return sOpen; }
 
 static int sLogFrames; /* the guide's first pictures, each logged (what it handed the renderer) */
@@ -373,6 +387,7 @@ void Vita_GuideOpen(void) {
     sOpen = 1;
     sLogFrames = 1;
     sTopic = -1; /* the contents */
+    sFromOptions = 0;
     sPage = 0;
     Snd_PlaySe(1, 1);
     Vita_Log("vita: guide: opened\n");
@@ -606,15 +621,26 @@ int Vita_GuideInput(void) {
     if (!sOpen) {
         return 0;
     }
+    if (sTopic == TOPIC_BUTTONS) {
+        return buttons_input();
+    }
     if (sTopic < 0) {
+        if (sCursor >= content_rows()) {
+            sCursor = 0;
+        }
         if (rep & PADG_UP) {
-            sCursor = (sCursor + VG_TOPICS - 1) % VG_TOPICS;
+            sCursor = (sCursor + content_rows() - 1) % content_rows();
             Snd_PlaySe(1, 0);
         } else if (rep & PADG_DOWN) {
-            sCursor = (sCursor + 1) % VG_TOPICS;
+            sCursor = (sCursor + 1) % content_rows();
             Snd_PlaySe(1, 0);
         } else if (press & (PADG_CROSS | PADG_RIGHT)) {
-            sTopic = sCursor;
+            sTopic = sCursor < VG_TOPICS ? sCursor : TOPIC_BUTTONS;
+            if (sTopic == TOPIC_BUTTONS) {
+                extern int gVitaGuideEdRow;
+                gVitaGuideEdRow = 0;
+                sFromOptions = 0;
+            }
             sPage = 0;
             Snd_PlaySe(1, 1);
         } else if (press & (PADG_TRIANGLE | PADG_CIRCLE | PADG_START)) {
@@ -706,7 +732,7 @@ static void style_heading(void) {
 
 /* after the main menu's own drawing, on its page */
 void Vita_GuideDraw(void) {
-    static u16 sRow[VG_TOPICS][96];
+    static u16 sRow[VG_TOPICS + 1][96];
     u64 *p;
     int i;
 
@@ -736,9 +762,13 @@ void Vita_GuideDraw(void) {
     quad(&p, GL_X0, GL_Y0, GL_X1, GL_Y0 + 34, RGBA(0x10, 0x30, 0x68, 0x80)); /* its title band */
     quad(&p, GL_X0, GL_Y0 + 34, GL_X1, GL_Y0 + 36, RGBA(0x89, 0xC3, 0xE5, 0x70));
     quad(&p, GL_X0, GL_Y1 - 32, GL_X1, GL_Y1 - 30, RGBA(0x89, 0xC3, 0xE5, 0x50));
-    if (sTopic < 0) { /* the cursor's bar */
-        int y = GL_TEXT_Y - 3 + sCursor * GL_ROW;
-        quad(&p, GL_X0 + 10, y, GL_X1 - 10, y + GL_ROW - 1, RGBA(0x30, 0x60, 0xA0, 0x60));
+    if (sTopic == -1) { /* the cursor's bar */
+        int y = GL_TEXT_Y - 3 + sCursor * content_step();
+        quad(&p, GL_X0 + 10, y, GL_X1 - 10, y + content_step() - 1, RGBA(0x30, 0x60, 0xA0, 0x60));
+    } else if (sTopic == TOPIC_BUTTONS) { /* the editor's row bar */
+        extern int gVitaGuideEdRow;
+        int y = GL_TEXT_Y - 3 + gVitaGuideEdRow * 24;
+        quad(&p, GL_X0 + 10, y, GL_X1 - 10, y + 23, RGBA(0x30, 0x60, 0xA0, 0x60));
     }
     Dma_EndDirect(p);
     }
@@ -752,20 +782,22 @@ void Vita_GuideDraw(void) {
     FontIcon_SetPadType(0);
     Font_PushStyle();
     style_heading();
-    if (sTopic < 0) {
+    if (sTopic == TOPIC_BUTTONS) {
+        buttons_draw();
+    } else if (sTopic < 0) {
         to_u16(gVitaBt4English ? "Vita Guide" : "Guía Vita", sTitle, 96);
         Font_PrintAt(GL_TEXT_X, GL_Y0 + 7, sTitle);
         Font_SetScale(GL_SCALE);
         shadow_mode(1);
         Font_SetShadowColorRGBA(0, 0, 0x10, 0x60);
-        for (i = 0; i < VG_TOPICS; i++) {
-            to_u16(topics()[i].title, sRow[i], 96);
+        for (i = 0; i < content_rows(); i++) {
+            to_u16(content_title(i), sRow[i], 96);
             if (i == sCursor) {
                 Font_SetColorRGBA(0xF4, 0xFF, 0x3F, 0x80); /* the pause menu's cursor colour */
             } else {
                 Font_SetColorRGBA(0xE8, 0xF0, 0xFF, 0x80); /* (white: the pause menu's blue was dim on the window) */
             }
-            Font_PrintAt(GL_TEXT_X + 12, GL_TEXT_Y + i * GL_ROW, sRow[i]);
+            Font_PrintAt(GL_TEXT_X + 12, GL_TEXT_Y + i * content_step(), sRow[i]);
         }
         to_u16(gVitaBt4English ? "{U}{D} Choose     {X} Open     {T} Close"
                                : "{U}{D} Elegir     {X} Abrir     {T} Cerrar", sFoot, 160);
@@ -823,6 +855,237 @@ void Vita_GuideDraw(void) {
     if (!(gVitaGuideTest & 4)) {
         Port_MenuPage(0);
     }
+}
+
+/* ---- Vita Buttons: the editor of the Vita's own controls (port/vita/vita_remap.c), in the guide's window, from the
+   contents' last row or from Options > Controller > Vita Settings (START). A row an action: its name, its controls
+   now (the button pictures, as everywhere in the guide), for L2 / R2 / L3 / R3 their touch place on the right. CROSS
+   takes the next pair pressed on the Vita (SELECT held, another button pressed; Unlock All also SELECT alone), CIRCLE
+   then clears it, TRIANGLE leaves it as it was; the Tag target row turns between the PC's three methods (Camera mode
+   > Target selection's setting). SQUARE twice: every one back to its default (the PC's for what the PC has). A pair
+   another action already has where both work is refused, saying whose it is. Drawn as the guide's pages: the font's
+   letters and pictures, the window's quads and one bar; nothing loaded. ---- */
+int gVitaGuideEdRow;
+static int sEdCap, sEdWaitUp, sEdConfirm;
+static char sEdMsg[2][200];
+static u16 sEdName[VR_COUNT][48], sEdVal[VR_COUNT][120], sEdTouch[4][32], sEdLine[2][200];
+#define ED_STEP 24
+#define ED_VALUE_X (GL_TEXT_X + 196)
+
+static void ed_msg(const char *a, const char *b) {
+    snprintf(sEdMsg[0], sizeof(sEdMsg[0]), "%s", a ? a : "");
+    snprintf(sEdMsg[1], sizeof(sEdMsg[1]), "%s", b ? b : "");
+}
+
+void Vita_GuideOpenButtons(void) {
+    sOpen = 1;
+    sLogFrames = 1;
+    sTopic = TOPIC_BUTTONS;
+    sFromOptions = 1;
+    gVitaGuideEdRow = 0;
+    sEdCap = sEdConfirm = 0;
+    sEdWaitUp = 1; /* (the START that opened it) */
+    ed_msg(NULL, NULL);
+    Snd_PlaySe(1, 1);
+    Vita_Log("vita: guide: Vita Buttons opened from Vita Settings\n");
+}
+
+/* the row's help and its default, when no message is shown */
+static void ed_help(int a, char *l1, char *l2, int size) {
+    int en = gVitaBt4English;
+    unsigned d = Vita_RemapDefault(a);
+    char t[96];
+    static const char *const kBtn[4] = {"{L2}", "{R2}", "{L3}", "{R3}"};
+    switch (a) {
+    case VR_L2: case VR_R2: case VR_L3: case VR_R3:
+        snprintf(l1, (size_t)size, en ? "A pair that gives %s. Touch: Vita Settings > Touch."
+                                      : "Una pareja que da %s. Táctil: Vita Settings > Touch.", kBtn[a]);
+        break;
+    case VR_SENZU:
+        snprintf(l1, (size_t)size, en ? "Tag fights. Hold {L2} + press {SEL} always works."
+                                      : "Combates Tag. Mantén {L2} + pulsa {SEL} siempre vale.");
+        break;
+    case VR_FUSION:
+        snprintf(l1, (size_t)size, en ? "Tag fights: gives {R3}. Hold it with a direction."
+                                      : "Combates Tag: da {R3}. Mantenlo con una dirección.");
+        break;
+    case VR_UNFUSE:
+        snprintf(l1, (size_t)size, en ? "Tag fights: gives {L3} + {R3}." : "Combates Tag: da {L3} + {R3}.");
+        break;
+    case VR_TARGET:
+        snprintf(l1, (size_t)size, en ? "{LT}{RT}: right stick, D-pad or {L3} (as Camera mode)."
+                                      : "{LT}{RT}: stick derecho, cruceta o {L3} (Camera mode).");
+        break;
+    case VR_QUIT:
+        snprintf(l1, (size_t)size, en ? "Held for 1.5 seconds: the game closes." : "Mantenido 1,5 segundos: el juego se cierra.");
+        break;
+    default:
+        snprintf(l1, (size_t)size, en ? "Held for 1 second in a menu: Unlock All." : "Mantenido 1 segundo en un menú: Desbloquear todo.");
+        break;
+    }
+    if (a == VR_TARGET) {
+        snprintf(t, sizeof(t), "{L3}"); /* (the PC's: gs_input.c tag_target_method_p1, 0) */
+    } else if (d) {
+        Vita_RemapMaskText(d, t, sizeof(t), 0);
+    } else {
+        snprintf(t, sizeof(t), "%s", en ? "none" : "ninguno");
+    }
+    if (strchr(l1, '\n') == NULL) {
+        snprintf(l2, (size_t)size, en ? "Default: %s" : "Por defecto: %s", t);
+    } else {
+        l2[0] = 0;
+    }
+}
+
+static int buttons_close(void) {
+    sEdCap = 0;
+    Vita_RemapCaptureEnd();
+    Snd_PlaySe(1, 2);
+    if (sFromOptions) {
+        sOpen = 0;
+        return 0;
+    }
+    sTopic = -1;
+    sCursor = VG_TOPICS;
+    return 1;
+}
+
+static int buttons_input(void) {
+    extern int PortInput_TagTargetMethod(int player, int method);
+    u32 press = gPad[0].gamePressed, rep = gPad[0].gameRepeat;
+    int a = gVitaGuideEdRow, en = gVitaBt4English;
+    char t[200];
+
+    if (sEdWaitUp) { /* (a capture's or the opening's buttons: none of them reaches the editor or the menu) */
+        if (Vita_RemapAllUp()) {
+            sEdWaitUp = 0;
+        }
+        return 1;
+    }
+    if (sEdCap) {
+        unsigned m = 0;
+        int r = Vita_RemapCapture(&m), c;
+        if (r == VR_CAP_WAIT) {
+            return 1;
+        }
+        if (r == VR_CAP_ALONE) {
+            ed_msg(en ? "Hold {SEL}, then press the other button." : "Mantén {SEL} y pulsa el otro botón.",
+                   en ? "{O}  none     {T}  leave it" : "{O}  ninguno     {T}  dejarlo");
+            return 1;
+        }
+        Vita_RemapCaptureEnd();
+        sEdCap = 0;
+        sEdWaitUp = 1;
+        if (r == VR_CAP_CANCEL) {
+            ed_msg(NULL, NULL);
+            Snd_PlaySe(1, 2);
+        } else if (!Vita_RemapValid(a, m)) {
+            ed_msg(en ? "Not taken: it needs {SEL} and one other button." : "No vale: hace falta {SEL} y otro botón.", NULL);
+            Snd_PlaySe(1, 2);
+        } else if ((c = Vita_RemapConflict(a, m)) >= 0) {
+            Vita_RemapMaskText(m, t, sizeof(t), 0);
+            snprintf(sEdMsg[0], sizeof(sEdMsg[0]), en ? "%s is already %s." : "%s ya es %s.", t, Vita_RemapName(c));
+            snprintf(sEdMsg[1], sizeof(sEdMsg[1]), "%s", en ? "Change that one first." : "Cambia ese primero.");
+            Snd_PlaySe(1, 2);
+        } else {
+            Vita_RemapSet(a, m);
+            ed_msg(en ? "Saved." : "Guardado.", NULL);
+            Snd_PlaySe(1, 1);
+        }
+        return 1;
+    }
+    if (rep & (PADG_UP | PADG_DOWN)) {
+        gVitaGuideEdRow = (a + ((rep & PADG_UP) ? VR_COUNT - 1 : 1)) % VR_COUNT;
+        sEdConfirm = 0;
+        ed_msg(NULL, NULL);
+        Snd_PlaySe(1, 0);
+    } else if (a == VR_TARGET && (press & (PADG_LEFT | PADG_RIGHT | PADG_CROSS))) {
+        PortInput_TagTargetMethod(0, (PortInput_TagTargetMethod(0, -1) + ((press & PADG_LEFT) ? 2 : 1)) % 3);
+        ed_msg(en ? "Saved." : "Guardado.", NULL);
+        Snd_PlaySe(1, 0);
+    } else if (press & PADG_CROSS) {
+        Vita_RemapCaptureBegin();
+        sEdCap = 1;
+        sEdConfirm = 0;
+        ed_msg(a == VR_UNLOCK ? (en ? "Hold {SEL} and press a button (or {SEL} alone)." : "Mantén {SEL} y pulsa un botón (o {SEL} solo).")
+                              : (en ? "Hold {SEL} and press another button." : "Mantén {SEL} y pulsa otro botón."),
+               en ? "{O}  none     {T}  leave it" : "{O}  ninguno     {T}  dejarlo");
+        Snd_PlaySe(1, 1);
+    } else if (press & PADG_SQUARE) {
+        if (sEdConfirm) {
+            Vita_RemapDefaults();
+            sEdConfirm = 0;
+            ed_msg(en ? "Every button back to its default." : "Todos los botones por defecto.", NULL);
+            Snd_PlaySe(1, 1);
+        } else {
+            sEdConfirm = 1;
+            ed_msg(en ? "{S} again: every button back to its default." : "{S} otra vez: todos por defecto.", NULL);
+            Snd_PlaySe(1, 0);
+        }
+    } else if (press & (PADG_TRIANGLE | PADG_CIRCLE)) {
+        return buttons_close();
+    } else if (press & PADG_START) {
+        sFromOptions = 1;
+        return buttons_close();
+    }
+    return 1;
+}
+
+static void buttons_draw(void) {
+    static const char *const spotEn[3] = {"rear pad", "corner", ""}, *const spotEs[3] = {"panel", "esquina", ""};
+    char t[200], l1[200], l2[200], *nl;
+    int a, y;
+
+    to_u16(gVitaBt4English ? "Vita Buttons" : "Botones Vita", sTitle, 96);
+    Font_PrintAt(GL_TEXT_X, GL_Y0 + 7, sTitle);
+    style_body();
+    Font_SetScale(0.85f);
+    for (a = 0; a < VR_COUNT; a++) {
+        y = GL_TEXT_Y + a * ED_STEP;
+        if (a == gVitaGuideEdRow) {
+            Font_SetColorRGBA(0xF4, 0xFF, 0x3F, 0x80);
+        } else {
+            Font_SetColorRGBA(0xE8, 0xF0, 0xFF, 0x80);
+        }
+        to_u16(Vita_RemapName(a), sEdName[a], 48);
+        Font_PrintAt(GL_TEXT_X + 12, y, sEdName[a]);
+        if (sEdCap && a == gVitaGuideEdRow) {
+            snprintf(t, sizeof(t), "%s", gVitaBt4English ? "...press" : "...pulsa");
+        } else {
+            Vita_RemapActionText(a, t, sizeof(t), 0);
+        }
+        to_u16(t, sEdVal[a], 120);
+        Font_PrintAt(ED_VALUE_X, y, sEdVal[a]);
+        if (a <= VR_R3) {
+            int s = Vita_TouchGetSpot(a);
+            to_u16((gVitaBt4English ? spotEn : spotEs)[s < 0 || s > 2 ? 2 : s], sEdTouch[a], 32);
+            Font_PushStyle();
+            Font_SetAlign(2);
+            Font_SetScale(0.75f);
+            Font_SetColorRGBA(0x89, 0xC3, 0xE5, 0x80);
+            Font_PrintAt(GL_X1 - 16, y + 2, sEdTouch[a]);
+            Font_PopStyle();
+        }
+    }
+    if (sEdMsg[0][0] || sEdMsg[1][0]) {
+        snprintf(l1, sizeof(l1), "%s", sEdMsg[0]);
+        snprintf(l2, sizeof(l2), "%s", sEdMsg[1]);
+    } else {
+        ed_help(gVitaGuideEdRow, l1, l2, sizeof(l1));
+        if ((nl = strchr(l1, '\n')) != NULL) { /* (a help of two lines: the second in l2) */
+            *nl = 0;
+            snprintf(l2, sizeof(l2), "%s", nl + 1);
+        }
+    }
+    Font_SetScale(0.80f);
+    Font_SetColorRGBA(0xC8, 0xE4, 0xFF, 0x80);
+    y = GL_TEXT_Y + VR_COUNT * ED_STEP + 8;
+    to_u16(l1, sEdLine[0], 200);
+    Font_PrintAt(GL_TEXT_X + 6, y, sEdLine[0]);
+    to_u16(l2, sEdLine[1], 200);
+    Font_PrintAt(GL_TEXT_X + 6, y + 22, sEdLine[1]);
+    to_u16(gVitaBt4English ? "{U}{D} Choose   {X} Change   {S} Defaults   {T} Back"
+                           : "{U}{D} Elegir   {X} Cambiar   {S} Por defecto   {T} Volver", sFoot, 160);
 }
 
 /* ---- the main menu's entry: its label in the game's font on the plate's row, its description ---- */
@@ -1022,5 +1285,33 @@ const char *Vita_GuideTagLegend(int i) {
     if (!gVitaGuide || i < 0 || i >= 8) {
         return NULL;
     }
-    return (gVitaBt4English ? kVgTagEn : kVgTagEs)[i];
+    {   /* (the player's controls in words: the Tag screens' TrueType lines have no button pictures) */
+        static char lines[8][160];
+        return Vita_RemapExpand((gVitaBt4English ? kVgTagEn : kVgTagEs)[i], lines[i], sizeof(lines[i]), 1);
+    }
+}
+
+/* ---- the Tag Team screens' help lines that name buttons (port_tbo.c, PORT_VITA): with the player's controls now, in
+   words (their TrueType lines have no button pictures); upstream's own words otherwise ---- */
+const char *Vita_GuideTagHelp(int which) {
+    static const char *const kEn[3] = {
+        "In battle: %K:target% picks the target. Stay near a downed ally to revive. Senzu: %K:senzu%. Fusion: %K:fusion% + "
+        "direction. Change them: Vita Guide > Vita Buttons.",
+        "Use %K:fusion% + direction near a compatible ally; %K:fusion% accepts. Control is random and both players help in "
+        "clashes. The spectator follows only the fusion. %K:unfuse% separates temporary fusions; the timer also ends them.",
+        "Set the number of Senzu Beans each fighter can use. To heal: %K:senzu%.",
+    };
+    static const char *const kEs[3] = {
+        "En combate: %K:target% elige el objetivo. Quédate cerca de un aliado caído para reanimarlo. Semilla: %K:senzu%. "
+        "Fusión: %K:fusion% + dirección. Cámbialos: Guía Vita > Botones Vita.",
+        "%K:fusion% y una dirección solicita la fusión con un aliado compatible; %K:fusion% la acepta. El control se sortea y "
+        "ambos ayudan en los choques. El espectador sigue sólo a la fusión. Las temporales terminan al agotarse el tiempo "
+        "o pulsar %K:unfuse%.",
+        "Elige cuántas semillas puede usar cada luchador. Para curarte: %K:senzu%.",
+    };
+    static char line[3][400];
+    if (which < 0 || which > 2) {
+        return "";
+    }
+    return Vita_RemapExpand((gVitaBt4English ? kEn : kEs)[which], line[which], sizeof(line[which]), 1);
 }

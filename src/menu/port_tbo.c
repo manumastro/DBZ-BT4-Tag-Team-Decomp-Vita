@@ -5132,7 +5132,7 @@ static char *Tb_Help(void) {
            (vita_touch.c): players did not find how to pick the other enemy (port/src/gs/online_language.c has it in
            Spanish and Portuguese) */
         if(Tb_TagOffline()&&sTb->tagCur==TAG_OFF_ROWS-1)
-            return "In battle: right stick picks the target. Stay near a downed ally to revive. Senzu: L2 + SELECT. Fusion: R3 + direction. L2 / R2 / L3 / R3: rear touch corners.";
+            {extern const char *Vita_GuideTagHelp(int which);return Vita_GuideTagHelp(0);} /* (the player's controls: vita_remap.c) */
 #endif
         if(Tb_TagOffline())return offlineHelp[sTb->tagCur];
         if(sTb->tagCur==TAG_NET_BATTLE_RULES)return "Set shared battle rules. The host's settings apply to everyone in this room.";
@@ -5171,10 +5171,16 @@ static char *Tb_Help(void) {
         if (sTagHealthRow == TAG_HP_APPLY) return "Copy this fighter's health settings to the active slots on the same team.";
         return "Choose a fighter slot to edit. Each slot has its own health settings.";
     case TB_TAG_FUSION:
+#ifdef PORT_VITA
+        {extern const char *Vita_GuideTagHelp(int which);return Vita_GuideTagHelp(1);} /* (the player's controls: vita_remap.c) */
+#endif
         return "Use R3 + direction near a compatible ally; R3 accepts. Control is random and both players help in clashes. The spectator follows only the fusion. L3 + R3 separates temporary fusions; the timer also ends them.";
     case TB_TAG_RECOVERY:
         if(sTagRecoveryRow==TAG_REC_TEAM1||sTagRecoveryRow==TAG_REC_TEAM2)
             return "Enable revival independently for each team. A fully defeated team cannot revive itself.";
+#ifdef PORT_VITA
+        if(sTagRecoveryRow==TAG_REC_BEANS){extern const char *Vita_GuideTagHelp(int which);return Vita_GuideTagHelp(2);}
+#endif
         if(sTagRecoveryRow==TAG_REC_BEANS)return "Set the number of Senzu Beans each fighter can use. Hold L2 and press SELECT to heal.";
         if(sTagRecoveryRow==TAG_REC_CPU)return "CPU allies assess nearby enemies before approaching a downed teammate. Interrupted progress is retained.";
         return "Stay near a downed ally to revive them. Extra helpers speed up recovery; movement and hits interrupt your contribution.";

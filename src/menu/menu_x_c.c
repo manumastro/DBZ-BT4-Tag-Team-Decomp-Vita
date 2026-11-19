@@ -357,6 +357,10 @@ extern int Port_Setting(const char *name, int def);
 extern void Port_SettingSave(const char *name, int value);
 extern void Port_SettingsWrite(void);
 extern void Vita_ModsSummary(char *out, int size);
+extern int Vita_RemapOn(void);
+extern void Vita_GuideOpenButtons(void), Vita_GuideDraw(void);
+extern int Vita_GuideIsOpen(void), Vita_GuideInput(void);
+extern void Vita_RemapActionText(int a, char *out, int size, int words);
 extern void Vita_UnlockFromOptions(void); /* port/vita/vita_main.c: Unlock All's screen, from level 1 (SQUARE) */
 extern int Vita_UnlockTakeChanged(void);
 #ifndef PORT_VITA_HOME
@@ -436,7 +440,7 @@ static void Option_VitaSetGuide(void) {
                 k++;
             }
             if (k < 90 && lines < 3) {
-                sprintf(text + k, "\nSQUARE: Unlock All.");
+                sprintf(text + k, Vita_RemapOn() ? "\nSQUARE Unlock All. START Buttons." : "\nSQUARE: Unlock All.");
             }
         }
         break;
@@ -448,7 +452,13 @@ static void Option_VitaSetGuide(void) {
         } else if (spot == 1) {
             sprintf(more, "the screen's %s\ncorner", kCorner[b]);
         } else {
-            sprintf(more, b < 2 ? "SELECT + %c only" : "not on the touch panels", kName[b][0]);
+            char pair[48];
+            Vita_RemapActionText(b, pair, sizeof(pair), 1); /* (vita_remap.c: the player's pair, in words) */
+            if (strcmp(pair, "none") != 0 && strcmp(pair, "ninguno") != 0) {
+                sprintf(more, "%s only", pair);
+            } else {
+                sprintf(more, "not on the touch panels");
+            }
         }
         sprintf(text, "%s is %s.\nChoose a button to change it.", kName[b], more);
         break;
@@ -458,10 +468,14 @@ static void Option_VitaSetGuide(void) {
             sprintf(text, "%s on the rear touch pad's\n%s quarter, where a grip\nattachment's %s presses.", kName[b], kQuarter[b], kName[b]);
         } else if (v == 1) {
             sprintf(text, "%s on the screen's %s\ncorner.", kName[b], kCorner[b]);
-        } else if (b < 2) {
-            sprintf(text, "%s not on the touch panels\n(SELECT + %c still gives it).", kName[b], kName[b][0]);
         } else {
-            sprintf(text, "%s not on the touch panels.", kName[b]);
+            char pair[48];
+            Vita_RemapActionText(b, pair, sizeof(pair), 1);
+            if (strcmp(pair, "none") != 0 && strcmp(pair, "ninguno") != 0) {
+                sprintf(text, "%s not on the touch panels\n(%s still gives it).", kName[b], pair);
+            } else {
+                sprintf(text, "%s not on the touch panels.", kName[b]);
+            }
         }
         break;
     case 4: /* Square Stick / ON OFF (the assist) */
@@ -561,6 +575,10 @@ static void Option_VitaTouchInput(void) {
             Option_VitaSetLevel(7, 0);
         } else if (pressed & (PADG_UP | PADG_DOWN)) {
             Option_VitaSetMove(v ^ 2);
+        } else if ((pressed & PADG_START) && Vita_RemapOn()) {
+            /* Vita Buttons: the editor of the Vita's own controls (port/vita/vita_remap.c), the Vita Guide's window over
+               this page (vita_guide.c); its pairs, the Tag target, quit, Unlock All */
+            Vita_GuideOpenButtons();
         } else if (pressed & PADG_SQUARE) {
             /* Unlock All: its text screen, shown between two pictures (port/vita/vita_main.c); there the save is given
                everything and written to its file, its copy kept first */
@@ -695,6 +713,14 @@ s32 Option_Input(void) {
     s32 i;
     TagHudScreen_TestInput();
     if(sHudEditorOn){TagHudEditor_Input();return 1;}
+#ifdef PORT_VITA
+    if (Vita_GuideIsOpen()) { /* Vita Buttons over Vita Settings: it takes the pad while open */
+        if (!Vita_GuideInput() && sVitaSetLevel == 1) {
+            Option_VitaSetGuide(); /* (the guide line again: the pairs may have changed) */
+        }
+        return 1;
+    }
+#endif
 
     if (!(gOption->flash[0].flags & MFLASH_PAD)) {
         return 1;
@@ -2637,6 +2663,9 @@ void Option_Draw(void) {
         Dialog_Draw(1);
     }
     if(sHudEditorOn)TagHudEditor_Draw();
+#ifdef PORT_VITA
+    Vita_GuideDraw(); /* (Vita Buttons over Vita Settings, when it is open) */
+#endif
 
 #ifdef PORT
     Port_MenuPage(0);

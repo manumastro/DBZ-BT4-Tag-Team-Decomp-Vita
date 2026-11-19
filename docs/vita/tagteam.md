@@ -163,8 +163,10 @@ pick one enemy over the other. Measured on the console's shots (960 x 544): the 
 18-20 pixels, the talk box 16; the Tag Team setup's rows and its talk box 12-13. So: `tagui_scale=130` (the rows'
 capitals about 16-17) and `taghud_scale=135` (the fight's letters, the HUD's gauge, the allies' column, the target's
 rings and bar). The layout is upstream's: only the letters and the HUD's pieces grow, each around where it was; the
-allies' column is laid out from the screen's foot so it stays on it. Targeting: the Vita's default is now the right
-stick (`tagtarget=1`; the PC's L3 is a rear touch corner here); the Select Fighters row's help says the fight's
+allies' column is laid out from the screen's foot so it stays on it. Targeting: the Vita's default was the right
+stick (`tagtarget=1`) until `wip/remap`, which went back to the PC's L3 (the developer: every default the PC's;
+the player picks the method on Camera mode > Target selection or Vita Guide > Vita Buttons, and the help lines
+say the current one, `docs/vita/development.md` "remap"); the Select Fighters row's help says the fight's
 controls and where L2 / R2 / L3 / R3 are (English, Spanish, Portuguese: `online_language.c`, PORT_VITA). Console
 check: `psvita-agent/sets/bt4/tagscale_menu_{on,off}.txt` (with `.inputs.json`) and `tagscale_2v2_{on,off}.txt`.
 

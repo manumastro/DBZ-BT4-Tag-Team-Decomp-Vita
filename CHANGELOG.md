@@ -4,6 +4,14 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 ## Unreleased
 
+- **Every Vita-only control can now be changed** (`remap=1`, not yet run on the console): Vita Guide > Vita Buttons,
+  or Options > Controller > Vita Settings and START. Choose a SELECT + button pair for L2, R2, L3, R3, the Tag Team
+  Senzu Bean, fusion and undo-fusion, quitting the game and Unlock All, and the Tag target method; SQUARE twice puts
+  every default back. The guide, the pause page, the reminder line, the Tag Team legend and help lines always show
+  your current buttons. A SELECT + button pair no longer sends a stray SELECT press first.
+- **Tag Team target: the PC's default** (L3, the rear pad's lower-left quarter) for players who never chose one; pick
+  the right stick or the D-pad on Camera mode > Target selection or in Vita Buttons (`tagtarget=1` for the old
+  default).
 - **Vita Guide in the main menu** (`vitaguide=1`): everything about playing on the Vita,
   in the game, in English or Spanish: the controls and the touch buttons, a full Tag Team guide (how to start, the
   setup, targeting, revive, Senzu, fusion, the HUD), Unlock All, every Vita Settings option, the anime soundtrack, the

@@ -18,6 +18,7 @@
  *   log.txt            written by every run (log-vgl.txt by the development build), kept across runs
  */
 #include "vita_paths.h"
+#include "vita_remap.h"
 #include <psp2/ctrl.h>
 #include <psp2/display.h>
 #include <psp2/io/dirent.h>
@@ -1748,7 +1749,7 @@ void Vita_VBlank(unsigned vblanks) {
             sUnlockAsk = 0;
             selHeld = 0;
             unlock_in_menus(1);
-        } else if (gVitaInMenus && (buttons() & (SCE_CTRL_START | SCE_CTRL_SELECT | SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) == SCE_CTRL_SELECT) {
+        } else if (gVitaInMenus && Vita_RemapHeld(VR_UNLOCK, buttons())) { /* (SELECT alone unless the player changed it: vita_remap.c) */
             if (++selHeld >= 2) {
                 selHeld = 0;
                 unlock_in_menus(0);
@@ -1757,7 +1758,7 @@ void Vita_VBlank(unsigned vblanks) {
             selHeld = 0;
         }
     }
-    if ((buttons() & (SCE_CTRL_START | SCE_CTRL_SELECT | SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)) == (SCE_CTRL_START | SCE_CTRL_SELECT)) {
+    if (Vita_RemapHeld(VR_QUIT, buttons())) { /* (START + SELECT unless the player changed it: vita_remap.c) */
         static int held;
         if (++held >= 3) { /* a second and a half: both are buttons of the game too */
             exit(9);
@@ -2160,7 +2161,8 @@ static void read_settings(void) {
         /* the released program: only the player's settings. The test runs leave theirs in the same file
            (mode=demo, film=...): a game started from its bubble goes to its title screen, not into a test fight */
         if (strcmp(line, "disc") != 0 && strcmp(line, "heap") != 0 && strcmp(line, "wide") != 0 && strcmp(line, "report") != 0 &&
-            strcmp(line, "fightres") != 0 && strcmp(line, "tagteam") != 0 && strcmp(line, "es_disc") != 0 && strcmp(line, "anime_music") != 0) {
+            strcmp(line, "fightres") != 0 && strcmp(line, "tagteam") != 0 && strcmp(line, "es_disc") != 0 && strcmp(line, "anime_music") != 0 &&
+            strcmp(line, "remap") != 0 && strncmp(line, "vbind_", 6) != 0) {
             continue;
         }
 #endif
@@ -2323,6 +2325,18 @@ static void read_settings(void) {
         } else if (strcmp(line, "guidetest") == 0) { /* development: the Vita Guide's picture without some of its parts, to find what blacks it out (vita_guide.c): bits 1 the window's quads, 2 the flush before them, 4 the 4:3 page's markers, 8 the icons,  16 its text, 32 the letters' shadows, 64 the fight reminder's dark strip; 0 (default) all */
             extern int gVitaGuideTest;
             gVitaGuideTest = atoi(eq);
+        } else if (strcmp(line, "remap") == 0) { /* the Vita's button pairs and the player's bindings (vita_remap.c, Vita Guide > Vita Buttons): 1 (default), 0 the buttons fixed as before */
+            gVitaRemap = atoi(eq);
+        } else if (strncmp(line, "vbind_", 6) == 0) { /* one binding over the saved one, this run (vita_remap.c): vbind_senzu=select+triangle, none, ... */
+            if (!Vita_RemapOverride(line + 6, eq)) {
+                Vita_Log("vita: settings: %s=%s not taken (SELECT and at most one other button)\n", line, eq);
+            }
+        } else if (strcmp(line, "remaptest") == 0) { /* development: the Vita Buttons editor's capture gets SELECT then SELECT + these buttons (SceCtrl bits, 4096 TRIANGLE) made up, as the runner cannot hold (vita_remap.c) */
+            extern int gVitaRemapTest;
+            gVitaRemapTest = (int)strtol(eq, NULL, 0);
+        } else if (strcmp(line, "remaplog") == 0) { /* the button pairs' work, into the log (vita_remap.c) */
+            extern int gVitaRemapPadLog;
+            gVitaRemapPadLog = atoi(eq);
         } else if (strcmp(line, "hudhelp") == 0) { /* the fights' reminder line (vita_guide.c) over the saved choice (pause > Vita Controls, SQUARE): 0 off, 1 on, 2 the first 5 fights' first 20 seconds (the saved default) */
             extern int gVitaHudHelp;
             gVitaHudHelp = atoi(eq);

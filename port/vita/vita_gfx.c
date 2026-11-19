@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "vita_remap.h"
 
 int gVitaGsSkip;                 /* 1: do not draw the frame being read */
 int gVitaGsSkipR;                /* the same for the list in hand (GPU build: set when the list is handed over) */
@@ -315,8 +316,11 @@ static unsigned sTagTargetDpadHeld[2];
    the right stick. The Vita's L3 is a corner of the rear touch pad (vita_touch.c), which players did not find (the
    developer: "could not work out how to pick one enemy over the other"); its right stick is free in a Tag Team fight
    (the camera is the game's, the free camera of Camera mode takes the pad whole: spec_consumes). A choice made on the
-   Camera mode page is saved and kept as on PC. */
-int gVitaTagTargetDefault = 1;
+   Camera mode page is saved and kept as on PC.
+   Since branch wip/remap (the developer: every default the PC's own): 0, L3, as upstream's gs_input.c
+   (target_stick_p1 0 unless set); the right stick is one choice away (Camera mode, Vita Guide > Vita Buttons), and
+   bt3.txt tagtarget=1 gives the old default. */
+int gVitaTagTargetDefault = 0;
 int PortInput_TagTargetMethod(int player, int method) {
     char key[40];
     if (player < 0 || player > 1) {
@@ -444,8 +448,8 @@ int Port_PadRead(int socket, unsigned char *data) {
         {SCE_CTRL_START, B_START}, {SCE_CTRL_UP, B_UP}, {SCE_CTRL_RIGHT, B_RIGHT}, {SCE_CTRL_DOWN, B_DOWN}, {SCE_CTRL_LEFT, B_LEFT},
         {SCE_CTRL_TRIANGLE, B_TRIANGLE}, {SCE_CTRL_CIRCLE, B_CIRCLE}, {SCE_CTRL_CROSS, B_CROSS}, {SCE_CTRL_SQUARE, B_SQUARE}};
     SceCtrlData pad;
-    unsigned btn = 0, i;
-    int ds;
+    unsigned btn = 0, i, bound = 0;
+    int ds, remap;
 
     if (socket < 0 || socket > 1) {
         return 0;
@@ -464,6 +468,12 @@ int Port_PadRead(int socket, unsigned char *data) {
     } else { /* the handheld's buttons (L / R are its triggers' bits), or the PS TV's merged pad as before */
         sceCtrlPeekBufferPositive(0, &pad, 1);
     }
+    /* the Vita's button pairs (vita_remap.c, bt3.txt remap; Vita Guide > Vita Buttons): what they give, the buttons
+       they take off the pad; remap=0: SELECT + L / R as fixed before (below) */
+    remap = !ds && socket == 0 && Vita_RemapOn();
+    if (remap) {
+        bound = Vita_RemapPad(&pad.buttons);
+    }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
         if (pad.buttons & map[i].vita) {
             btn |= map[i].ps2;
@@ -477,6 +487,11 @@ int Port_PadRead(int socket, unsigned char *data) {
         if (pad.buttons & SCE_CTRL_L3) { btn |= B_L3; }
         if (pad.buttons & SCE_CTRL_R3) { btn |= B_R3; }
         if (pad.buttons & SCE_CTRL_SELECT) { btn |= B_SELECT; }
+    } else if (remap) { /* (what the pairs left: SELECT alone, L / R as L1 / R1) */
+        if (pad.buttons & SCE_CTRL_SELECT) { btn |= B_SELECT; }
+        if (pad.buttons & SCE_CTRL_LTRIGGER) { btn |= B_L1; }
+        if (pad.buttons & SCE_CTRL_RTRIGGER) { btn |= B_R1; }
+        btn |= bound;
     } else if (pad.buttons & SCE_CTRL_SELECT) { /* SELECT + L / R = L2 / R2; SELECT alone = SELECT */
         if (pad.buttons & SCE_CTRL_LTRIGGER) { btn |= B_L2; }
         if (pad.buttons & SCE_CTRL_RTRIGGER) { btn |= B_R2; }

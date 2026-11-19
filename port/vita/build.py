@@ -262,7 +262,7 @@ def port_sources():
             (S / "gs/menu_text.c", "gs"), (S / "gs/tbo_text.c", "gs"), (S / "gs/menu_labels.c", "gs"),
             (S / "fight_panels.c", "ee"), (V / "vita_tbo.c", "hard"),
             # the Vita Guide: the main menu's entry, the pause menu's Vita Controls, the fights' reminder (bt3.txt vitaguide)
-            (V / "vita_guide.c", "hard"),
+            (V / "vita_guide.c", "hard"), (V / "vita_remap.c", "hard"),
             # BT4decomp's free / spectator camera and its screens' Spanish, its own files built unchanged
             # (gs/spectator_camera.c, gs/online_language.c; docs/vita/tagteam.md)
             (V / "vita_spectator.c", "gs"), (V / "vita_onlinelang.c", "gs"),

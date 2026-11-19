@@ -11,6 +11,9 @@
    - {X} cross, {O} circle, {S} square, {T} triangle, {L1} {R1} {L2} {R2} {L3} {R3}, {U} {D} {LT} {RT} the D-pad's
      arrows: the game's own button pictures (its font's <PAD=> tag); {SEL} and {ST} are written SELECT and START
      (the game's pictures of those two are unlabelled pills).
+   - %K:<name>% the player's controls of a Vita action now (port/vita/vita_remap.c: l2 r2 l3 r3 senzu fusion unfuse
+     target quit unlock), %KEYLINES% the button pairs that give L2 / R2 / L3 / R3, %TOUCHW% where L2 / R2 / L3 / R3
+     are touched now, in words (the Tag legend): never write those buttons here.
    Lines over the page's width wrap by themselves; keep them under ~40 letters so they do not. Avoid the words the
    Vita's text fixes rewrite ("the console", "(PS2)", "PlayStation 2": port/vita/vita_text.c). */
 #ifndef VITA_GUIDE_TEXT_H
@@ -36,10 +39,10 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "# Buttons the Vita does not have\n"
      "{L2}   Blast wave\n"
      "{R2}   Fly down\n"
-     "These and {L3} {R3}: rear touch pad (next topic).\n"
+     "These and {L3} {R3}: %WHERE% (next topic).\n"
      "# Pause and quit\n"
      "{ST}   Pause\n"
-     "Hold {ST} + {SEL}   Quit the game"},
+     "Hold %K:quit%   Quit the game"},
     {"Touch: L2, R2, L3, R3",
      "# The back of the Vita\n"
      "Touch the rear pad in one of four places:\n"
@@ -48,11 +51,11 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "{L3}   Bottom left\n"
      "{R3}   Bottom right\n"
      "# Another way\n"
-     "{SEL} + {L1}   Same as {L2}\n"
-     "{SEL} + {R1}   Same as {R2}\n"
+     "%KEYLINES%\n"
      "# Move them\n"
      "Options > Controller > Vita Settings > Touch\n"
      "Put them in the screen's corners, or off.\n"
+     "Button pairs: Vita Guide > Vita Buttons\n"
      "# In the menus\n"
      "Tap an item, tap it again to choose it.\n"
      "Swipe to scroll. Two fingers: go back."},
@@ -71,13 +74,13 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "3 vs 3 and bigger teams are still slow."},
     {"Tag Team: in the fight",
      "# Your target\n"
-     "Right stick   Change the enemy you aim at\n"
+     "%K:target%   Change the enemy you aim at\n"
      "A ring and a health bar mark him.\n"
      "# Help your team\n"
      "Near a fallen ally   Revive him\n"
-     "Hold {L2} + press {SEL}   Eat a Senzu Bean\n"
-     "{R3} + a direction   Fuse with a near ally\n"
-     "{L3} + {R3}   Undo the fusion\n"
+     "%K:senzu%   Eat a Senzu Bean\n"
+     "%K:fusion% + a direction   Fuse with a near ally\n"
+     "%K:unfuse%   Undo the fusion\n"
      "# Forgot something?\n"
      "In the fight: {ST} > Vita Controls"},
     {"Tag Team: the screen",
@@ -91,7 +94,7 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "Every fighter, form, stage and song,\n"
      "every item, and 4,850,000 Zenni.\n"
      "# How to do it\n"
-     "In a menu, hold {SEL} for one second.\n"
+     "In a menu, hold %K:unlock% for one second.\n"
      "Or: Options > Controller > Vita Settings, {S}\n"
      "Then press {X}.\n"
      "# Changed your mind?\n"
@@ -110,7 +113,8 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "Mods   Your mods on or off\n"
      "Mods, lower row   The anime music\n"
      "Stick   Slower stick, if it feels too quick\n"
-     "{S}   Unlock All"},
+     "{S}   Unlock All\n"
+     "{ST}   Vita Buttons: change them"},
     {"Anime soundtrack",
      "# English game, anime music\n"
      "1. Copy your Spanish B14 Rev2 .iso\n"
@@ -197,10 +201,10 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "# Botones que la Vita no tiene\n"
      "{L2}   Onda\n"
      "{R2}   Bajar\n"
-     "Estos y {L3} {R3}: panel trasero (tema siguiente).\n"
+     "Estos y {L3} {R3}: %WHERE% (tema siguiente).\n"
      "# Pausa y salir\n"
      "{ST}   Pausa\n"
-     "Mantén {ST} + {SEL}   Cerrar el juego"},
+     "Mantén %K:quit%   Cerrar el juego"},
     {"Táctil: L2, R2, L3, R3",
      "# La parte de atrás de la Vita\n"
      "Toca el panel trasero en uno de cuatro sitios:\n"
@@ -209,11 +213,11 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "{L3}   Abajo a la izquierda\n"
      "{R3}   Abajo a la derecha\n"
      "# Otra forma\n"
-     "{SEL} + {L1}   Igual que {L2}\n"
-     "{SEL} + {R1}   Igual que {R2}\n"
+     "%KEYLINES%\n"
      "# Cambiarlos de sitio\n"
      "Opciones > Mando > Vita Settings > Touch\n"
      "Ponlos en las esquinas de la pantalla, o apágalos.\n"
+     "Parejas de botones: Guía Vita > Botones Vita\n"
      "# En los menús\n"
      "Toca una opción y tócala otra vez para elegirla.\n"
      "Desliza para bajar. Dos dedos: volver."},
@@ -232,13 +236,13 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "3 contra 3 y equipos mayores aún van lentos."},
     {"Tag Team: en combate",
      "# Tu objetivo\n"
-     "Stick derecho   Cambia el enemigo al que apuntas\n"
+     "%K:target%   Cambia el enemigo al que apuntas\n"
      "Lo marcan un anillo y una barra de vida.\n"
      "# Ayuda a tu equipo\n"
      "Junto a un aliado caído   Lo reanimas\n"
-     "Mantén {L2} + pulsa {SEL}   Semilla del ermitaño\n"
-     "{R3} + una dirección   Fusión con un aliado\n"
-     "{L3} + {R3}   Deshacer la fusión\n"
+     "%K:senzu%   Semilla del ermitaño\n"
+     "%K:fusion% + una dirección   Fusión con un aliado\n"
+     "%K:unfuse%   Deshacer la fusión\n"
      "# ¿Se te olvidó algo?\n"
      "En combate: {ST} > Controles Vita"},
     {"Tag Team: la pantalla",
@@ -252,7 +256,7 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "Todos los luchadores, formas, escenarios,\n"
      "canciones y objetos, y 4.850.000 Zenis.\n"
      "# Cómo hacerlo\n"
-     "En un menú, mantén {SEL} un segundo.\n"
+     "En un menú, mantén %K:unlock% un segundo.\n"
      "O: Opciones > Mando > Vita Settings, {S}\n"
      "Luego pulsa {X}.\n"
      "# ¿Te arrepientes?\n"
@@ -271,7 +275,8 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "Mods   Tus mods, sí o no\n"
      "Mods, fila de abajo   La música del anime\n"
      "Stick   Stick más lento, si va rápido\n"
-     "{S}   Desbloquear todo"},
+     "{S}   Desbloquear todo\n"
+     "{ST}   Botones Vita: cámbialos"},
     {"Música del anime",
      "# Juego en inglés, música del anime\n"
      "1. Copia tu .iso de B14 Rev2 en español\n"
@@ -352,46 +357,46 @@ static const char *const kVgFightEn[2] = {
     "{X}   Dash              {O}   Guard\n"
     "{L1}   Charge ki       {R1}   Fly up\n"
     "{L2}   Blast wave     {R2}   Fly down\n"
-    "Hold {ST} + {SEL}   Quit the game\n"
+    "Hold %K:quit%   Quit the game\n"
     "%TOUCH%",
-    "Right stick   Change your target\n"
+    "%K:target%   Change your target\n"
     "Next to a fallen ally   Revive him\n"
-    "Hold {L2} + press {SEL}   Senzu Bean\n"
-    "{R3} + direction   Fusion\n"
-    "{L3} + {R3}   Undo the fusion",
+    "%K:senzu%   Senzu Bean\n"
+    "%K:fusion% + direction   Fusion\n"
+    "%K:unfuse%   Undo the fusion",
 };
 static const char *const kVgFightEs[2] = {
     "{S}   Golpe              {T}   Ráfaga de ki\n"
     "{X}   Impulso           {O}   Defensa\n"
     "{L1}   Cargar ki       {R1}   Subir\n"
     "{L2}   Onda              {R2}   Bajar\n"
-    "Mantén {ST} + {SEL}   Cerrar el juego\n"
+    "Mantén %K:quit%   Cerrar el juego\n"
     "%TOUCH%",
-    "Stick derecho   Cambia de objetivo\n"
+    "%K:target%   Cambia de objetivo\n"
     "Junto a un aliado caído   Lo reanimas\n"
-    "Mantén {L2} + pulsa {SEL}   Semilla\n"
-    "{R3} + dirección   Fusión\n"
-    "{L3} + {R3}   Deshacer la fusión",
+    "%K:senzu%   Semilla\n"
+    "%K:fusion% + dirección   Fusión\n"
+    "%K:unfuse%   Deshacer la fusión",
 };
 
 /* The fight's one-line reminder (hudhelp), 1 vs 1 and Tag Team */
 static const char *const kVgHudEn[2] = {
     "{L2} {R2} {L3} {R3}: %WHERE%      {ST} > Vita Controls",
-    "Right stick: change target      {ST} > Vita Controls",
+    "%K:target%: change target      {ST} > Vita Controls",
 };
 static const char *const kVgHudEs[2] = {
     "{L2} {R2} {L3} {R3}: %WHERE%      {ST} > Controles Vita",
-    "Stick derecho: cambiar objetivo      {ST} > Controles Vita",
+    "%K:target%: cambiar objetivo      {ST} > Controles Vita",
 };
 
 /* The Tag Team setup page's legend (port_tbo.c, the Tag screens' own kit and lines) */
 static const char *const kVgTagEn[8] = {
-    "IN THE FIGHT", "Right stick: target", "Near a fallen ally: revive", "L2 + SELECT: Senzu Bean",
-    "R3 + direction: fusion", "L3 + R3: undo a fusion", "L2 R2 L3 R3: rear touch pad", "START > Vita Controls",
+    "IN THE FIGHT", "%K:target%: target", "Near a fallen ally: revive", "%K:senzu%: Senzu Bean",
+    "%K:fusion% + direction: fusion", "%K:unfuse%: undo a fusion", "%TOUCHW%", "START > Vita Controls",
 };
 static const char *const kVgTagEs[8] = {
-    "EN COMBATE", "Stick derecho: objetivo", "Junto a un aliado caído: reanimar", "L2 + SELECT: semilla",
-    "R3 + dirección: fusión", "L3 + R3: deshacer fusión", "L2 R2 L3 R3: panel trasero", "START > Controles Vita",
+    "EN COMBATE", "%K:target%: objetivo", "Junto a un aliado caído: reanimar", "%K:senzu%: semilla",
+    "%K:fusion% + dirección: fusión", "%K:unfuse%: deshacer fusión", "%TOUCHW%", "START > Controles Vita",
 };
 
 #endif
