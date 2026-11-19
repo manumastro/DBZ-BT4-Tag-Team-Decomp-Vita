@@ -417,6 +417,12 @@ s32 Battle_Draw(void) {
     BtlGame_Draw();
 #ifdef PORT_VITA
     VGZ(27); /* (the HUD) */
+    {   /* the Vita Guide's reminder line at the fight's foot (port/vita/vita_guide.c, hudhelp): not over the pause menu,
+           nor with the HUD hidden */
+        extern void Vita_GuideHudHint(int visible);
+        extern int PortHud_Hidden(void), Vita_InBattle(void);
+        Vita_GuideHudHint(Vita_InBattle() && !PortHud_Hidden() && !(Battle_GetWork()->flags & BATTLE_FLAG_PAUSE_MENU));
+    }
 #endif
     Dbg_ProfColor(prof, 0x80FF40FF);
     Dbg_ProfMark(prof);

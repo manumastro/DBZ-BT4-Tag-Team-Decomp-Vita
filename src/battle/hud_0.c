@@ -68,6 +68,23 @@ static s32 PauseMenu_HudToggle(BtlMenuEvent *ev) {
     return 1;
 }
 #endif
+#ifdef PORT_VITA
+/* The Vita Guide's "Vita Controls" entry (port/vita/vita_guide.c, bt3.txt vitaguide): after Hide HUD, a page of the
+   menu engine's own kind, the controls page (its box, its opening and closing, TRIANGLE back), with the fight's Vita
+   controls in it (hud_0_b.c draws them through Vita_GuideFightPage); its item's function reads LEFT / RIGHT (the Tag
+   Team page) and SQUARE (the fights' reminder line) while it is open, as the skill list's does. */
+#define VITA_CONTROLS_ID 0x7300
+extern int Vita_GuideOn(void), Vita_GuideFightFunc(int pad);
+extern void Vita_GuideFightStart(int tag);
+static BtlMenuItem sVitaControlsItem;
+static BtlMenu sVitaControlsMenu;
+static s32 PauseMenu_VitaControlsFunc(BtlMenuEvent *ev) {
+    if (sVitaControlsMenu.state == BTL_MENU_STATE_ACTIVE) {
+        Vita_GuideFightFunc(BtlMenu_GetWork()->pad);
+    }
+    return 0;
+}
+#endif
 /* The cursor words (BtlMenu + 0x18) of the yes / no box at 0x2C4F00 and of the CPU level menu at 0x2C5158. */
 extern s32 gPauseMenuConfirmCursor[8];
 extern s32 gPauseMenuCpuLevelCursor[8];
@@ -472,6 +489,9 @@ void PauseMenu_Init(void) {
     sPresentationPauseReady=0;
     sHudPauseDismissRequested=0;
     Training_Init();
+#ifdef PORT_VITA
+    Vita_GuideFightStart(TagBattle_Active());
+#endif
     if(getenv("BT4_RENDER_TEST") && getenv("BT4_HUD_MENU_MATRIX")) {
         BtlMenu *menus[]={&gPauseMenuVersus,&gPauseMenuReplayRec,&gPauseMenuReplayPlay,
             &gPauseMenuMode1,&gPauseMenuMode2,&gPauseMenuMode3,&gPauseMenuMode4,
@@ -568,6 +588,19 @@ void PauseMenu_Init(void) {
                         memset(item,0,sizeof(*item));
                         item->id=0x7250;item->text[0]=item->text[1]=0x7250;item->sub=Training_Menu();
                     }
+#ifdef PORT_VITA
+                    if(Vita_GuideOn()&&n<31){
+                        memset(&sVitaControlsItem,0,sizeof(sVitaControlsItem));
+                        sVitaControlsItem.id=VITA_CONTROLS_ID;sVitaControlsItem.type=BTL_MENU_ITEM_CONTROLS;
+                        memset(&sVitaControlsMenu,0,sizeof(sVitaControlsMenu));
+                        sVitaControlsMenu.items=&sVitaControlsItem;sVitaControlsMenu.count=1;sVitaControlsMenu.scale=1.0f;
+                        sVitaControlsMenu.padX=14;sVitaControlsMenu.padY=12;sVitaControlsMenu.open=-1;
+                        item=&sPresentationPauseItems[n++];
+                        memset(item,0,sizeof(*item));
+                        item->id=VITA_CONTROLS_ID;item->text[0]=item->text[1]=VITA_CONTROLS_ID;
+                        item->sub=&sVitaControlsMenu;item->func=PauseMenu_VitaControlsFunc;
+                    }
+#endif
                 }
             }
             sPresentationPauseMenu.count=n;

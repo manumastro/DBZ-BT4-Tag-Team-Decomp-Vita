@@ -4,6 +4,16 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 ## Unreleased
 
+- **Vita Guide in the main menu** (`vitaguide=1`, not yet run on the console): everything about playing on the Vita,
+  in the game, in English or Spanish: the controls and the touch buttons, a full Tag Team guide (how to start, the
+  setup, targeting, revive, Senzu, fusion, the HUD), Unlock All, every Vita Settings option, the anime soundtrack, the
+  right game files and where they go, mods, what to send when something breaks, and what is not there yet. It is the
+  entry just above the first one when the main menu opens.
+- **Vita Controls in the pause menu**: the controls of the fight you are in (where L2, R2, L3 and R3 are now, and the
+  Tag Team controls in a Tag fight).
+- **A controls legend on the Tag Team setup page** ("In the fight": target, revive, Senzu, fusion).
+- **A short controls reminder at the bottom of the screen in your first 5 fights** (20 seconds each); pause > Vita
+  Controls, SQUARE, turns it on for good or off.
 - **The Tag Team fight's HUD drawn like the game's own** (`taghudvita=1`, not yet run on the console): your gauge is
   now exactly the one of a normal 1 vs 1 fight (same size, same corner), the allies' gauges in proportion at the
   bottom left, the game's own timer at the top, a sharp radar and target ring, and readable names and labels (before,

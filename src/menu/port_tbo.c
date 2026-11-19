@@ -2852,11 +2852,35 @@ static void Tb_DrawTagSharedText(void){
     }
 }
 
+#ifdef PORT_VITA
+/* The Vita Guide's legend on the Local Battle page (port/vita/vita_guide.c, bt3.txt vitaguide): what to press in the
+   fight, in a window of the page's own kit on its free right side (the main menu's way in: no hosts' picture there),
+   its lines the page's own (Ps_Text). Upstream's rows, prompts and help are not touched. */
+extern const char *Vita_GuideTagLegend(int i);
+static s32 Tb_VitaLegendBox(f32 *x0,f32 *x1,f32 *y1){
+    if(!sTagHomeEntry||!Tb_TagOffline()||!Vita_GuideTagLegend(0))return 0;
+    *x0=Tb_TagDetailRight()+12.0f;*x1=512.0f-Ps_Left()-18.0f;*y1=Tb_TagOptionsY(8)+4.0f;
+    return *x1-*x0>=150.0f;
+}
+static void Tb_DrawVitaLegend(void){
+    f32 x0,x1,y1;
+    if(Tb_VitaLegendBox(&x0,&x1,&y1))Ps_Panel(TBO_KIT_WINDOW,x0,74,x1,y1,0x80);
+}
+static void Tb_DrawVitaLegendText(void){
+    f32 x0,x1,y1;s32 i;
+    if(!Tb_VitaLegendBox(&x0,&x1,&y1))return;
+    Ps_Text(x0+12,Ps_TextTop(92,.50f),(char*)Vita_GuideTagLegend(0),.50f,x1-x0-24,3);
+    for(i=1;i<8;++i)Ps_Text(x0+12,Ps_TextTop(92+i*24.0f,.42f),(char*)Vita_GuideTagLegend(i),.42f,x1-x0-24,0);
+}
+#endif
 static void Tb_DrawTag(void){
     s32 i;f32 left=Tb_TagWideLeft();
     if(!sTagHomeEntry)Tb_Hosts(TBO_HOSTS_ARMS_CROSSED,408-left,350,250);
     if(Tb_TagOffline()){
         Tb_TagOptionsPlate(sTb->tagCur,TAG_OFF_ROWS);
+#ifdef PORT_VITA
+        Tb_DrawVitaLegend();
+#endif
         return;
     }
     if(sTagHomeEntry){
@@ -2896,6 +2920,9 @@ static void Tb_DrawTagText(void){
             }
             Tb_TagOptionText(i,i==sTb->tagCur,offlineLabels[i],value);
         }
+#ifdef PORT_VITA
+        Tb_DrawVitaLegendText();
+#endif
         return;
     }
     if(sTagHomeEntry)Tb_TagOptionText(0,sTb->tagCur==TAG_NET_QUICK,"Quick Match","2 vs 2");

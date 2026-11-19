@@ -1,0 +1,669 @@
+/* The Vita Guide (bt3.txt vitaguide, default 1): everything about playing on the Vita, in the game itself, drawn the
+   way the game draws its own help pages.
+
+   What the original does, and what this copies (docs/vita/development.md "vitaguide"):
+   - its help pages (the battle pause menu's controls page, src/battle/hud_0_c.c BtlText_DrawControls; the menus'
+     message windows) are text of the boot file's resident font, one sprite a letter (src/battle/col_c.c,
+     Font_PutSprite), with the controller's buttons drawn inside the text by the font's <PAD=> tag from the resident
+     icon file (col_c_b.c); no texture is made for them, nothing is uploaded but the font and icon sheets the game
+     uploads for any text;
+   - the pause menu's entries are its menu engine's items (hud_0_b.c), its pages the engine's boxes.
+   So: the guide's words are Font_PrintAt lines of that font (the letters' outline only on the headings: the body has
+   the drop shadow, 2 sprites a letter instead of the controls page's 9), the buttons the font's own pictures (L3 / R3
+   the Vita's plates since vita_optart.c), the window two plain quads and two thin bars (no texture), drawn over the
+   main menu, which keeps running behind it. In a fight the page is the engine's own controls box with these lines
+   in it (Vita_GuideFightPage, hud_0_b.c). Nothing is loaded, kept or made: no memory beyond this file's text
+   buffers (about 20 KB of .bss).
+
+   Three places use it:
+   - the main menu's "Vita Guide" entry (src/menu/menu_a.c, PORT_VITA; the PC's online item's slot, which the Vita
+     never lists): a contents page, then each topic's pages (vita_guide_text.h);
+   - the battle pause menu's "Vita Controls" entry (src/battle/hud_0.c, hud_0_b.c): the controls of the fight (the
+     Tag Team page too in a Tag fight), and SQUARE there turns the reminder below on and off;
+   - the reminder line at the foot of a fight (bt3.txt / saved hudhelp: 0 off, 1 on, 2 the first fights; default 2,
+     the first 5 fights, the first 20 seconds of each), and the Tag Team setup page's legend (port_tbo.c). */
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include "types.h"
+#include "sys/pad.h"
+#include "vita_guide_text.h"
+
+extern void Font_PushStyle(void);
+extern void Font_PopStyle(void);
+extern void Font_SetScale(f32 scale);
+extern void Font_SetScaleXY(f32 sx, f32 sy);
+extern void Font_SetAlign(s32 align);
+extern void Font_SetSpacing(s32 x, s32 y);
+extern void Font_SetShadowMode(s32 mode);
+extern void Font_SetShadowOffset(s32 x, s32 y);
+extern void Font_SetShadowColorRGBA(s32 r, s32 g, s32 b, s32 a);
+extern void Font_SetColorRGBA(s32 r, s32 g, s32 b, s32 a);
+extern void Font_PrintAt(s32 x, s32 y, u16 *str);
+extern s32 Font_GetWidth(u16 *str);
+extern void Font_FlushAll(void);
+extern void FontIcon_SetPadType(s32 type);
+extern void FontIcon_ResetAnim(void);
+extern u64 *Dma_BeginDirect(void);
+extern void Dma_EndDirect(u64 *pkt);
+extern void Gfx_PutDefaultEnv(u64 **pkt);
+extern s32 Snd_PlaySe(u32 mask, s32 id);
+extern void Port_MenuPage(int screen);
+extern void Port_MenuFill(int on);
+extern int Port_Setting(const char *name, int def);
+extern void Port_SettingSave(const char *name, int value);
+extern int Vita_TouchGetSpot(int b);
+extern int gVitaBt4English;
+extern void Vita_Log(const char *fmt, ...);
+
+/* ---- settings ---- */
+int gVitaGuide = 1;    /* bt3.txt vitaguide: 1 (default) the entries and the legend; 0 none of them */
+int gVitaHudHelp = -1; /* bt3.txt hudhelp: over the saved one (Vita Controls' SQUARE); -1 the saved one */
+#define HUDHELP_FIGHTS 5    /* hudhelp 2: in the first fights */
+#define HUDHELP_FRAMES 1200 /* ... their first 20 seconds */
+
+int Vita_GuideOn(void) { return gVitaGuide != 0; }
+
+static int hudhelp_mode(void) {
+    int v = gVitaHudHelp >= 0 ? gVitaHudHelp : Port_Setting("hud_help", 2);
+    return v < 0 || v > 2 ? 2 : v;
+}
+
+/* ---- text: UTF-8 with {marks} to the game's 16-bit strings with <PAD=> tags ---- */
+static const struct { const char *mark; const u16 name[3]; int advance; } kMarks[] = {
+    {"X", {0x00D7}, 20}, {"O", {0x25CB}, 20}, {"S", {0x25A1}, 20}, {"T", {0x25B3}, 20},
+    {"L1", {0xFF2C, 0xFF11}, 29}, {"L2", {0xFF2C, 0xFF12}, 29}, {"L3", {0xFF2C, 0xFF13}, 31},
+    {"R1", {0xFF32, 0xFF11}, 29}, {"R2", {0xFF32, 0xFF12}, 29}, {"R3", {0xFF32, 0xFF13}, 31},
+    {"SEL", {0xFF26, 0x32A7}, 24}, {"ST", {0xFF26, 0x32A8}, 24},
+    {"U", {0x2191}, 16}, {"D", {0x2193}, 16}, {"RT", {0x2192}, 16}, {"LT", {0x2190}, 16},
+};
+#define MARKS ((int)(sizeof(kMarks) / sizeof(kMarks[0])))
+
+/* the mark at s (after its '{'), its length up to '}' in *len; -1 none */
+static int mark_at(const char *s, int *len) {
+    int k;
+    for (k = 0; k < MARKS; k++) {
+        size_t n = strlen(kMarks[k].mark);
+        if (strncmp(s, kMarks[k].mark, n) == 0 && s[n] == '}') {
+            *len = (int)n + 1;
+            return k;
+        }
+    }
+    return -1;
+}
+
+static unsigned utf8_next(const char **p) {
+    const unsigned char *s = (const unsigned char *)*p;
+    unsigned c = *s++;
+    if ((c & 0xE0) == 0xC0 && s[0]) {
+        c = ((c & 31) << 6) | (s[0] & 63);
+        s++;
+    } else if ((c & 0xF0) == 0xE0 && s[0] && s[1]) {
+        c = ((c & 15) << 12) | ((s[0] & 63) << 6) | (s[1] & 63);
+        s += 2;
+    }
+    *p = (const char *)s;
+    return c;
+}
+
+/* one token (a word, a mark, or the spaces before a word) into out; its width at scale 1 */
+static int put_tag(u16 *out, int *n, int max, int k) {
+    static const char pre[] = "<PAD=";
+    int i;
+    for (i = 0; pre[i] && *n < max; i++) {
+        out[(*n)++] = (u8)pre[i];
+    }
+    for (i = 0; i < 3 && kMarks[k].name[i] && *n < max; i++) {
+        out[(*n)++] = kMarks[k].name[i];
+    }
+    if (*n < max) {
+        out[(*n)++] = '>';
+    }
+    return kMarks[k].advance;
+}
+
+/* ---- the lines of a page: the text wrapped at `width` (GS units at scale `scale`) ---- */
+#define LINES_MAX 64
+#define LINE_CHARS 200
+static u16 sLine[LINES_MAX][LINE_CHARS];
+static int sLineCount;
+
+static int word_width(const u16 *w, int n, f32 scale) {
+    static u16 tmp[LINE_CHARS];
+    if (n <= 0) {
+        return 0;
+    }
+    memcpy(tmp, w, (size_t)n * 2);
+    tmp[n] = 0;
+    return (int)((f32)Font_GetWidth(tmp) * scale);
+}
+
+/* `text` with %TOUCH% / %WHERE% put in (where the touch buttons are now) into sLine[]; returns the lines */
+static int wrap(const char *text, int width, f32 scale) {
+    char buf[2048];
+    const char *p;
+    int x = 0, n = 0;
+    u16 *line;
+
+    {   /* the touch line, from Vita Settings > Touch */
+        static const char *spotEn[3] = {"rear touch pad", "front screen corner", "off"};
+        static const char *spotEs[3] = {"panel trasero", "esquina de la pantalla", "apagado"};
+        const char *const *spot = gVitaBt4English ? spotEn : spotEs;
+        char touch[200], where[80];
+        int s0 = Vita_TouchGetSpot(0), same = 1, b;
+        const char *src = text;
+        char *d = buf;
+        for (b = 1; b < 4; b++) {
+            same &= Vita_TouchGetSpot(b) == s0;
+        }
+        if (same) {
+            snprintf(touch, sizeof(touch), "{L2} {R2} {L3} {R3}: %s.", spot[s0 < 0 || s0 > 2 ? 0 : s0]);
+            snprintf(where, sizeof(where), "%s", spot[s0 < 0 || s0 > 2 ? 0 : s0]);
+        } else {
+            static const char *const nm[4] = {"{L2}", "{R2}", "{L3}", "{R3}"};
+            int o = 0;
+            touch[0] = 0;
+            for (b = 0; b < 4; b++) {
+                int s = Vita_TouchGetSpot(b);
+                o += snprintf(touch + o, sizeof(touch) - (size_t)o, "%s %s%s", nm[b], spot[s < 0 || s > 2 ? 0 : s], b < 3 ? ",  " : ".");
+            }
+            snprintf(where, sizeof(where), "%s", gVitaBt4English ? "Vita Settings > Touch" : "Vita Settings > Touch");
+        }
+        while (*src && d < buf + sizeof(buf) - 200) {
+            if (strncmp(src, "%TOUCH%", 7) == 0) {
+                d += snprintf(d, 200, "%s", touch);
+                src += 7;
+            } else if (strncmp(src, "%WHERE%", 7) == 0) {
+                d += snprintf(d, 200, "%s", where);
+                src += 7;
+            } else {
+                *d++ = *src++;
+            }
+        }
+        *d = 0;
+    }
+    Font_PushStyle(); /* (Font_GetWidth measures with the style's scale and spacing: scale 1 here, `scale` below) */
+    Font_SetScaleXY(1.0f, 1.0f);
+    Font_SetScale(1.0f);
+    Font_SetSpacing(0, 0);
+    sLineCount = 0;
+    line = sLine[0];
+    p = buf;
+    while (*p && sLineCount < LINES_MAX) {
+        u16 word[LINE_CHARS];
+        int wn = 0, ww = 0, spaces = 0, k, len;
+        if (*p == '\n') {
+            line[n] = 0;
+            sLineCount++;
+            line = sLine[sLineCount < LINES_MAX ? sLineCount : LINES_MAX - 1];
+            n = x = 0;
+            p++;
+            continue;
+        }
+        while (*p == ' ') {
+            spaces++;
+            p++;
+        }
+        /* a word: up to a space or a line's end; marks count by their picture's width */
+        while (*p && *p != ' ' && *p != '\n' && wn < LINE_CHARS - 12) {
+            if (*p == '{' && (k = mark_at(p + 1, &len)) >= 0) {
+                ww += put_tag(word, &wn, LINE_CHARS - 12, k);
+                p += 1 + len;
+            } else {
+                unsigned c = utf8_next(&p);
+                word[wn++] = (u16)c;
+                ww += 0; /* (measured below, the letters together) */
+            }
+        }
+        {   /* the letters' width: the word without its tags, measured by the font */
+            u16 letters[LINE_CHARS];
+            int ln = 0, i = 0;
+            while (i < wn) {
+                if (word[i] == '<' && i + 4 < wn && word[i + 1] == 'P' && word[i + 4] == '=') {
+                    while (i < wn && word[i] != '>') {
+                        i++;
+                    }
+                    i++;
+                    continue;
+                }
+                letters[ln++] = word[i++];
+            }
+            ww = (int)((f32)ww + (f32)word_width(letters, ln, scale));
+        }
+        {
+            int sw = spaces * word_width((u16[]){' '}, 1, scale);
+            if (n > 0 && x + sw + ww > width) { /* the word on the next line */
+                line[n] = 0;
+                sLineCount++;
+                if (sLineCount >= LINES_MAX) {
+                    break;
+                }
+                line = sLine[sLineCount];
+                n = x = 0;
+                spaces = 0;
+                sw = 0;
+            }
+            while (spaces-- > 0 && n < LINE_CHARS - 1) {
+                line[n++] = ' ';
+            }
+            x += sw;
+        }
+        if (n + wn >= LINE_CHARS - 1) {
+            wn = LINE_CHARS - 1 - n;
+        }
+        memcpy(line + n, word, (size_t)wn * 2);
+        n += wn;
+        x += ww;
+    }
+    if (sLineCount < LINES_MAX) {
+        line[n] = 0;
+        sLineCount++;
+    }
+    Font_PopStyle();
+    return sLineCount;
+}
+
+/* a short line (a heading, a footer) with its marks */
+static void to_u16(const char *s, u16 *out, int max) {
+    int n = 0, k, len;
+    while (*s && n < max - 12) {
+        if (*s == '{' && (k = mark_at(s + 1, &len)) >= 0) {
+            put_tag(out, &n, max - 1, k);
+            s += 1 + len;
+        } else {
+            out[n++] = (u16)utf8_next(&s);
+        }
+    }
+    out[n] = 0;
+}
+
+/* ---- the window: untextured quads in the GS's packet, as the game's own direct packets are made ---- */
+static void quad(u64 **p, int x0, int y0, int x1, int y1, u32 rgba) {
+    x0 += 0x700;
+    x1 += 0x700;
+    y0 += 0x720;
+    y1 += 0x720;
+    (*p)[0] = 0x4400000000008001ULL; /* GIF tag: REGLIST, 4 registers, once, the end */
+    (*p)[1] = 0x5510;                /* PRIM, RGBAQ, XYZ2, XYZ2 */
+    *p += 2;
+    (*p)[0] = 0x46;                  /* a sprite, blended, no texture */
+    (*p)[1] = (u64)rgba | 0x3F80000000000000ULL;
+    *p += 2;
+    (*p)[0] = ((u64)x0 << 4) | ((u64)y0 << 20) | 0xFFFFFFF000000000ULL;
+    (*p)[1] = ((u64)x1 << 4) | ((u64)y1 << 20) | 0xFFFFFFF000000000ULL;
+    *p += 2;
+}
+
+static u64 *quads_begin(void) {
+    u64 *p = Dma_BeginDirect();
+    Gfx_PutDefaultEnv(&p);
+    p[0] = 0x1000000000008002ULL; /* TEST_1 0, ZBUF_1 no depth writes (as the battle menu's box) */
+    p[1] = 0xE;
+    p += 2;
+    p[0] = 0;
+    p[1] = 0x47;
+    p += 2;
+    p[0] = 0x1310000E0ULL;
+    p[1] = 0x4E;
+    p += 2;
+    return p;
+}
+
+#define RGBA(r, g, b, a) ((u32)(r) | ((u32)(g) << 8) | ((u32)(b) << 16) | ((u32)(a) << 24))
+
+/* ---- the guide over the main menu ---- */
+enum { GL_X0 = 18, GL_X1 = 494, GL_Y0 = 22, GL_Y1 = 426, GL_TEXT_X = 34, GL_TEXT_Y = 66, GL_STEP = 23, GL_ROWS = 14 };
+#define GL_SCALE 0.80f
+static int sOpen, sTopic, sPage, sPages, sCursor, sLastTopic = -1, sLastPages;
+static u16 sTitle[96], sFoot[160], sCount[16];
+
+static const VgTopic *topics(void) { return gVitaBt4English ? kVgEn : kVgEs; }
+
+int Vita_GuideIsOpen(void) { return sOpen; }
+
+void Vita_GuideOpen(void) {
+    sOpen = 1;
+    sTopic = -1; /* the contents */
+    sPage = 0;
+    Snd_PlaySe(1, 1);
+    Vita_Log("vita: guide: opened\n");
+}
+
+/* one topic's lines (cached: wrapped again only when the topic changes) */
+static void topic_lines(int t) {
+    if (t != sLastTopic) {
+        wrap(topics()[t].body, GL_X1 - GL_X0 - 34, GL_SCALE);
+        sLastPages = (sLineCount + GL_ROWS - 1) / GL_ROWS;
+        if (sLastPages < 1) {
+            sLastPages = 1;
+        }
+        sLastTopic = t;
+    }
+    sPages = sLastPages;
+}
+
+/* the main menu's frame, in place of its own input (src/menu/menu_a.c): 0 when the guide closed */
+int Vita_GuideInput(void) {
+    u32 press = gPad[0].gamePressed, rep = gPad[0].gameRepeat;
+
+    if (!sOpen) {
+        return 0;
+    }
+    if (sTopic < 0) {
+        if (rep & PADG_UP) {
+            sCursor = (sCursor + VG_TOPICS - 1) % VG_TOPICS;
+            Snd_PlaySe(1, 0);
+        } else if (rep & PADG_DOWN) {
+            sCursor = (sCursor + 1) % VG_TOPICS;
+            Snd_PlaySe(1, 0);
+        } else if (press & (PADG_CROSS | PADG_RIGHT)) {
+            sTopic = sCursor;
+            sPage = 0;
+            Snd_PlaySe(1, 1);
+        } else if (press & (PADG_TRIANGLE | PADG_CIRCLE | PADG_START)) {
+            sOpen = 0;
+            Snd_PlaySe(1, 2);
+            return 0;
+        }
+        return 1;
+    }
+    topic_lines(sTopic);
+    if (rep & (PADG_RIGHT | PADG_R1 | PADG_CROSS)) { /* the next page, then the next topic */
+        if (sPage + 1 < sPages) {
+            sPage++;
+        } else {
+            sTopic = (sTopic + 1) % VG_TOPICS;
+            sCursor = sTopic;
+            sPage = 0;
+        }
+        Snd_PlaySe(1, 0);
+    } else if (rep & (PADG_LEFT | PADG_L1)) {
+        if (sPage > 0) {
+            sPage--;
+        } else {
+            sTopic = (sTopic + VG_TOPICS - 1) % VG_TOPICS;
+            sCursor = sTopic;
+            topic_lines(sTopic);
+            sPage = sPages - 1;
+        }
+        Snd_PlaySe(1, 0);
+    } else if (press & (PADG_TRIANGLE | PADG_CIRCLE)) {
+        sTopic = -1; /* back to the contents */
+        Snd_PlaySe(1, 2);
+    } else if (press & PADG_START) {
+        sOpen = 0;
+        Snd_PlaySe(1, 2);
+        return 0;
+    }
+    return 1;
+}
+
+static void style_body(void) {
+    Font_SetAlign(0);
+    Font_SetScale(GL_SCALE);
+    Font_SetSpacing(0, 0);
+    Font_SetShadowMode(1); /* the drop shadow: 2 sprites a letter */
+    Font_SetShadowOffset(1, 1);
+    Font_SetShadowColorRGBA(0, 0, 0x10, 0x60);
+    Font_SetColorRGBA(0xFF, 0xFF, 0xFF, 0x80);
+}
+
+static void style_heading(void) {
+    Font_SetAlign(0);
+    Font_SetScale(1.0f);
+    Font_SetSpacing(0, 0);
+    Font_SetShadowMode(2); /* the outline, as the pause menu's headings */
+    Font_SetShadowOffset(1, 1);
+    Font_SetShadowColorRGBA(0x30, 0x10, 0x00, 0x60);
+    Font_SetColorRGBA(0xFF, 0xB0, 0x40, 0x80);
+}
+
+/* after the main menu's own drawing, on its page */
+void Vita_GuideDraw(void) {
+    static u16 sRow[VG_TOPICS][96];
+    u64 *p;
+    int i;
+
+    if (!sOpen) {
+        return;
+    }
+    Font_FlushAll(); /* (the menu's own letters under the window) */
+    Port_MenuPage(50); /* the 4:3 page in the middle, at its true shape (as the language picker, port_language.c) */
+    Port_MenuFill(1); /* (the part's marker before the packet, not inside it) */
+    p = quads_begin();
+    quad(&p, 0, 0, 512, 448, RGBA(0, 0, 0, 0x50)); /* the menu dimmed, the screen's width */
+    Dma_EndDirect(p);
+    Port_MenuFill(0);
+    p = quads_begin();
+    quad(&p, GL_X0, GL_Y0, GL_X1, GL_Y1, RGBA(0x04, 0x10, 0x30, 0x74));      /* the window */
+    quad(&p, GL_X0, GL_Y0, GL_X1, GL_Y0 + 34, RGBA(0x10, 0x30, 0x68, 0x70)); /* its title band */
+    quad(&p, GL_X0, GL_Y0 + 34, GL_X1, GL_Y0 + 36, RGBA(0x89, 0xC3, 0xE5, 0x70));
+    quad(&p, GL_X0, GL_Y1 - 32, GL_X1, GL_Y1 - 30, RGBA(0x89, 0xC3, 0xE5, 0x50));
+    if (sTopic < 0) { /* the cursor's bar */
+        int y = GL_TEXT_Y - 3 + sCursor * 23;
+        quad(&p, GL_X0 + 10, y, GL_X1 - 10, y + 22, RGBA(0x30, 0x60, 0xA0, 0x50));
+    }
+    Dma_EndDirect(p);
+
+    FontIcon_SetPadType(0);
+    Font_PushStyle();
+    style_heading();
+    if (sTopic < 0) {
+        to_u16(gVitaBt4English ? "Vita Guide" : "Guía Vita", sTitle, 96);
+        Font_PrintAt(GL_TEXT_X, GL_Y0 + 7, sTitle);
+        Font_SetScale(0.9f);
+        Font_SetShadowMode(1);
+        Font_SetShadowColorRGBA(0, 0, 0x10, 0x60);
+        for (i = 0; i < VG_TOPICS; i++) {
+            to_u16(topics()[i].title, sRow[i], 96);
+            if (i == sCursor) {
+                Font_SetColorRGBA(0xF4, 0xFF, 0x3F, 0x80); /* the pause menu's cursor colour */
+            } else {
+                Font_SetColorRGBA(0x89, 0xC3, 0xE5, 0x80); /* ... and its items' */
+            }
+            Font_PrintAt(GL_TEXT_X + 12, GL_TEXT_Y + i * 23, sRow[i]);
+        }
+        to_u16(gVitaBt4English ? "{U}{D} choose   {X} open   {T} back to the menu"
+                               : "{U}{D} elegir   {X} abrir   {T} volver al menú", sFoot, 160);
+    } else {
+        int first, n;
+        topic_lines(sTopic);
+        to_u16(topics()[sTopic].title, sTitle, 96);
+        Font_PrintAt(GL_TEXT_X, GL_Y0 + 7, sTitle);
+        {
+            char count[16];
+            snprintf(count, sizeof(count), "%d/%d", sTopic + 1, VG_TOPICS);
+            to_u16(count, sCount, 16);
+        }
+        Font_SetAlign(2);
+        Font_SetScale(0.8f);
+        Font_SetColorRGBA(0x89, 0xC3, 0xE5, 0x80);
+        Font_PrintAt(GL_X1 - 14, GL_Y0 + 10, sCount);
+        style_body();
+        first = sPage * GL_ROWS;
+        n = sLineCount - first < GL_ROWS ? sLineCount - first : GL_ROWS;
+        for (i = 0; i < n; i++) {
+            Font_PrintAt(GL_TEXT_X, GL_TEXT_Y + i * GL_STEP, sLine[first + i]);
+        }
+        if (sPages > 1) {
+            char pg[64];
+            snprintf(pg, sizeof(pg), gVitaBt4English ? "{LT}{RT} page %d of %d   {T} contents" : "{LT}{RT} página %d de %d   {T} índice",
+                     sPage + 1, sPages);
+            to_u16(pg, sFoot, 160);
+        } else {
+            to_u16(gVitaBt4English ? "{LT}{RT} other topics   {T} contents   {ST} close"
+                                   : "{LT}{RT} otros temas   {T} índice   {ST} cerrar", sFoot, 160);
+        }
+    }
+    Font_SetAlign(0);
+    Font_SetScale(0.75f);
+    Font_SetShadowMode(1);
+    Font_SetColorRGBA(0xD0, 0xE0, 0xF0, 0x80);
+    Font_PrintAt(GL_TEXT_X, GL_Y1 - 25, sFoot);
+    Font_PopStyle();
+    Font_FlushAll();
+    Port_MenuPage(0);
+}
+
+/* ---- the main menu's entry: its label in the game's font on the plate's row, its description ---- */
+static u16 sLabel[32];
+void Vita_GuideMenuLabel(f32 x, f32 y, f32 sx, f32 sy, int alpha, int lit) {
+    if (alpha <= 0) {
+        return;
+    }
+    to_u16(gVitaBt4English ? "Vita Guide" : "Guía Vita", sLabel, 32);
+    FontIcon_SetPadType(0);
+    Font_PushStyle();
+    Font_SetAlign(0);
+    Font_SetScaleXY(1.30f * sx, 1.30f * sy); /* the plate's row is 32 high: capitals as tall as its neighbours' */
+    Font_SetScale(1.0f);
+    Font_SetSpacing(0, 0);
+    Font_SetShadowMode(2);
+    Font_SetShadowOffset(1, 1);
+    Font_SetShadowColorRGBA(0x10, 0x08, 0x30, alpha > 0x80 ? 0x80 : alpha);
+    if (lit) {
+        Font_SetColorRGBA(0xFF, 0xD8, 0x50, alpha > 0x80 ? 0x80 : alpha);
+    } else {
+        Font_SetColorRGBA(0xE8, 0xF0, 0xFF, alpha > 0x80 ? 0x80 : alpha);
+    }
+    Font_PrintAt((s32)(x + 6.0f * sx), (s32)(y + 4.0f * sy), sLabel);
+    Font_PopStyle();
+}
+
+/* the message window's line under the menu (MsgWin_PortDrawString's form: 0xFEFF, lines of at most ~31 letters) */
+u16 *Vita_GuideMenuDescription(void) {
+    static u16 line[160];
+    const char *text = gVitaBt4English ? "Controls, Tag Team, settings and help:\nall about playing on the Vita."
+                                       : "Controles, Tag Team, ajustes y ayuda:\ntodo sobre jugar en la Vita.";
+    int n = 1;
+    line[0] = 0xFEFF;
+    while (*text && n < 158) {
+        line[n++] = (u16)utf8_next(&text);
+    }
+    line[n] = 0;
+    return line;
+}
+
+/* ---- the battle pause menu's "Vita Controls" page (src/battle/hud_0_b.c, the engine's controls box) ---- */
+static int sFightPage;
+static int sTagFight;
+
+u16 *Vita_GuideFightItemText(void) {
+    static u16 t[32];
+    to_u16(gVitaBt4English ? "Vita Controls" : "Controles Vita", t, 32);
+    return t;
+}
+
+void Vita_GuideFightBegin(int tag) {
+    sTagFight = tag;
+    sFightPage = 0;
+}
+
+/* the page's item, every frame while it is open: LEFT / RIGHT the Tag Team page, SQUARE the reminder (as the skill
+   list's item reads its pad: hud_0.c PauseMenu_SkillListFunc) */
+int Vita_GuideFightFunc(int pad) {
+    u32 press = gPad[pad < 0 ? 0 : pad].gamePressed;
+    if (sTagFight && (press & (PADG_LEFT | PADG_RIGHT))) {
+        sFightPage ^= 1;
+        Snd_PlaySe(1, 0);
+    }
+    if (press & PADG_SQUARE) {
+        int m = hudhelp_mode() == 1 ? 0 : 1;
+        Port_SettingSave("hud_help", m);
+        gVitaHudHelp = -1;
+        Snd_PlaySe(1, 1);
+        Vita_Log("vita: guide: the fights' controls reminder %s\n", m ? "on" : "off");
+    }
+    return 0;
+}
+
+static u16 sFightTitle[48], sFightFoot[128];
+void Vita_GuideFightPage(int x0, int x1, int y0, int y1) {
+    const char *body = (gVitaBt4English ? kVgFightEn : kVgFightEs)[sTagFight ? sFightPage : 0];
+    char foot[160];
+    int i, n;
+    f32 scale = 0.78f;
+
+    wrap(body, x1 - x0 - 8, scale);
+    sLastTopic = -1; /* (the lines are shared with the guide's) */
+    Font_PushStyle();
+    style_heading();
+    if (sTagFight && sFightPage) {
+        to_u16(gVitaBt4English ? "Vita Controls: Tag Team" : "Controles Vita: Tag Team", sFightTitle, 48);
+    } else {
+        to_u16(gVitaBt4English ? "Vita Controls" : "Controles Vita", sFightTitle, 48);
+    }
+    Font_SetAlign(1);
+    Font_PrintAt((x0 + x1) / 2, y0 + 4, sFightTitle);
+    style_body();
+    Font_SetScale(scale);
+    n = sLineCount < 10 ? sLineCount : 10;
+    for (i = 0; i < n; i++) {
+        Font_PrintAt(x0 + 4, y0 + 34 + i * 22, sLine[i]);
+    }
+    snprintf(foot, sizeof(foot), gVitaBt4English ? "%s{S} reminder: %s   {T} back" : "%s{S} recordatorio: %s   {T} volver",
+             sTagFight ? (gVitaBt4English ? "{LT}{RT} page   " : "{LT}{RT} página   ") : "",
+             hudhelp_mode() == 1 ? "ON" : hudhelp_mode() == 2 ? (gVitaBt4English ? "first fights" : "primeros combates") : "OFF");
+    to_u16(foot, sFightFoot, 128);
+    Font_SetScale(0.7f);
+    Font_SetColorRGBA(0xD0, 0xE0, 0xF0, 0x80);
+    Font_PrintAt(x0 + 4, y1 - 20, sFightFoot);
+    Font_PopStyle();
+}
+
+/* ---- the fight's reminder line (src/battle/battle.c, after the HUD, before the font is flushed) ---- */
+static int sHudFrames, sHudCounted;
+static u16 sHud[200];
+
+/* a fight began (src/battle/hud_0.c PauseMenu_Init) */
+void Vita_GuideFightStart(int tag) {
+    Vita_GuideFightBegin(tag);
+    sHudFrames = 0;
+    sHudCounted = 0;
+}
+
+void Vita_GuideHudHint(int visible) {
+    int mode = hudhelp_mode();
+    if (!gVitaGuide || mode == 0 || !visible) {
+        return;
+    }
+    if (mode == 2) {
+        int fights = Port_Setting("hud_help_fights", 0);
+        if (!sHudCounted) { /* (counted once a fight, when its reminder first shows) */
+            sHudCounted = 1;
+            if (fights >= HUDHELP_FIGHTS) {
+                sHudFrames = HUDHELP_FRAMES;
+            } else {
+                Port_SettingSave("hud_help_fights", fights + 1);
+            }
+        }
+        if (sHudFrames >= HUDHELP_FRAMES) {
+            return;
+        }
+    }
+    sHudFrames++;
+    if (sHudFrames == 1 || sHud[0] == 0) {
+        wrap((gVitaBt4English ? kVgHudEn : kVgHudEs)[sTagFight], 2000, 0.7f);
+        sLastTopic = -1;
+        memcpy(sHud, sLine[0], sizeof(sHud) < sizeof(sLine[0]) ? sizeof(sHud) : sizeof(sLine[0]));
+    }
+    FontIcon_SetPadType(0);
+    Font_PushStyle();
+    Font_SetAlign(1);
+    Font_SetScale(0.7f);
+    Font_SetSpacing(0, 0);
+    Font_SetShadowMode(1);
+    Font_SetShadowOffset(1, 1);
+    Font_SetShadowColorRGBA(0, 0, 0, 0x60);
+    Font_SetColorRGBA(0xFF, 0xFF, 0xFF, 0x68);
+    Font_PrintAt(256, 412, sHud);
+    Font_PopStyle();
+}
+
+/* ---- the Tag Team setup page's legend: its lines (port_tbo.c draws them with the page's own kit) ---- */
+const char *Vita_GuideTagLegend(int i) {
+    if (!gVitaGuide || i < 0 || i >= 8) {
+        return NULL;
+    }
+    return (gVitaBt4English ? kVgTagEn : kVgTagEs)[i];
+}

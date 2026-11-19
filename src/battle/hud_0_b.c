@@ -233,6 +233,9 @@ u16 *BtlMenu_GetText(s32 n) {
 u16 *BtlMenu_GetItemText(s32 n) {
 #ifdef PORT
     if(n>=0x7200&&n<=0x7250){extern u16 *Training_Text(s32);return Training_Text(n);}
+#ifdef PORT_VITA
+    if(n==0x7300){extern u16 *Vita_GuideFightItemText(void);return Vita_GuideFightItemText();} /* the Vita Guide's "Vita Controls" (hud_0.c) */
+#endif
     if(n>=0x7110&&n<=0x7113){extern u16 *TagBattle_ResultText(s32);return TagBattle_ResultText(n);}
     if (n==0x7100) {
         extern int PortHud_Hidden(void),Port_GameProfileEnglish(void);
@@ -506,6 +509,12 @@ void BtlMenu_Draw(u64 **pkt, BtlMenu *menu) {
                 BtlText_DrawList(pkt, x + padX, x - padX + w, y + 0x11B, y - padY + h, 1);
                 BtlText_DrawScrollBar(pkt, x + padX, x - padX + w, y + 0x3E, y + 0x100);
             } else if (BtlMenu_IsControls(menu)) {
+#ifdef PORT_VITA
+                if (menu->items[0].id == 0x7300) { /* the Vita Guide's page: the engine's controls box, the Vita's lines (vita_guide.c) */
+                    extern void Vita_GuideFightPage(int x0, int x1, int y0, int y1);
+                    Vita_GuideFightPage(x + padX, x - padX + w, y + padY, y - padY + h);
+                } else
+#endif
                 BtlText_DrawControls(pkt, x + padX, x - padX + w, y + padY, y - padY + h);
             } else {
                 s32 ty = y + padY;

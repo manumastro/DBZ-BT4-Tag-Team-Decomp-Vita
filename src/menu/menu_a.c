@@ -49,6 +49,12 @@ MainMenu *gMainMenu = NULL;
 #include "menu/port_screen.h"
 #include "menu/tbo_art.h"
 extern void Flash_ClipSetCustomDraw(MFlash *,MFlashRef *,void *,void *);
+#ifdef PORT_VITA /* the Vita Guide (below, MM_ICON) */
+extern int Vita_GuideOn(void), Vita_TagMenu(void), Vita_GuideIsOpen(void), Vita_GuideInput(void);
+extern void Vita_GuideOpen(void), Vita_GuideDraw(void), Vita_GuideMenuLabel(f32, f32, f32, f32, int, int);
+extern u16 *Vita_GuideMenuDescription(void);
+#define MAINMENU_VITA_GUIDE() (Vita_GuideOn() && Vita_TagMenu() != 2)
+#endif
 typedef struct OnlineLabelProp {
     u32 flags;f32 x,y,alpha,scaleX,scaleY,color;MFlashUv uv;
     f32 m[9],mul[4];s16 add[4];
@@ -70,6 +76,9 @@ static void PortMainMenu_OnlineLabel(void *arg,OnlineLabelProp *p){
     if(p->flags&16){sx*=p->scaleX;sy*=p->scaleY;}
     if(p->flags&2){x+=p->x;y+=p->y;}
     if(p->flags&8)alpha=(s32)(alpha*p->alpha);
+#ifdef PORT_VITA
+    if(MAINMENU_VITA_GUIDE()){Vita_GuideMenuLabel(x,y,sx,sy,alpha,arg!=NULL);return;}
+#endif
     Ps_PageSet();Ps_SetShift(0);
     /* The long name stays inside the plate's cursor end cap, while retaining
        the native row's height, baseline and normal/highlight animation. */
@@ -78,7 +87,16 @@ static void PortMainMenu_OnlineLabel(void *arg,OnlineLabelProp *p){
 
 #define MAINMENU_TBO 11
 #define MAINMENU_TAG 4
+#ifdef PORT_VITA
+/* The Vita Guide (port/vita/vita_guide.c, bt3.txt vitaguide): the Vita never lists the PC's online item (11), so its
+   slot is the guide's: listed last (the plate just above the first one when the menu opens), Options' icon, its
+   label in the game's own font over the row (its baked online lettering not drawn), its line in the message window,
+   and choosing it opens the guide over this menu, which keeps running behind it. With tagteam=2 (the Vita's earlier
+   Tag Team entry, which takes this slot) there is no guide entry. */
+#define MM_ICON(item) ((item) == MAINMENU_TBO ? (MAINMENU_VITA_GUIDE() ? 9 : 4) : (item) == MAINMENU_TAG ? 3 : (item))
+#else
 #define MM_ICON(item) ((item) == MAINMENU_TBO ? 4 : (item) == MAINMENU_TAG ? 3 : (item))
+#endif
 
 extern void Flash_ClipSetCustomDraw(MFlash *,MFlashRef *,void *,void *);
 typedef struct TagSpriteProp {
@@ -393,6 +411,11 @@ void MainMenu_Init(s32 section) {
         }
 #endif
     }
+#ifdef PORT_VITA
+    if (MAINMENU_VITA_GUIDE()) {
+        gMainMenu->items[gMainMenu->itemCount++] = MAINMENU_TBO;
+    }
+#endif
 #ifdef PORT
     /* the second sheet of each state (slot 8 not chosen, 12 chosen) is the entry behind the first */
     if (1) { /* The BT4 sheets use their own lettering; the port's bundled online label occupies the spare row. */
@@ -607,12 +630,24 @@ void MainMenu_Draw(void) {
     for (i = 0; i < MAINMENU_FLASH_NUM; i++) {
         Flash_Draw(&gMainMenu->flash[i]);
     }
+#ifdef PORT_VITA
+    { extern void Font_FlushAll(void); Font_FlushAll(); } /* (the Vita Guide's label, queued by the plates' movie: over its plate) */
+#endif
     IconWin_Draw();
 #ifdef PORT
     if(MAINMENU_CUR(gMainMenu)==MAINMENU_TAG)PortMainMenu_TagDescription();
+#ifdef PORT_VITA
+    else if(MAINMENU_CUR(gMainMenu)==MAINMENU_TBO&&MAINMENU_VITA_GUIDE()){
+        extern void MsgWin_PortDrawString(u16 *text);
+        MsgWin_PortDrawString(Vita_GuideMenuDescription());
+    }
+#endif
     else MsgWin_Draw(0, 0, MAINMENU_CUR(gMainMenu)==MAINMENU_TBO ? 0x20+gMainMenu->guide : gMainMenu->voiceLine);
 #else
     MsgWin_Draw(0, 0, gMainMenu->voiceLine);
+#endif
+#ifdef PORT_VITA
+    Vita_GuideDraw(); /* (the guide over the menu, when it is open) */
 #endif
 #ifdef PORT
     Port_MenuPage(0);
@@ -790,6 +825,12 @@ void MainMenu_Input(s32 *result) {
             break;
 #ifdef PORT
         case MAINMENU_TBO: /* "Tenkaichi Budokai Online": the port's screen mode runs its screens (menu/port_tbo.c) */
+#ifdef PORT_VITA
+            if (MAINMENU_VITA_GUIDE()) { /* the Vita Guide: over this menu, which stays */
+                Vita_GuideOpen();
+                return;
+            }
+#endif
             gPortScreen = PORT_SCREEN_TBO;
             MAINMENU_COUNT();
             MAINMENU_CHOOSE(MPROG_MODE_PORT_SCREEN);
@@ -894,6 +935,12 @@ s32 MainMenu_Run(s32 section) {
                 gProgress->mainMenuItem = MAINMENU_CUR(gMainMenu);
             }
         } else {
+#ifdef PORT_VITA
+            if (Vita_GuideIsOpen()) { /* the guide takes the pad while it is open */
+                Vita_GuideInput();
+                continue;
+            }
+#endif
             MainMenu_Input(&result);
         }
     }

@@ -2317,6 +2317,12 @@ static void read_settings(void) {
         } else if (strcmp(line, "taguivita") == 0) { /* the Tag Team screens the game's menus' way: the kit from one atlas at its pixel size, lines written with the capitals they show, the backdrop given back in a fight (vita_tbo.c): 1 (default), 0 the way before, 2 the soak's B battles */
             extern int gVitaTagUiVita;
             gVitaTagUiVita = atoi(eq);
+        } else if (strcmp(line, "vitaguide") == 0) { /* the Vita Guide (vita_guide.c): the main menu's entry, the pause menu's Vita Controls, the Tag Team setup's legend, the fights' reminder: 1 (default), 0 none of them */
+            extern int gVitaGuide;
+            gVitaGuide = atoi(eq);
+        } else if (strcmp(line, "hudhelp") == 0) { /* the fights' reminder line (vita_guide.c) over the saved choice (pause > Vita Controls, SQUARE): 0 off, 1 on, 2 the first 5 fights' first 20 seconds (the saved default) */
+            extern int gVitaHudHelp;
+            gVitaHudHelp = atoi(eq);
         } else if (strcmp(line, "taghudvita") == 0) { /* the Tag Team fight's HUD the game's HUD's way: gauges as the 1 vs 1 HUD's, not narrowed twice, shapes from one atlas, the game's timer, words at the HUD's size (vita_tbo.c): 1 (default), 0 the way before, 2 the soak's B battles */
             extern int gVitaTagHudVita;
             gVitaTagHudVita = atoi(eq);
