@@ -177,7 +177,7 @@ and restarts the app with `sceAppMgrLoadExec`; `Vita_SessionLoad` reads it at th
 tick (the start-up warp unpaced); the banner and the notices drawn with the port screens' kit (`port/vita/vita_netline.c`,
 `online_line`); the Vita Settings that change the pad neutral in a session (`online_neutral`); a room's speed above
 100 % paced (`online_speed`). Still to do: the waiting banner while the game's thread waits (the Vita draws nothing
-then; the PC draws its last picture again: `Gs_HoldFrame`); the sound's pitch at a speed above 100 %; the players'
+then; the PC draws its last picture again: `Gs_HoldFrame`); the players'
 names under the health bars (the PC's `ui.cpp` draws them); then a 1 vs 1 by address (Vita vs Vita on the same build
 first: not blocked by M0).
 
