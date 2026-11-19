@@ -1373,12 +1373,6 @@ static unsigned long long sSplitAt; /* the next part's end (0: none in this pict
 static int sSplitN;                  /* parts ended in this picture */
 static unsigned sSplitPics;          /* for the log: pictures drawn in parts */
 static int sLogFrames = 3; /* (and again whenever sLogMore is set: after the first texture) */
-/* the next n pictures' batches in the log (the Vita Guide's first pictures, vita_guide.c: what reached the GPU) */
-void Vita_VglLogFrames(int n) {
-    if (sLogFrames < n) {
-        sLogFrames = n;
-    }
-}
 static int sLogMore = 1; /* the first drawn frames are logged batch by batch */
 static unsigned sBadVerts;
 

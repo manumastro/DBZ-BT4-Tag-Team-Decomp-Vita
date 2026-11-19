@@ -2320,7 +2320,7 @@ static void read_settings(void) {
         } else if (strcmp(line, "vitaguide") == 0) { /* the Vita Guide (vita_guide.c): the main menu's entry, the pause menu's Vita Controls, the Tag Team setup's legend, the fights' reminder: 1 (default), 0 none of them */
             extern int gVitaGuide;
             gVitaGuide = atoi(eq);
-        } else if (strcmp(line, "guidetest") == 0) { /* development: the Vita Guide's picture without some of its parts, to find what blacks it out (vita_guide.c): bits 1 the window's quads, 2 the flush before them, 4 the 4:3 page's markers, 8 the icons; 0 (default) all */
+        } else if (strcmp(line, "guidetest") == 0) { /* development: the Vita Guide's picture without some of its parts, to find what blacks it out (vita_guide.c): bits 1 the window's quads, 2 the flush before them, 4 the 4:3 page's markers, 8 the icons, 16 its text, 32 the letters' shadows; 0 (default) all */
             extern int gVitaGuideTest;
             gVitaGuideTest = atoi(eq);
         } else if (strcmp(line, "hudhelp") == 0) { /* the fights' reminder line (vita_guide.c) over the saved choice (pause > Vita Controls, SQUARE): 0 off, 1 on, 2 the first 5 fights' first 20 seconds (the saved default) */

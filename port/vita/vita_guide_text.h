@@ -51,7 +51,7 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "Hold {L2} and press {SEL}: eat a Senzu Bean, if the rules give you any.\n"
      "{R3} + a direction, near a compatible ally: fusion. {L3} + {R3} splits a temporary one.\n\n"
      "Everything else: the game's usual controls.\n"
-     "In the fight, pause > Vita Controls shows all of this again."},
+     "In the fight, pause > Vita Controls shows it all again."},
     {"Tag Team: the HUD",
      "Your gauges: top left, as in a 1 vs 1 fight.\n"
      "Your allies: the column at the bottom left.\n"

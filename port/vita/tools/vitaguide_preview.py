@@ -135,9 +135,15 @@ class Canvas:
         self.blend(x0, y0, src, a)
 
 
+def words(text):
+    """SELECT / START as words, as vita_guide.c (their icons are unlabelled pills)"""
+    return text.replace('{SEL}', 'SELECT').replace('{ST}', 'START')
+
+
 def tokens(text):
     """a line's text with {marks} to a list of ('c', char) / ('i', mark)"""
     out, i = [], 0
+    text = words(text)
     while i < len(text):
         m = re.match(r'\{(X|O|S|T|L1|L2|L3|R1|R2|R3|SEL|ST|U|D|RT|LT)\}', text[i:])
         if m:
@@ -188,7 +194,7 @@ def print_at(cv, font, x, y, text, scale=1.0, sx=None, sy=None, color=(255, 255,
 def wrap(font, text, width, scale):
     """vita_guide.c wrap(): words at `width` GS units at `scale`"""
     lines, cur, x = [], '', 0
-    for raw in text.split('\n'):
+    for raw in words(text).split('\n'):
         cur, x = '', 0
         for m in re.finditer(r'( *)([^ ]+)', raw):
             spaces, word = m.group(1), m.group(2)
@@ -237,11 +243,11 @@ def dim(bg, a):
     return Image.blend(bg.convert('RGB'), black, min(1.0, a / 128.0))
 
 
-GL_X0, GL_X1, GL_Y0, GL_Y1, GL_TEXT_X, GL_TEXT_Y, GL_STEP, GL_ROWS, GL_SCALE = 18, 494, 22, 426, 34, 66, 23, 14, 0.80
+GL_X0, GL_X1, GL_Y0, GL_Y1, GL_TEXT_X, GL_TEXT_Y, GL_STEP, GL_ROWS, GL_SCALE = 18, 494, 22, 426, 34, 66, 22, 14, 0.80
 
 
 def guide_window(cv, cursor=None):
-    cv.quad(GL_X0, GL_Y0, GL_X1, GL_Y1, (0x04, 0x10, 0x30, 0x74))
+    cv.quad(GL_X0, GL_Y0, GL_X1, GL_Y1, (0x04, 0x10, 0x30, 0x7C))
     cv.quad(GL_X0, GL_Y0, GL_X1, GL_Y0 + 34, (0x10, 0x30, 0x68, 0x70))
     cv.quad(GL_X0, GL_Y0 + 34, GL_X1, GL_Y0 + 36, (0x89, 0xC3, 0xE5, 0x70))
     cv.quad(GL_X0, GL_Y1 - 32, GL_X1, GL_Y1 - 30, (0x89, 0xC3, 0xE5, 0x50))
@@ -252,6 +258,39 @@ def guide_window(cv, cursor=None):
 
 def heading(cv, font, x, y, text, align=0):
     print_at(cv, font, x, y, text, 1.0, color=(0xFF, 0xB0, 0x40, 0x80), shadow=2, shadow_rgba=(0x30, 0x10, 0, 0x60), align=align)
+
+
+def page_breaks(lines):
+    """vita_guide.c page_breaks(): pages of up to GL_ROWS lines, ending at a paragraph's or sentence's end"""
+    lines = list(lines)
+    while lines and lines[-1] == '':
+        lines.pop()
+    out, start = [], 0
+    while start < len(lines):
+        while start < len(lines) and lines[start] == '':
+            start += 1
+        if start >= len(lines):
+            break
+        if len(lines) - start <= GL_ROWS:
+            out.append(lines[start:])
+            break
+        end, nxt = start + GL_ROWS, -1
+        for b in range(end - 1, start + GL_ROWS // 2, -1):
+            if lines[b] == '':
+                nxt = b
+                break
+        if nxt < 0:
+            for b in range(end - 1, start + GL_ROWS // 2, -1):
+                if lines[b].rstrip().endswith(('.', ':', ';', ')')):
+                    nxt = b + 1
+                    break
+        nxt = nxt if nxt > start else end
+        page = lines[start:nxt]
+        while page and page[-1] == '':
+            page.pop()
+        out.append(page)
+        start = nxt
+    return out or [[]]
 
 
 def main():
@@ -285,14 +324,17 @@ def main():
     # 2. every topic's pages
     for t, (title, body) in enumerate(topics):
         lines = wrap(font, body, GL_X1 - GL_X0 - 34, GL_SCALE)
-        pages = max(1, (len(lines) + GL_ROWS - 1) // GL_ROWS)
+        chunks = page_breaks(lines)
+        pages = len(chunks)
         for pg in range(pages):
             cv = Canvas()
             guide_window(cv)
             heading(cv, font, GL_TEXT_X, GL_Y0 + 7, title)
             print_at(cv, font, GL_X1 - 14, GL_Y0 + 10, '%d/%d' % (t + 1, len(topics)), 0.8, color=(0x89, 0xC3, 0xE5, 0x80), shadow=2,
                      shadow_rgba=(0x30, 0x10, 0, 0x60), align=2)
-            for i, line in enumerate(lines[pg * GL_ROWS:(pg + 1) * GL_ROWS]):
+            chunk = chunks[pg]
+            print('topic %d page %d/%d: %d lines' % (t + 1, pg + 1, pages, len(chunk)))
+            for i, line in enumerate(chunk):
                 print_at(cv, font, GL_TEXT_X, GL_TEXT_Y + i * GL_STEP, line, GL_SCALE, shadow=1, shadow_rgba=(0, 0, 0x10, 0x60))
             if pages > 1:
                 foot = ('{LT}{RT} página %d de %d   {T} índice' if es else '{LT}{RT} page %d of %d   {T} contents') % (pg + 1, pages)
