@@ -172,7 +172,9 @@ static int wrap(const char *text, int width, f32 scale) {
     {   /* the touch line, from Vita Settings > Touch */
         static const char *spotEn[3] = {"rear touch pad", "front screen corner", "off"};
         static const char *spotEs[3] = {"panel trasero", "esquina de la pantalla", "apagado"};
+        static const char *shortEn[3] = {"rear pad", "corner", "off"}, *shortEs[3] = {"panel", "esquina", "no"};
         const char *const *spot = gVitaBt4English ? spotEn : spotEs;
+        const char *const *spotShort = gVitaBt4English ? shortEn : shortEs;
         char touch[200], where[80];
         int s0 = Vita_TouchGetSpot(0), same = 1, b;
         const char *src = text;
@@ -189,7 +191,7 @@ static int wrap(const char *text, int width, f32 scale) {
             touch[0] = 0;
             for (b = 0; b < 4; b++) {
                 int s = Vita_TouchGetSpot(b);
-                o += snprintf(touch + o, sizeof(touch) - (size_t)o, "%s %s%s", nm[b], spot[s < 0 || s > 2 ? 0 : s], b < 3 ? ",  " : ".");
+                o += snprintf(touch + o, sizeof(touch) - (size_t)o, "%s %s%s", nm[b], spotShort[s < 0 || s > 2 ? 0 : s], b < 3 ? "  " : "");
             }
             snprintf(where, sizeof(where), "%s", gVitaBt4English ? "Vita Settings > Touch" : "Vita Settings > Touch");
         }
@@ -445,7 +447,7 @@ static void line_cells(f32 scale, int width) {
         sW2[l] = (s16)(sCellN[l] >= 4 ? cell_width(s + sCellAt[l][2], scale) : 0);
     }
     for (a = 0; a < sLineCount; a = b) { /* the columns of each heading's group */
-        int colA = 0, colB = 0;
+        int colA = 0, colB = 0, colQ = 0; /* (colQ: the first column of the lines of two pairs, their own) */
         for (b = a + 1; b < sLineCount && sKind[b] != LK_HEAD; b++) {
         }
         for (l = a; l < b; l++) {
@@ -459,11 +461,14 @@ static void line_cells(f32 scale, int width) {
                     if (w2 > colB) {
                         colB = w2;
                     }
+                    if (w0 > colQ) {
+                        colQ = w0;
+                    }
                 }
             }
         }
         for (l = a; l < b; l++) {
-            sColA[l] = (s16)(colA + 14);
+            sColA[l] = (s16)((sCellN[l] >= 4 ? colQ : colA) + 14);
             sColB[l] = (s16)(colB + 14);
         }
     }
@@ -864,8 +869,8 @@ static u16 sFightTitle[48], sFightFoot[160];
 void Vita_GuideFightPage(int x0, int x1, int y0, int y1) {
     const char *body = (gVitaBt4English ? kVgFightEn : kVgFightEs)[sTagFight ? sFightPage : 0];
     char foot[200];
-    int i, n, y, step = 27, width = x1 - x0 - 12;
-    f32 scale = 0.90f;
+    int i, n, y, step = 23, width = x1 - x0 - 12;
+    f32 scale = 0.85f;
 
     wrap(body, width, scale);
     line_cells(scale, width);

@@ -2870,8 +2870,8 @@ static void Tb_DrawVitaLegendText(void){
     f32 x0,x1,y1;s32 i;
     if(!Tb_VitaLegendBox(&x0,&x1,&y1))return;
     /* (0.50 / 0.42 before: capitals of ~9 pixels, too small to read on the console, run vgr2) */
-    Ps_Text(x0+12,Ps_TextTop(96,.66f),(char*)Vita_GuideTagLegend(0),.66f,x1-x0-24,3);
-    for(i=1;i<8;++i)Ps_Text(x0+12,Ps_TextTop(98+i*29.0f,.58f),(char*)Vita_GuideTagLegend(i),.58f,x1-x0-24,0);
+    Ps_Text(x0+12,Ps_TextTop(94,.80f),(char*)Vita_GuideTagLegend(0),.80f,x1-x0-24,3);
+    for(i=1;i<8;++i)Ps_Text(x0+14,Ps_TextTop(100+i*21.0f,.70f),(char*)Vita_GuideTagLegend(i),.70f,x1-x0-28,0);
 }
 #endif
 static void Tb_DrawTag(void){
