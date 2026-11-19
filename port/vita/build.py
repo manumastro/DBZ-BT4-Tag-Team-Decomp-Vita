@@ -22,6 +22,10 @@ Environment:
                        (it reads the same ux0:data/bt3: the disc, the saves, bt3.txt)
     BT3_PGO=gen        a build that counts how the program runs (port/vita/vita_pgo.c: ux0:data/bt3/pgo/); objects
                        and package in their own folders (*_pgogen)
+    BT4_VITA_ONLINE=1  the network part (port/vita/vita_net.c: SceNet, curl + OpenSSL, BT4decomp's signaling client, the
+                       self-test; bt3.txt online, online_test, docs/vita/online-bt4.md). Default: 1 in the development
+                       build, 0 in the release (whose program then has none of it)
+    python3 port/vita/build.py netcheck   BT4decomp's network files compiled for the Vita, not linked: what builds
     BT3_PGO=use        a build laid out by those counts: port/vita/pgo/<rel or dev>/*.gcda (port/vita/pgo_merge.sh),
                        copied next to the objects (*_pgouse); a file without counts is built as usual
 
@@ -40,6 +44,7 @@ SDK = pathlib.Path(os.environ.get("VITASDK", "/usr/local/vitasdk"))
 P = str(SDK / "bin/arm-vita-eabi-")
 DEV = os.environ.get("BT3_VITA_DEV") == "1"
 PGO = os.environ.get("BT3_PGO", "")
+ONLINE = os.environ.get("BT4_VITA_ONLINE", "1" if DEV else "0") == "1"
 if PGO not in ("", "gen", "use"):
     raise SystemExit("BT3_PGO: gen or use")
 TAG = ("_dev" if DEV else "_rel") + ("_pgo" + PGO if PGO else "")
@@ -72,7 +77,8 @@ ABI = ["-fsigned-char", "-fno-short-enums", "-fsigned-bitfields"]
 COMMON = ["-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-w", "-DPORT_VITA=1", "-DPORT_VITA_FIXED=1",
           '-DPORT_VITA_SFX="-vgl.txt"' if DEV else '-DPORT_VITA_SFX=".txt"', "-DPORT_VITA_GFX=1", "-DPORT_VITA_VGL=1",
           "-DMPEG2_PLAYER=1", "-DPORT_VITA_SOUND=1", "-DPORT_VITA_NATIVE=1",
-          "-DPORT_VITA_BT4=1", "-DBT4_TAG_TEAM_EXPANDED=1", '-DPORT_VITA_HOME="ux0:data/bt4"', '-DPORT_VITA_ELF="SLUS_219.78"'] + ([] if DEV else ["-DPORT_VITA_RELEASE=1"])
+          "-DPORT_VITA_BT4=1", "-DBT4_TAG_TEAM_EXPANDED=1", '-DPORT_VITA_HOME="ux0:data/bt4"', '-DPORT_VITA_ELF="SLUS_219.78"'] + ([] if DEV else ["-DPORT_VITA_RELEASE=1"]) + \
+         (["-DBT4_VITA_ONLINE=1"] if ONLINE else [])
 # Profile-guided builds (BT3_PGO): gen counts with atomic updates (several threads run the same code); use takes the
 # counts where there are some (a profile from an older source of a file is used as far as it fits, with a warning)
 # counts only (VitaSDK's libgcov has no value profilers, no atomic updates and no file writing): arcs, with the
@@ -265,8 +271,28 @@ def port_sources():
             # (gs/spectator_camera.c, gs/online_language.c; docs/vita/tagteam.md)
             (V / "vita_spectator.c", "gs"), (V / "vita_onlinelang.c", "gs"),
             # the film behind the Tag Team screens (bt3.txt tbomovie): the hardware player (SceAvPlayer)
-            (V / "vita_tagmovie.c", "hard"), (V / "vita_tagmovie_sw.c", "hard")]
+            (V / "vita_tagmovie.c", "hard"), (V / "vita_tagmovie_sw.c", "hard"),
+            # the network (bt3.txt online, online_test; docs/vita/online-bt4.md): without BT4_VITA_ONLINE only its settings
+            (V / "vita_net.c", "net")]
+    if ONLINE:  # the SDL calls of BT4decomp's network files, its signaling client (and the pieces of its update code that
+                # the client's route checks call), built unchanged but for cloudflare_signal.inc's PORT_VITA lines
+        out += [(V / "vita_sdl.c", "net"), (S / "gs/supabase_signal.cpp", "netcpp"), (S / "gs/update_sign.c", "net"),
+                (S / "gs/update_crypto.c", "net"), (S / "gs/update_monocypher.c", "net")]
     return out
+
+
+# BT4decomp's network files the Vita does not link yet, compiled by "build.py netcheck" to see what builds (M1 of the
+# online plan, docs/vita/online-bt4.md): the 1 vs 1 session, its chat, TURN, STUN, lobbies, the room client, identity
+NETCHECK = ["gs/net.c", "gs/net_chat.c", "gs/net_relay.c", "gs/net_match.c", "gs/net_lobby.c", "gs/build_identity.c",
+            "plat_fprint.c", "gs/match_supabase.cpp", "gs/tag_team_net.c", "gs/state.c"]
+
+
+def net_cmd(f, o):
+    """The compile of a network file (kind net / netcpp): ordinary code, its SDL calls on the shim, getenv the real one."""
+    inc = ["-Iinclude", "-Iport/include", "-Iport/src", "-Iport/vita", f"-I{ROOT / 'port/src/gs'}", f"-I{ROOT / 'port/vita/sdlshim'}"]
+    if f.suffix == ".cpp":
+        return [P + "g++", "-std=gnu++17", "-c"] + COMMON + inc + ["-O2", str(f), "-o", str(o)]
+    return [P + "gcc", "-std=gnu99", "-c"] + COMMON + inc + ["-O2", str(f), "-o", str(o)]
 
 
 def cc_port(item):
@@ -290,9 +316,43 @@ def cc_port(item):
         r = rename(subprocess.run(base + deps(o) + ABI + mode + fast + ["-include", "math.h", "-include", "stdlib.h", "-include", "port_libm.h",
                                                                "-include", "vu0_names.h", "-DREF_VU0_EXTERN_ARITH", str(f), "-o", str(o)],
                                   cwd=ROOT, capture_output=True, text=True), o)
+    elif kind in ("net", "netcpp"):
+        r = subprocess.run(net_cmd(f, o)[:-3] + deps(o) + net_cmd(f, o)[-3:], cwd=ROOT, capture_output=True, text=True)
     else:
         r = compile_ee(base + ABI + NOBUILTIN + ["-include", "math.h", "-include", "stdlib.h", "-include", "port_libm.h"], f, o)
     return (o if r.returncode == 0 else None), f, r.stderr
+
+
+def netcheck():
+    """NETCHECK compiled for the Vita into <objects>/netcheck (not linked): per file OK or its first errors, and what
+    each object needs that neither the Vita's program (its last link) nor the other objects define."""
+    d = OBJ / "netcheck"
+    d.mkdir(parents=True, exist_ok=True)
+    good = []
+    for rel in NETCHECK:
+        f = ROOT / "port/src" / rel
+        o = d / (f.stem + ".o")
+        r = subprocess.run(net_cmd(f, o), cwd=ROOT, capture_output=True, text=True)
+        errs = [l for l in r.stderr.splitlines() if "error" in l]
+        print(f"netcheck {rel}: {'OK' if r.returncode == 0 else 'FAILED'}")
+        for l in errs[:12]:
+            print("    " + l[-220:])
+        if r.returncode == 0:
+            good.append(o)
+    names = lambda *a: {l.split()[-1] for l in subprocess.run([P + "nm"] + list(a), capture_output=True, text=True).stdout.splitlines() if l.strip()}
+    elf = OUT / "bt3.unstripped.elf"
+    have = (names("--defined-only", str(elf)) if elf.exists() else set()) | set(PORT_WRAPS + FAST_WRAPS + VUFAST_WRAPS)  # (wrapped: defined as __wrap_<name>)
+    mine = set()
+    for o in good:
+        mine |= names("--defined-only", str(o))
+    for o in good:
+        need = sorted(names("-u", str(o)) - have - mine)
+        strong = {l.split()[-1] for l in subprocess.run([P + "nm", "--defined-only", "--extern-only", str(o)], capture_output=True, text=True).stdout.splitlines()
+                  if len(l.split()) == 3 and l.split()[1] in "TDBR"}  # (not C++'s weak copies of inline code)
+        clash = sorted(strong & have)
+        print(f"netcheck {o.stem}: needs {len(need)} names nothing defines" + (": " + " ".join(need[:60]) if need else ""))
+        if clash:
+            print(f"netcheck {o.stem}: {len(clash)} names the program defines already (vita_bt4.c's stand-ins): " + " ".join(clash[:60]))
 
 
 def cc_libm(f):
@@ -351,6 +411,9 @@ LIBS = ["-lvitaGL", "-lpng16", "-lstdc++", "-lSceCommonDialog_stub", "-lSceGxm_s
         "-lSceDisplay_stub", "-lSceCtrl_stub", "-lSceTouch_stub", "-lScePower_stub", "-lSceAppMgr_stub", "-lSceAppUtil_stub",
         "-lSceSysmodule_stub", "-lSceAvPlayer_stub", "-lSceRtc_stub", "-lSceKernelThreadMgr_stub", "-lSceProcessmgr_stub", "-lSceLibKernel_stub",
         "-lSceIofilemgr_stub", "-lSceSysmem_stub", "-lpthread", "-lz", "-lm"]
+# the network part (BT4_VITA_ONLINE): the image's libcurl 8.17 (WebSocket) on OpenSSL 1.1.1, SceNet
+if ONLINE:
+    LIBS = LIBS[:-3] + ["-lcurl", "-lssl", "-lcrypto", "-lzstd", "-lSceNet_stub", "-lSceNetCtl_stub", "-lSceKernelModulemgr_stub"] + LIBS[-3:]
 
 # Game functions replaced by faster equivalents (port/src/port_fast.c: the stage's culling, the effects' task lists).
 FAST_WRAPS = "StgFrustum_TestBox StgFrustum_TestPart BtlTaskList_Update BtlTaskList_Draw EftGfx_DrawPolyAvgZFront Bpe_Decode".split()
@@ -365,6 +428,9 @@ PORT_WRAPS = "Progress_Main main exit Port_GsVif1Chain sceMpegGetPicture GsVu1_C
 # The C library's per-thread lookups the short way (vita_tls.c, as mh3-wii's fast_tls.c) and a faster memcmp (vita_clib.c)
 PORT_WRAPS += ["__getreent", "pte_osTlsGetValue", "memcmp"]
 # The file calls, the C library's included: the disc's files read from its .iso as it is (vita_iso.c, arielxflores's)
+# every request curl makes logged, curl's CA list set (port/vita/vita_net.c)
+if ONLINE:
+    PORT_WRAPS += ["curl_easy_init", "curl_easy_perform", "curl_multi_add_handle"]
 PORT_WRAPS += """sceIoOpen sceIoClose sceIoRead sceIoPread sceIoLseek sceIoLseek32 sceIoGetstat sceIoGetstatByFd sceIoDopen sceIoDread
     sceIoDclose""".split()
 
@@ -457,12 +523,23 @@ def vpk():
         for f in ("tag_ui_intro.pss", "tag_ui_loop.pss"):
             extra += ["-a", f"{ui / f}=tbo/ui/{f}"]
         print("the package carries the PC's films too (tbo/ui/tag_ui_*.pss, 30 MB: BT4_VITA_TAGMOVIE=1)")
+    # the network part's CA list (BT4_VITA_ONLINE): the build image's public CA certificates as lib/cacert.pem, where
+    # gs/curl_ws_io.h looks for it, as the PC's packages carry it (port/tools/package_native.py)
+    if ONLINE:
+        ca = next((pathlib.Path(x) for x in ["/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/cert.pem"] if pathlib.Path(x).is_file()), None)
+        if ca is None:
+            raise SystemExit("BT4_VITA_ONLINE: no CA list in the build image (/etc/ssl/certs/ca-certificates.crt)")
+        extra += ["-a", f"{ca}=lib/cacert.pem"]
+        print(f"the package carries the CA list lib/cacert.pem ({ca.stat().st_size} bytes)")
     run("vita-pack-vpk", "-s", OUT / "param.sfo", "-b", OUT / "eboot.bin", *extra, OUT / VPK)
     print(f"{OUT / VPK}: {(OUT / VPK).stat().st_size} bytes")
 
 
 def main():
     steps = [a for a in sys.argv[1:] if not a.startswith("-")] or ["compile", "link", "vpk"]
+    if steps == ["netcheck"]:
+        netcheck()
+        return
     if "compile" in steps and not compile_all():
         sys.exit(1)
     if "link" in steps and not link():

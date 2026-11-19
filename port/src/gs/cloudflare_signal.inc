@@ -6,9 +6,22 @@
 #ifndef BT4_CLOUDFLARE_HOST
 #define BT4_CLOUDFLARE_HOST "bt4-online-v5.mellamannau22.workers.dev"
 #endif
+#ifdef PORT_VITA
+/* PS Vita (port/vita/vita_net.c): the server is bt3.txt's online_server, read at run time; with none set, a name that
+   never resolves (the Vita's test builds never reach the default service by accident) */
+extern "C" const char *Vita_NetHost(void);
+extern "C" const char *Vita_NetUrl(void);
+#define cloudHost Vita_NetHost()
+#define cloudUrl Vita_NetUrl()
+#else
 static constexpr const char *cloudHost=BT4_CLOUDFLARE_HOST;
 static constexpr const char *cloudUrl="https://" BT4_CLOUDFLARE_HOST;
+#endif
+#ifdef PORT_VITA
+static bool cloudBackend(){return true;} /* (the Vita has no Supabase identity to migrate: the v5 client only) */
+#else
 static bool cloudBackend(){const char *v=SDL_getenv("BT4_ONLINE_BACKEND");return !v||strcmp(v,"supabase");}
+#endif
 static bool cloudStoreSession(const Sj &reply){
     auto &i=identities[2];auto u=reply.find("user");
     auto access=str(reply,"access_token"),refresh=str(reply,"refresh_token");
