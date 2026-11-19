@@ -442,6 +442,10 @@ def vpk():
     for name in names:
         extra += ["-a", f"{vt / (name + '.vt')}=tbo/ui/{name}.vt"]
         n += 1
+    # the Tag Team fight HUD's shapes as one atlas at their pixel size (bt3.txt taghudvita, tools/vita_hud_atlas.py)
+    subprocess.run([sys.executable, str(ROOT / "port/vita/tools/vita_hud_atlas.py"), str(vt)], check=True)
+    extra += ["-a", f"{vt / 'tag_hud_vita.vt'}=tbo/ui/tag_hud_vita.vt"]
+    n += 1
     extra += ["-a", f"{ui / 'CREDITS.md'}=tbo/ui/CREDITS.md"]
     n += 1
     fonts = ROOT / "port/third_party/fonts"

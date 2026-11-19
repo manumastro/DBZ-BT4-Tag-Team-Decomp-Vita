@@ -800,7 +800,14 @@ void Hud_Draw(void) {
             HudNode_Update(gHud->gauge);
             HudNode_Draw(gHud->gauge, 0);
         }
+#ifdef PORT_VITA
+        /* (bt3.txt taghudvita, port/vita/vita_tbo.c) in a Tag Team fight the game's own timer, its digits' sprites,
+           instead of the PC's line of letters (src/battle/tag_team_hud.inc) */
+        extern int Vita_TagHudVita(void);
+        if ((gHud->flags & HUD_SHOW_TIMER)&&(!TagBattle_Active()||Vita_TagHudVita())) {
+#else
         if ((gHud->flags & HUD_SHOW_TIMER)&&!TagBattle_Active()) {
+#endif
             HudNode_Update(gHud->timer);
             HudNode_Draw(gHud->timer, 0);
         }

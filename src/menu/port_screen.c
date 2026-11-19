@@ -602,6 +602,15 @@ void Ps_TextExOuterXY(f32 x, f32 y, char *str, f32 scaleX, f32 scaleY, f32 width
         }
     }
     Ps_Line(id, x, y + cell * PS_BASE_OF_CELL, cap, lineFit, top, bottom, line, 0, alpha); /* the outline under the fill */
+#ifdef PORT_VITA
+    {   /* (bt3.txt taghudvita, port/vita/vita_tbo.c) a fill of one colour in one sprite, not three alike */
+        extern int Vita_TagHudVita(void);
+        if (top == bottom && Vita_TagHudVita()) {
+            Ps_Line(id, x, y + cell * PS_BASE_OF_CELL, cap, lineFit, top, bottom, line, 1, alpha);
+            return;
+        }
+    }
+#endif
     Ps_Line(id, x, y + cell * PS_BASE_OF_CELL, cap, lineFit, top, bottom, line, 3, alpha);
 }
 

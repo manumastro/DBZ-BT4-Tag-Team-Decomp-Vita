@@ -216,6 +216,104 @@ Console check (settings in `psvita-agent/sets/bt4/`): `tagtext_menu_{new,old,big
 `startmode=80`, `tagscreen=1`) and `tagtext_2v2_{new,old,big}.txt` (the 2 vs 2 demo fight with the HUD,
 `BT4_TAG_ACTOR_TEST=4`).
 
+### The Vita's Tag Team HUD (`taghudvita`, 2026-11-19, branch `wip/taghud-vita`)
+
+The developer: "we must make it all optimized for the PS Vita as the normal fights' HUD is, which runs great, in
+proportions and resolution". The Tag Team fight's HUD is the PC port's (`src/battle/tag_team_hud.inc`): vector strokes,
+rings and TrueType lines laid out for a big monitor. The game's own 1 vs 1 HUD is textured sprites authored for its
+screen, resident, drawn 1:1 into the 640 x 368 fight picture. `taghudvita=1` (default 1, not compared on the console
+yet; `0` the way before; `2` the soak's B battles) draws the Tag HUD the second way, with upstream's logic (what is
+shown, when, where on the page) unchanged:
+
+- **Not narrowed twice** (`vita_vgl.c`): in a fight the Vita's renderer narrows each 2D sprite to 3/4 about a fixed
+  point (the 4:3 HUD on the 16:9 picture). It did that to the Tag HUD's gauges (marker 0x19) and to every BT4decomp
+  line of letters (TBO_PSM) too, which are laid out on the page for the screen's shape already (the PC's `gs_draw.c`
+  leaves both alone: `gsAnchor 20`, `!tbo`). That is why on v1.4.1 the player's gauge sat 85 pixels in from the left
+  (the 1 vs 1 one at 5), the allies' column too, the portraits came off their frames, and every word was 3/4 as wide.
+- **The gauges in the 1 vs 1 HUD's proportions**: the player's gauge is drawn with the 1 vs 1 HUD's own transform
+  (scale 1, at the page's top-left corner: the same pixels as the 1 vs 1 player's gauge), the allies' column at 0.6 of
+  it against the left edge from the foot, the floating allies' gauges at 0.34. The PC's gauge unit was 0.857 of the
+  page's across on top of the renderer's 3/4: its gauges came out narrower than tall.
+- **The game's own timer** (`hud_a.c`: its frame and digit sprites, top centre as in 1 vs 1) instead of the PC's
+  TrueType line.
+- **Shapes from one atlas** (`port/vita/tools/vita_hud_atlas.py`, built into the package as `tbo/ui/tag_hud_vita.vt`,
+  128 x 112 RGBA, 56 KB, read once and kept; its boxes in `port/vita/vita_hud_atlas.h`, picture number 0x240): the
+  radar's face (dark green disc, grid, rim), the target's rings in three sizes (the nearest drawn, scaled; a dark edge
+  under them for any ground), the radar's contacts, the stick and shoulder glyphs. Each is one textured quad at its
+  pixel size, its corner on a whole pixel, tinted with the HUD's colours as the PC colours its strokes. The off-screen
+  arrow stays a filled triangle (it turns) with a dark one under it; bars stay rectangles.
+- **Words at the game's HUD text size**: the lines (names, figures, KO, the assist and fusion labels) written with
+  capitals of 11 pixels without smaller copies (as `taghudfine`) and drawn 1.6 times the PC's size (capitals 7-10
+  pixels, as the 1 vs 1 HUD's "Hits" and damage figures), each as two sprites (the outline, one fill) instead of 12
+  (the 8 copies of the outer border were 0.3 pixels out; three fill bands of one colour). `taghud_scale` no longer
+  applies with it; strokes that remain (the revival cylinder's rim) at least 1.25 pixels.
+
+Sizes in the 640 x 368 fight picture (PC = upstream's layout as v1.4.1 drew it on the Vita, `taghud_scale=100`):
+
+| Element | PC (v1.4.1 on the Vita) | Vita (`taghudvita=1`) | Source |
+|---|---|---|---|
+| Player's gauge (face, health, ki, blast stock) | 0.86 of the game's gauge, narrowed twice: ~123 x 45 px from x 85 | the 1 vs 1 gauge: ~215 x 53 px from x 5 | the game's gauge sprites (`HudGauge_TagDraw`) |
+| Allies' column (one gauge each) | 0.48: ~68 x 25 px from x 85 | 0.6: ~129 x 32 px against the left edge, 40 units apart from the foot | the game's gauge sprites |
+| Floating allies' gauges | 0.28: ~39 x 15 px | 0.34: ~73 x 18 px | the game's gauge sprites |
+| Timer | TrueType line, capitals ~9 px, narrowed, top right | the game's timer (frame, digits), top centre | the game's timer node |
+| Radar | ~150 triangles: rim 0.7 px, grid 0.3 px, contacts 2-3 px | one 48 x 48 quad; contacts 7-9 px quads | atlas |
+| Target's rings | 64 strokes 1.2 / 0.45 px, radius 8-26 px | one quad: rings 1.7 / 1.0 px with a dark edge, radius 10-31 px (3 sizes) | atlas |
+| Off-screen arrow | filled triangle 6 units (~5 px) | filled triangle 8 units over a dark one of 10.5 | shapes |
+| Target's health bar | 58 x 3 units (~54 x 2.5 px) | x 1.2 (~65 x 3 px) | rectangles |
+| Target's name | capitals ~5.3 px, 3/4 wide | capitals ~8.5 px | TrueType line (cap 11) |
+| Health figures (> 70,000), KO, assist / fusion labels | capitals 4-6.5 px, 3/4 wide | capitals 7-10 px | TrueType lines |
+| Stick / shoulder glyphs | 16 strokes 0.7 px / 2 strokes | 16 x 16 / 15 x 13 px quads | atlas |
+
+Cost, per picture of a steady 2 vs 2 fight (estimates from the code, to be measured on the console; the 1 vs 1 HUD
+for reference):
+
+| | Normal 1 vs 1 HUD | Tag HUD now (v1.4.1) | Tag HUD `taghudvita=1` |
+|---|---|---|---|
+| Gauges | 2 x ~30 sprites | ~30 + 2 x ~22 sprites (player, one ally in the column, one floating) | the same |
+| Timer | ~4 sprites | 12 sprites (a line) | ~4 sprites (the game's) |
+| Radar | | 1 packet of ~120 triangles (hudbatch) | 5 sprites |
+| Target | | 1 packet of ~128 triangles, 3 rectangles, 12 sprites (name) | 1 sprite, 3 rectangles, 2 sprites |
+| Lines of letters drawn | 0 | 2 (timer, name; +2 above 70,000 health): 24-48 sprites | 1 (name; +2): 2-6 sprites |
+| Textures | the game's HUD sheets, resident | + the lines' textures (written at capitals 40) | + the atlas 56 KB, resident; the lines written at capitals 11 (about a thirteenth of the pixels) |
+| Uploads a picture | the faces (the game's) | the faces, once per gauge (upstream) | the same; the atlas once in a fight |
+
+The drawing thread reads each sprite and packet register by register: about 60-70 fewer sprites and 250 fewer
+triangles a picture than now. Not yet measured; the batch below gives the figures (the report's `tboui`/`tbotext` lines,
+the HUD's ms in the list reader).
+
+Preview without the console: `port/vita/tools/taghud_preview.py` (Pillow) composes the atlas's pieces at their places
+over a 1 vs 1 screenshot of the runs and puts it under a v1.4.1 2 vs 2 screenshot, at 960 x 544
+(`port/build/taghud_vita_preview.png`).
+
+Console check (settings in `psvita-agent/sets/bt4/`): `taghudvita_2v2_on.txt` / `_off.txt` (the 2 vs 2 demo fight,
+`BT4_TAG_ACTOR_TEST=4`, screenshots) and `taghudvita_1v1.txt` (a 1 vs 1 fight: nothing must change). To look at: the
+player's gauge where the 1 vs 1 one is; the portraits in their frames; the words' width; the radar and the rings
+sharp; the allies' column at the foot; the timer at the top centre; 2 vs 2 at ~30 pictures a second.
+
+#### Not Vita-native yet: the other PC-port screens (the next agent's brief)
+
+The developer's rule (2026-11-19): everything the PC port adds must look and cost like the game's own HUD and menus
+on the Vita: pre-made graphics at their Vita size, the game's fonts, the right proportions; upstream's logic kept. The
+atlas (`vita_hud_atlas.py`: an element is a name, a box, a draw function; `TagHud_Atlas` draws one) and the
+cheap lines (`Ps_TextExOuterXY`: one fill band when the colour is one; lines written at the capitals shown) are meant
+to be reused. What remains, with what each needs:
+
+| Screen / overlay | Where (upstream) | Today on the Vita | Needs |
+|---|---|---|---|
+| Tag Team setup pages: mode, rules, health, recovery, fusion, settings, shared (`Tb_DrawTag*`) | `src/menu/port_tbo.c` 2724-2990 | PC kit pictures (`kit_*.png`) halved to ~640, TrueType lines at `tagui_scale` 130, 960 x 544 | the kit's bars, windows and capsules made at their pixel size on 960 x 544 (9-slice in an atlas), rows' lines at their capitals; count sprites per page (each `Ps_Panel` is 9) |
+| Tag Team character select (header, team rows, cursor, hexagon cells, "Goku (Mid)" bars, OK) | `src/menu/tag_team_select.inc` | the PC's art and lines scaled; the header line small | the hexagon cells and bars as atlas pieces at their size; the header in the game's menu font size; the faces from the game's sheet (already) |
+| The talk box (hosts' lines) and headings (`Ps_Msg*`, `Ps_Heading`) | `src/menu/port_screen.c` | lines at capitals 24 / 40 drawn smaller, several bands | written at the capitals shown; one band where one colour |
+| Button prompts (`btn_*.png`, `Ps_Prompt*`) | `port/tbo/ui`, `port_screen.c` 718-790 | PC button pictures halved, mipmapped | the Vita's own buttons (the game's prompt sprites, or an atlas at ~20 px) |
+| Backdrop / poster behind the screens (`tag_team_art`) | `port/tbo/ui` | 960 x 544 picture (the film off: `tbomovie=0`) | fine as a full-screen picture; check its VRAM (~2 MB) is freed in a fight |
+| Main menu's Tag Team entry, emblem | `menu_a.c`, `bt4_main_lettering.inc` | the disc's own lettering (done), emblem cut from the PC logo | emblem at its pixel size (kept, ~600 KB with the lettering) |
+| The Tag Team pause menu (`sTagPauseMenu`) | `src/battle/hud_0.c` 138 | the game's pause menu with Tag rows | check its rows are the game's font (not TrueType); else as the setup pages |
+| Names over fighters (`fight_panels.c`) | `port/src/fight_panels.c` | TrueType lines, now not narrowed (`taghudvita`) | sized as the target's name; one line per fighter cached |
+| The assist / fusion / relay panel (`TagHud_Assist`) | `tag_team_hud.inc` 115-171 | gradient quads, lines, glyphs from the atlas (`taghudvita`) | its panel as an atlas piece (gradient 146 x 34 units), the relay's three links as pieces |
+| Revival cylinder and its label (`TagHud_Revival`) | `tag_team_hud.inc` 466-517 | 24 projected quads + rim strokes (min 1.25 px), a label | keep the projection (3D); the label box and plus sign as atlas pieces |
+| Spectator labels ("Switch fighter", L1/R1) and split-screen labels | `tag_team_hud.inc` 415-450, 554 | lines and atlas glyphs | sizes checked on the console |
+| The HUD editor (`tag_team_hud_editor.inc`) | `src/menu/tag_team_hud_editor.inc` | PC only? (to check it is reachable on the Vita) | if reachable: as the setup pages |
+| Online screens (lobby, ranked, join, profile: `Tb_Draw*` 2398-3270) | `src/menu/port_tbo.c` | not reachable offline | with the online work (`docs/vita/online-bt4.md`) |
+
 ## Where the Vita stands
 
 - The battle side is **already in the Vita build** (`tag_team_*.inc` are included by `battle.c`, `battle_work.c`,

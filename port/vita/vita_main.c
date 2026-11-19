@@ -2314,6 +2314,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "taghudfine") == 0) { /* the Tag Team fight's HUD for the 640 x 368 picture: its lines written at their size, no stroke under 1.25 pixels (vita_tbo.c): 0 (default) off, 1 on, 2 the soak's B battles */
             extern int gVitaTagHudFine;
             gVitaTagHudFine = atoi(eq);
+        } else if (strcmp(line, "taghudvita") == 0) { /* the Tag Team fight's HUD the game's HUD's way: gauges as the 1 vs 1 HUD's, not narrowed twice, shapes from one atlas, the game's timer, words at the HUD's size (vita_tbo.c): 1 (default), 0 the way before, 2 the soak's B battles */
+            extern int gVitaTagHudVita;
+            gVitaTagHudVita = atoi(eq);
         } else if (strcmp(line, "tbotextsize") == 0) { /* BT4decomp's screens' lines written at the Vita's size (capitals 40 / 24, tbo_text.c): 1 (default), 0 the PC's 80 / 48 then halved */
             extern int gVitaTboTextSize;
             gVitaTboTextSize = atoi(eq) != 0;

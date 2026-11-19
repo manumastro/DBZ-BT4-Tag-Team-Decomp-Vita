@@ -2,6 +2,14 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## Unreleased
+
+- **The Tag Team fight's HUD drawn like the game's own** (`taghudvita=1`, not yet run on the console): your gauge is
+  now exactly the one of a normal 1 vs 1 fight (same size, same corner), the allies' gauges in proportion at the
+  bottom left, the game's own timer at the top, a sharp radar and target ring, and readable names and labels (before,
+  the gauges sat away from the corner and every word was squeezed to three quarters of its width). It also draws less
+  each frame.
+
 ## v1.4.1 (2026-11-18)
 
 - **No more freeze going back to character select after a fight**: now and then (Duel or Tag Team, with or without

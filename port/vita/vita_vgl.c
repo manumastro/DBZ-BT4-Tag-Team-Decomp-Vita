@@ -5163,6 +5163,7 @@ static void wp_emit_clear(void) {
 }
 static int sAnchor;
 extern int Port_IsWide(void), Port_AspectMilli(void);
+extern int Vita_TagHudVita(void); /* (vita_tbo.c, bt3.txt taghudvita) */
 extern int gPortMenuMode; /* port/src/headless.c: the menus are running */
 static void GsGpu_Draw_impl(int type, int ctx, const GsVertex *v);
 unsigned long long gVitaDrawCyc[8]; /* GS primitives drawn the GS's way (not in a run), lists measured part by part: cycles by kind */
@@ -5945,6 +5946,11 @@ page_draw:
             if (v[i].y > y1) { y1 = v[i].y; }
         }
         if ((type == 6 && !d.tme && y1 - y0 >= 400.0f) || x1 - x0 >= 480.0f) {
+            pivot = -1.0f;
+        } else if (sAnchor == 20 || (d.tme && ((gGs.tex0[ctx] >> 20) & 0x3F) == 0x05 && Vita_TagHudVita())) {
+            /* (bt3.txt taghudvita) the Tag Team HUD's gauges (marker 0x19) and BT4decomp's pictures and lines (TBO_PSM):
+               laid out on the page for the screen's shape already (src/menu/port_screen.c Ps_X), as the PC's gs_draw.c
+               has them; narrowed again they came 3/4 as wide about the screen's middle */
             pivot = -1.0f;
         } else if (sAnchor == 4) {
             float cx = (x0 + x1) * 0.5f;
@@ -11688,6 +11694,13 @@ void GsGpu_Native(int effect) {
     }
     if (effect >= 0x10 && effect <= 0x14) {
         sAnchor = effect == 0x13 ? 0 : effect == 0x14 ? 4 : effect - 0x0F;
+    }
+    if (effect == 0x19) { /* (the Tag Team HUD's gauges and faces, src/battle/tag_team_native_gauges.inc: placed on the
+                             page already; the PC's gs_draw.c does not narrow them. bt3.txt taghudvita, vita_tbo.c) */
+        extern int Vita_TagHudVita(void);
+        if (Vita_TagHudVita()) {
+            sAnchor = 20;
+        }
     }
 }
 

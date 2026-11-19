@@ -50,6 +50,7 @@
 #include <psp2/io/stat.h>
 #include "vita_paths.h"
 #include "../../include/menu/tbo_art.h"
+#include "vita_hud_atlas.h" /* (TBO_VITA_HUD) */
 
 extern void Vita_Log(const char *fmt, ...);
 extern unsigned gGsFrame;
@@ -101,14 +102,35 @@ int gVitaTboTextPct = 100;
    the HUD's gauges, the target's marks and the allies' column grow by it too (src/battle/tag_team_hud.inc, PORT_VITA).
    tbotextpct (earlier) multiplies both. */
 int gVitaTagUiScale = 130, gVitaTagHudScale = 135;
+/* bt3.txt taghudvita (default 1 since branch wip/taghud-vita, not compared on the console yet; 0 the way before; 2 the
+   soak's B battles): the Tag Team fight's HUD drawn the way the game's own HUD is (the developer: "optimized for the
+   Vita as the normal fights' HUD is, in proportions and resolution"; docs/vita/tagteam.md "The Vita's Tag Team HUD"):
+   - the renderer does not narrow its pieces a second time (vita_vgl.c GsGpu_Native 0x19, the narrowing): they are
+     placed on the page already (the PC's gs_draw.c leaves them so). Before, the gauges' sprites and every line of
+     letters were narrowed to 3/4 about the screen's middle: the gauge 80 pixels in from the left, letters squeezed;
+   - the player's gauge exactly as the 1 vs 1 HUD's (its size and place), the allies' column at 0.6 of it, the
+     floating allies' at 0.34, the game's own timer (hud_a.c) instead of the PC's line (tag_team_hud.inc);
+   - the radar, the target's rings, the radar's contacts and the stick's glyph textured quads of one atlas made at build
+     time at their size in the 640 x 368 picture (tbo/ui/tag_hud_vita.vt, port/vita/tools/vita_hud_atlas.py), drawn with
+     the HUD's colours: no thin strokes (the radar was ~150 triangles, the rings 64 strokes);
+   - the words written with capitals of TAGHUD_VITA_CAP pixels without smaller copies (as taghudfine) and drawn
+     TAGHUD_VITA_TEXT times the PC's size (capitals 7-10 pixels as the game's HUD text), with the outline and one fill
+     (2 sprites a line, not 12: the 8 copies of the outer border, 0.3 pixels out, are left out). */
+int gVitaTagHudVita = 1;
+#define TAGHUD_VITA_TEXT 1.6f
+#define TAGHUD_VITA_CAP 11
 static float pct_scale(int pct) {
     return pct >= 50 && pct <= 200 ? (float)pct / 100.0f : 1.0f;
 }
 float Vita_TagHudScale(void) {
     return pct_scale(gVitaTagHudScale);
 }
+int Vita_TagHudVita(void);
 float Vita_TboTextScale(void) {
     extern int Vita_InBattle(void);
+    if (Vita_InBattle() && Vita_TagHudVita()) { /* (taghudvita: the HUD's words at the game's HUD text size, below) */
+        return pct_scale(gVitaTboTextPct) * TAGHUD_VITA_TEXT;
+    }
     return pct_scale(gVitaTboTextPct) * pct_scale(Vita_InBattle() ? gVitaTagHudScale : gVitaTagUiScale);
 } /* (the report) lines made when asked, their ms, lines that had to wait for a picture */
 static int tbo_ab(int v) { /* (2: the soak's B battles only) */
@@ -132,13 +154,20 @@ int Vita_TagHudFine(void) {
     extern int Vita_InBattle(void);
     return tbo_ab(gVitaTagHudFine) && Vita_InBattle();
 }
+int Vita_TagHudVita(void) {
+    return tbo_ab(gVitaTagHudVita);
+}
+static int taghud_vita_battle(void) {
+    extern int Vita_InBattle(void);
+    return Vita_TagHudVita() && Vita_InBattle();
+}
 int Vita_TagHudCap(void) { /* (tbo_text.c: 0 for the usual capitals) */
-    return Vita_TagHudFine() ? TAGHUD_CAP : 0;
+    return taghud_vita_battle() ? TAGHUD_VITA_CAP : Vita_TagHudFine() ? TAGHUD_CAP : 0;
 }
 float Vita_TagHudMinStroke(void) { /* (tag_team_hud.inc) in page units; 0 off */
     extern int gVitaFightW;
     int h = gVitaFightW >= 960 ? 544 : gVitaFightW >= 720 ? 408 : 368;
-    return Vita_TagHudFine() ? 1.25f * 448.0f / (float)h : 0.0f;
+    return Vita_TagHudFine() || taghud_vita_battle() ? 1.25f * 448.0f / (float)h : 0.0f;
 }
 static int tbo_pot(uint32_t v) {
     return v != 0 && (v & (v - 1)) == 0;
@@ -158,6 +187,7 @@ typedef struct {
 static const char *const kTboNames[TBO_ART_COUNT] = {TBO_ART_LIST(TBO_NAME)};
 #undef TBO_NAME
 static TboTex sPic[TBO_ART_COUNT], sText[TBO_TEXT_SLOTS], sEmblem, sLetters[2];
+static TboTex sHudAtlas; /* (taghudvita: tbo/ui/tag_hud_vita.vt, 128 x 112, 56 KB, kept from its first use) */
 
 static int tbo_on(void) {
     extern int gVitaAbSide;
@@ -1221,6 +1251,27 @@ static unsigned tbo_texture(uint32_t id, int *mip) {
             return film;
         }
         id = TBO_TAG_ART;
+    }
+    if (id == TBO_VITA_HUD) { /* (taghudvita) the Tag Team HUD's atlas: read once, kept */
+        if (sHudAtlas.tex == 0 && !sHudAtlas.missing) {
+            char path[160];
+            uint32_t w = 0, h = 0, *px = tbo_vt("tag_hud_vita", &w, &h, path, sizeof(path));
+            if (px == NULL) {
+                Vita_Log("tbo: cannot read %s\n", path);
+                sHudAtlas.missing = 1;
+                return 0;
+            }
+            sHudAtlas.tex = Vita_VglTexRgba(px, (int)w, (int)h); /* (drawn at its size: no smaller copies) */
+            free(px);
+            if (sHudAtlas.tex != 0) {
+                sHudAtlas.bytes = w * h * 4;
+                gVitaTboN[0]++;
+                gVitaTboN[3]++;
+                gVitaTboN[4] += sHudAtlas.bytes;
+                Vita_Log("tbo: %s: %u x %u, kept\n", path, (unsigned)w, (unsigned)h);
+            }
+        }
+        return sHudAtlas.tex;
     }
     if (id == TBO_MAIN_TAG_EMBLEM || (id < TBO_ART_COUNT && id != TBO_RADAR)) {
         unsigned tex = tbo_picture(id);

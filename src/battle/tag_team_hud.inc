@@ -33,6 +33,27 @@ extern float Vita_TagHudScale(void);
 #else
 #define TAGHUD_K() 1.0f
 #endif
+/* (the Vita, bt3.txt taghudvita: port/vita/vita_tbo.c, docs/vita/tagteam.md "The Vita's Tag Team HUD") the HUD drawn
+   the way the game's own HUD is: the player's gauge as the 1 vs 1 HUD's, the allies' in proportion, the shapes (radar,
+   rings, contacts, glyphs) textured quads of one atlas made at their pixel size (port/vita/tools/vita_hud_atlas.py),
+   the game's timer (hud_a.c). Upstream's logic (what is shown, when, where on the page) as it is. 0 elsewhere. */
+#ifdef PORT_VITA
+#include "../../port/vita/vita_hud_atlas.h"
+extern int Vita_TagHudVita(void);
+#define TAGHUD_VITA() (Vita_TagHudVita()!=0)
+#define TAGHUD_VK 1.2f /* the target's rings and bar: a little larger than the PC's, fixed (not taghud_scale) */
+/* an atlas element (box ax, ay, aw, ah in its pixels) centred on (x, y) of the page, k times its own pixel size in the
+   640 x 368 picture, its top left corner on a whole pixel (drawn 1:1, no blur), tinted (Ps_Tint; PS_PLAIN as it is) */
+static void TagHud_Atlas(s32 ax,s32 ay,s32 aw,s32 ah,f32 x,f32 y,f32 k,u32 tint){
+    const f32 sx=640.0f/512.0f,sy=368.0f/448.0f;
+    f32 w=aw*k,h=ah*k,x0=Ps_X(x)*sx-w*.5f,y0=Ps_Y(y)*sy-h*.5f;
+    x0=(f32)(s32)(x0+1024.5f)-1024.0f;y0=(f32)(s32)(y0+1024.5f)-1024.0f;
+    Ps_SpriteScreen(TBO_VITA_HUD,x0/sx,y0/sy,(x0+w)/sx,(y0+h)/sy,(f32)ax/VHA_W,(f32)ay/VHA_H,
+        (f32)(ax+aw)/VHA_W,(f32)(ay+ah)/VHA_H,tint,0x80);
+}
+#else
+#define TAGHUD_VITA() 0
+#endif
 static void TagHud_Stroke(f32 x0,f32 y0,f32 x1,f32 y1,f32 width,u32 c) {
     f32 dx=x1-x0,dy=y1-y0,n=sqrtf(dx*dx+dy*dy),px,py;
     if(n<0.001f)return;
@@ -47,6 +68,12 @@ static void TagHud_Stroke(f32 x0,f32 y0,f32 x1,f32 y1,f32 width,u32 c) {
     Ps_Quad(x0+px,y0+py,x1+px,y1+py,x0-px,y0-py,x1-px,y1-py,c,c,c,c);
 }
 static void TagHud_Label(f32 x,f32 y,char *s,f32 scale,f32 width,u32 color) {
+#ifdef PORT_VITA
+    if(TAGHUD_VITA()){ /* (taghudvita) the outline and one fill: the outer border's 8 copies were 0.3 pixels out */
+        Ps_TextExOuter(x,y,s,scale,width,color,color,TagHud_Color(3,10,17),0,0);
+        return;
+    }
+#endif
     Ps_TextExOuter(x,y,s,scale,width,color,color,TagHud_Color(3,10,17),Ps_Rgba(0,0,0,0x50),0.35f);
 }
 static void TagHud_Arrow(f32 x,f32 y,f32 dx,f32 dy,f32 size,u32 color) {
@@ -91,6 +118,14 @@ static void TagHud_Fill(f32 x,f32 y,f32 width,f32 height,f32 value,u32 color){
  * embedded in the sentence. Stick and shoulder caps share the native outline. */
 static void TagHud_Key(f32 x,f32 y,const char *key,s32 stick,u32 color){
     u32 ink=Ps_Rgba(8,19,28,0x78);
+#ifdef PORT_VITA
+    if(TAGHUD_VITA()){ /* (taghudvita) the glyph from the atlas */
+        if(stick){TagHud_Atlas(VHA_STICK,x,y,1,Ps_Tint(color));Ps_Rect(x-1,y+8,x+1,y+10,color,color);}
+        else TagHud_Atlas(VHA_KEY,x,y,.85f,Ps_Tint(color));
+        Ps_Align(1);TagHud_Label(x,Ps_TextTop(y,.32f),(char*)key,.32f,14,color);Ps_Align(0);
+        return;
+    }
+#endif
     if(stick){
 #ifdef PORT_VITA
         Ps_BatchBegin(); /* (hudbatch: the stick's ring, plain shapes only, one packet) */
@@ -266,10 +301,30 @@ static void TagHud_Target(s32 viewer,s32 target){
         if(!front){f32 rear[2];TagBattle_HudRear(head,rear);dx=rear[0]*PS_UNIT_X;dy=rear[1];}
         ax=dx<0?-dx:dx;ay=dy<0?-dy:dy;
         k=ax/(right-270);if(ay/154>k)k=ay/154;
+#ifdef PORT_VITA
+        if(TAGHUD_VITA()){ /* (taghudvita) a filled arrow with a dark edge, 8 units */
+            if(k>0.001f){TagHud_Arrow(256+dx/k,224+dy/k,dx,dy,10.5f,shadow);TagHud_Arrow(256+dx/k,224+dy/k,dx,dy,8,gold);}
+            return;
+        }
+#endif
         if(k>0.001f)TagHud_Arrow(256+dx/k,224+dy/k,dx,dy,6*TAGHUD_K(),gold);
         return;
     }
     radius=TagBattle_HudProject(head,tip)?y-tip[1]+6:16;
+#ifdef PORT_VITA
+    if(TAGHUD_VITA()){ /* (taghudvita) the two rings as one quad of the atlas: of its three sizes the nearest, scaled */
+        static const s32 box[3][4]={{VHA_RING_L},{VHA_RING_M},{VHA_RING_S}};
+        static const f32 inner[3]={26.0f,17.0f,10.5f}; /* (vita_hud_atlas.py RINGS: their inner rings' radii in pixels) */
+        f32 px,best=0;
+        s32 b=0;
+        if(radius<10*TAGHUD_VK)radius=10*TAGHUD_VK;
+        if(radius>32*TAGHUD_VK)radius=32*TAGHUD_VK;
+        px=radius*(Ps_Y(1)-Ps_Y(0))*368.0f/448.0f;
+        for(i=0;i<3;++i){f32 q=px>inner[i]?px/inner[i]:inner[i]/px;if(!i||q<best){best=q;b=i;}}
+        TagHud_Atlas(box[b][0],box[b][1],box[b][2],box[b][3],x,y,px/inner[b],Ps_Tint(gold));
+        goto bar;
+    }
+#endif
     if(radius<10*TAGHUD_K())radius=10*TAGHUD_K();
     if(radius>32*TAGHUD_K())radius=32*TAGHUD_K();
 #ifdef PORT_VITA
@@ -287,6 +342,9 @@ static void TagHud_Target(s32 viewer,s32 target){
 #endif
     /* The bar stays above the reticle and uses the model height instead
      * of an animated bone, so flinches and attacks do not kick it around. */
+#ifdef PORT_VITA
+bar:
+#endif
     {
         extern f32 BtlCharApi_GetHeight(s32);
         f32 anchor[4], projected[3];
@@ -303,7 +361,7 @@ static void TagHud_Target(s32 viewer,s32 target){
         if(x>right-65)x=right-65;
     }
     {   /* (the Vita: taghud_scale) the target's health bar as much larger, its name above it */
-        f32 k=TAGHUD_K();
+        f32 k=TAGHUD_VITA()?TAGHUD_VK:TAGHUD_K();
         Ps_Rect(x-30*k,y-1*k,x+30*k,y+5*k,shadow,shadow);
         TagHud_Fill(x-29*k,y,58*k,3*k,TagHud_Hp(target),TagHud_Color(116,235,83));
         y-=(k-1)*15;
@@ -323,15 +381,22 @@ static void TagHud_Target(s32 viewer,s32 target){
 static void TagHud_NativeGauge(s32 actor,f32 x,f32 y,f32 scale,s32 small,s32 mirror){
     extern void HudGauge_TagDraw(s32,f32,f32,f32,f32,s32,s32);
     char hp[32];
-    HudGauge_TagDraw(actor,Ps_X(x),Ps_Y(y),scale*(Ps_X(1)-Ps_X(0))*PS_UNIT_X,
+    f32 ux=PS_UNIT_X; /* (a gauge's unit across in the page's units) */
+#ifdef PORT_VITA
+    /* (taghudvita) the gauge in the 1 vs 1 HUD's proportions: its sprites 3/4 across as the renderer narrows the game's
+       own (vita_vgl.c), not 0.857 x 3/4; the labels' offsets across as much */
+    if(TAGHUD_VITA())ux=1.0f;
+#endif
+    HudGauge_TagDraw(actor,Ps_X(x),Ps_Y(y),scale*(Ps_X(1)-Ps_X(0))*ux,
         scale*(Ps_Y(1)-Ps_Y(0)),small,mirror);
+    ux=PS_UNIT_X/ux; /* (1 as the PC; under taghudvita the PC's offsets below grow by 1/0.857) */
     Port_GsMarker(0x72);
     if(!small&&BtlCharApi_GetHpMax(actor)>70000){
         snprintf(hp,sizeof(hp),"%d / %d",BtlCharApi_GetHp(actor),BtlCharApi_GetHpMax(actor));
         if(mirror)Ps_Align(2);
-        TagHud_Label(x+(mirror?-58:58)*scale,y+68*scale,hp,small?.31f:.42f,140*scale,TagHud_Color(238,248,251));
+        TagHud_Label(x+(mirror?-58:58)*scale/ux,y+68*scale,hp,small?.31f:.42f,140*scale,TagHud_Color(238,248,251));
         snprintf(hp,sizeof(hp),"%d",(BtlCharApi_GetHp(actor)+9999)/10000);
-        TagHud_Label(x+(mirror?-63:63)*scale,y,hp,small?.31f:.42f,30,TagHud_Color(238,248,251));
+        TagHud_Label(x+(mirror?-63:63)*scale/ux,y,hp,small?.31f:.42f,30,TagHud_Color(238,248,251));
         Ps_Align(0);
     }
     if(BtlCharApi_GetHp(actor)<=0){if(mirror)Ps_Align(2);TagHud_Label(x+(mirror?-5:5),y+10,"KO",.58f,30,TagHud_Color(255,110,84));Ps_Align(0);}
@@ -342,6 +407,12 @@ static void TagHud_NativeAllies(s32 view,s32 count,f32 left,s32 mirror){
     for(actor=0;actor<count;++actor)if(actor!=view&&!TagFusion_Absent(actor)&&TagBattle_Allied(actor,view))++n;
     for(actor=0;actor<count;++actor)if(actor!=view&&!TagFusion_Absent(actor)&&TagBattle_Allied(actor,view)){
         /* (taghud_scale: larger, the column kept on the screen from its foot) */
+#ifdef PORT_VITA
+        if(TAGHUD_VITA()){ /* (taghudvita) 0.6 of the player's gauge, against the screen's edge as it is */
+            TagHud_NativeGauge(actor,mirror?512-Ps_Left():left,448-(44+(n-1-index++)*40),.6f,1,mirror);
+            continue;
+        }
+#endif
         TagHud_NativeGauge(actor,mirror?512-Ps_Left()-8:left+8,448-(48+(n-1-index++)*39)*TAGHUD_K(),.48f*TAGHUD_K(),1,mirror);
     }
 }
@@ -363,6 +434,12 @@ static void TagHud_FloatingAllies(s32 pane,s32 cameraActor,s32 count){
         Port_TagAllyHudFeed(pane,cameraActor,actor,(s32)((point[0]-left)*100000/(512-2*left)),(s32)(point[1]*100000/448));
         Port_GsMarker(0x50000000u|((u32)actor<<24)|((u32)pane<<23)|
             ((u32)((point[0]-left)*4095/(512-2*left))<<11)|(u32)(point[1]*2047/448));
+#ifdef PORT_VITA
+        if(TAGHUD_VITA()){ /* (taghudvita) 0.34 of the player's gauge, centred as the PC's */
+            TagHud_NativeGauge(actor,point[0]-100.0f/PS_UNIT_X*.34f,point[1],.34f,1,0);
+            continue;
+        }
+#endif
         TagHud_NativeGauge(actor,point[0]-28*TAGHUD_K(),point[1],.28f*TAGHUD_K(),1,0);
     }
 }
@@ -374,6 +451,10 @@ static void TagHud_Radar(s32 view,s32 count,f32 right){
     BtlCharApi_GetBasePos(BattleSide_GetObjId(view),own);
     if(!TagBattle_HudCamera(basis))return;
 #ifdef PORT_VITA
+    if(TAGHUD_VITA()){ /* (taghudvita) the face, grid and rim: one quad of the atlas, at its size */
+        TagHud_Atlas(VHA_RADAR,cx,cy,1,PS_PLAIN);
+        goto contacts;
+    }
     Ps_BatchBegin(); /* (hudbatch: the radar's face, grid and contacts, plain shapes only, one packet) */
 #endif
     for(i=0;i<32;++i){
@@ -389,7 +470,11 @@ static void TagHud_Radar(s32 view,s32 count,f32 right){
         TagHud_Stroke(cx-span*PS_UNIT_X,cy+off,cx+span*PS_UNIT_X,cy+off,.4f,grid);
         TagHud_Stroke(cx+off*PS_UNIT_X,cy-span,cx+off*PS_UNIT_X,cy+span,.4f,grid);
     }
-    s32 marked=TagBattle_Target(view);
+    s32 marked;
+#ifdef PORT_VITA
+contacts:
+#endif
+    marked=TagBattle_Target(view);
 #ifdef BT4_TAG_TEAM_EXPANDED
     extern s32 TagBattle_Focus(s32);
     const s32 focus=TagBattle_Focus(view);
@@ -406,10 +491,13 @@ static void TagHud_Radar(s32 view,s32 count,f32 right){
         if(len>rad-3){dx*=(rad-3)/len;dy*=(rad-3)/len;}
         col=i==view?TagHud_Color(245,249,224):TagBattle_Allied(i,view)?TagHud_Color(69,211,246):TagHud_Color(249,104,78);
         if(i==marked)col=TagBattle_Allied(i,view)?TagHud_Color(170,244,255):TagHud_Color(255,223,80);
+#ifdef PORT_VITA
+        if(TAGHUD_VITA()){TagHud_Atlas(VHA_CONTACT,cx+dx*PS_UNIT_X,cy+dy,i==view?1.0f:.8f,Ps_Tint(col));continue;}
+#endif
         TagHud_Arrow(cx+dx*PS_UNIT_X,cy+dy,0,-1,i==view?2.7f:2.1f,col);
     }
 #ifdef PORT_VITA
-    Ps_BatchEnd();
+    if(!TAGHUD_VITA())Ps_BatchEnd();
 #endif
 }
 static void TagHud_DevLayout(s32 view,s32 target,s32 count,s32 split){
@@ -441,7 +529,7 @@ static void TagHud_DevLayout(s32 view,s32 target,s32 count,s32 split){
                 TagHud_Assist(player, edge + 8, 244);
             }
         }
-        if(gHud->flags&HUD_SHOW_TIMER){
+        if((gHud->flags&HUD_SHOW_TIMER)&&!TAGHUD_VITA()){ /* (taghudvita: the game's own timer, hud_a.c) */
             char time[16];s32 seconds=BtlSeq_GetTimeLeft();
             if(seconds<0)Ps_Copy(time,"\xE2\x88\x9E",sizeof(time));else snprintf(time,sizeof(time),"%d",seconds);
             Port_GsMarker(0x74);
@@ -450,10 +538,14 @@ static void TagHud_DevLayout(s32 view,s32 target,s32 count,s32 split){
         }
         return;
     }
+#ifdef PORT_VITA
+    if(TAGHUD_VITA())TagHud_NativeGauge(view,left,0,1.0f,0,0); /* (taghudvita) the 1 vs 1 HUD's gauge: its size, its place */
+    else
+#endif
     TagHud_NativeGauge(view,left+8,8,.86f*TAGHUD_K(),0,0);
     TagHud_NativeAllies(view,count,left,0);
     TagHud_Radar(view,count,right);
-    if(gHud->flags&HUD_SHOW_TIMER){
+    if((gHud->flags&HUD_SHOW_TIMER)&&!TAGHUD_VITA()){ /* (taghudvita: the game's own timer, hud_a.c) */
         char time[16];s32 seconds=BtlSeq_GetTimeLeft();
         if(seconds<0)Ps_Copy(time,"\xE2\x88\x9E",sizeof(time));else snprintf(time,sizeof(time),"%d",seconds);
         Ps_Align(2);TagHud_Label(right-75,9,time,1.03f,55,TagHud_Color(217,244,255));Ps_Align(0);
