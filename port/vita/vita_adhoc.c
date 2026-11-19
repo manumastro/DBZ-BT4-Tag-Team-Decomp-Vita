@@ -19,6 +19,8 @@
  *   adhoc_dialog=<n>      the dialog's mode: 5 join or create (default), 6 create, 7 join; 0 no dialog (a group must
  *                         already be up)
  *   adhoc_port=<n>        the datagram port (default 26013)
+ *   adhoc_test=3          A0b: as 1, then the app starts again (as an online session starts on the Vita) and the next start
+ *                         looks, without the dialog, whether the group is still there (ad hoc state, a socket)
  */
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
@@ -67,6 +69,7 @@ void Vita_AdhocBoot(void) {
 /* the game's identity on the group: the 9 characters every Vita of this port uses (the ad hoc ID and the dialog's
    communication ID; it keeps BT4 groups apart from other games' groups) */
 #define ADHOC_ID "BT4VITA01"
+#define RESTART_MARK "ux0:data/bt4/adhoc_restart.txt" /* (A0b: written before the restart, removed at the next start) */
 
 /* ---- the transport (A0 uses it; A1 puts gs/net.c's packets on it) ---- */
 static int sUp;          /* 1 SceNet and the ad hoc layer started by us, 2 the group joined */
@@ -397,14 +400,55 @@ static int adhoc_test(SceSize args, void *argp) {
         Vita_Log("adhoc: peer %s \"%s\": %u beacons, %u pongs, round trip min %u / mean %u / max %u us\n", m, peers[i].nick, peers[i].beacons,
                  peers[i].pongs, peers[i].pongs ? peers[i].rttMin : 0, peers[i].pongs ? peers[i].rttSum / peers[i].pongs : 0, peers[i].rttMax);
     }
+    if (gVitaAdhocTest == 3) { /* A0b: does the group outlive the app's restart? (the next start looks: Vita_AdhocBoot) */
+        extern int sceAppMgrLoadExec(const char *appPath, char *const argv[], void *optParam);
+        FILE *f = fopen(RESTART_MARK, "w");
+        if (f != NULL) {
+            fclose(f);
+            Vita_Log("adhoc: A0b: the app starts again with the group up\n");
+            Vita_Log("adhoc: sceAppMgrLoadExec: 0x%08X\n", (unsigned)sceAppMgrLoadExec("app0:eboot.bin", NULL, NULL));
+            remove(RESTART_MARK);
+        }
+    }
     Vita_AdhocStop();
     Vita_Log("adhoc: A0 check: done in %u s (%s)\n", (unsigned)((now_us() - t0) / 1000000), n ? "peers heard" : "no other Vita heard: one console");
     return 0;
 }
 
-/* vita_main.c, after the network's boot: the A0 check on its own thread (below the game's priority) */
+/* A0b's second start: the ad hoc state as the system has it, then the layer started again without the dialog */
+static int adhoc_after_restart(SceSize args, void *argp) {
+    int state = -1, r;
+    (void)args;
+    (void)argp;
+    sceKernelDelayThread(5u * 1000000u);
+    sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
+    r = sceNetCtlAdhocGetState(&state);
+    Vita_Log("adhoc: A0b: after the restart, sceNetCtlAdhocGetState 0x%08X state %d\n", (unsigned)r, state);
+    if (Vita_AdhocStart() && Vita_AdhocGroup(0, 0) && Vita_AdhocOpen(sPort)) {
+        static const char hi[] = "BT4A";
+        Vita_Log("adhoc: A0b: a socket opened after the restart without the dialog (a broadcast %s)\n",
+                 Vita_AdhocSend(NULL, sPort, hi, 4) ? "sent" : "refused");
+    } else {
+        Vita_Log("adhoc: A0b: no group after the restart: a session must join it again\n");
+    }
+    Vita_AdhocStop();
+    return 0;
+}
+
+/* vita_main.c, after the network's boot: the A0 check on its own thread (below the game's priority); at the start
+   after A0b's restart, the look at the group instead */
 void Vita_AdhocBoot(void) {
     SceUID th;
+    FILE *mark = fopen(RESTART_MARK, "r");
+    if (mark != NULL) {
+        fclose(mark);
+        remove(RESTART_MARK);
+        th = sceKernelCreateThread("bt4_adhoc_after", adhoc_after_restart, 0x10000100 + 20, 64 * 1024, 0, 0x00020000 | 0x00040000, NULL);
+        if (th >= 0) {
+            sceKernelStartThread(th, 0, NULL);
+        }
+        return;
+    }
     if (!gVitaAdhocTest) {
         return;
     }
