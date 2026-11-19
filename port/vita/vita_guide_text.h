@@ -76,7 +76,7 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "Mods: use the files in ux0:data/bt4/mods/. Its lower row: the anime soundtrack.\n"
      "Stick (press {D} from the lower row): a dead zone of 0 to 40% and a soft response, if the sticks feel too quick.\n"
      "{S}: Unlock All.\n"
-     "The fights' controls reminder: pause > Vita Controls, {S}."},
+     "Reminder in fights: pause > Vita Controls, {S}."},
     {"Anime soundtrack",
      "The English game with the anime music of the Spanish release:\n"
      "1. Copy your own Spanish B14 Rev2 .iso to ux0:data/bt4/es/ (the English one stays where it is).\n"
