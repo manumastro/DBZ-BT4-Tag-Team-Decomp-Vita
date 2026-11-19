@@ -172,7 +172,7 @@ static int wrap(const char *text, int width, f32 scale) {
     {   /* the touch line, from Vita Settings > Touch */
         static const char *spotEn[3] = {"rear touch pad", "front screen corner", "off"};
         static const char *spotEs[3] = {"panel trasero", "esquina de la pantalla", "apagado"};
-        static const char *shortEn[3] = {"rear pad", "corner", "off"}, *shortEs[3] = {"panel", "esquina", "no"};
+        static const char *shortEn[3] = {"rear pad", "screen corner", "off"}, *shortEs[3] = {"panel trasero", "esquina", "no"};
         const char *const *spot = gVitaBt4English ? spotEn : spotEs;
         const char *const *spotShort = gVitaBt4English ? shortEn : shortEs;
         char touch[200], where[80];
@@ -198,7 +198,8 @@ static int wrap(const char *text, int width, f32 scale) {
         } else {
             static const char *const nm[4] = {"{L2}", "{R2}", "{L3}", "{R3}"};
             int o = 0;
-            touch[0] = 0;
+            /* (a heading first: "L3 corner" alone did not say it is a touch; the console's run vgr6) */
+            o = snprintf(touch, sizeof(touch), "%s:\n", gVitaBt4English ? "Touch buttons" : "Botones t\xC3\xA1" "ctiles");
             for (b = 0; b < 4; b++) {
                 int s = Vita_TouchGetSpot(b);
                 o += snprintf(touch + o, sizeof(touch) - (size_t)o, "%s   %s%s", nm[b], spotShort[s < 0 || s > 2 ? 0 : s],
@@ -361,7 +362,7 @@ enum { GL_X0 = 18, GL_X1 = 494, GL_Y0 = 22, GL_Y1 = 426, GL_TEXT_X = 34, GL_TEXT
 static int sOpen, sTopic, sPage, sPages, sCursor, sLastTopic = -1, sLastPages;
 #define PAGES_MAX 16
 static int sPageStart[PAGES_MAX + 1]; /* the first line of each page, the line count after the last */
-static u16 sTitle[96], sFoot[160], sCount[16];
+static u16 sTitle[96], sFoot[160], sCount[32];
 
 static const VgTopic *topics(void) { return gVitaBt4English ? kVgEn : kVgEs; }
 
@@ -776,11 +777,11 @@ void Vita_GuideDraw(void) {
         {
             char count[16];
             snprintf(count, sizeof(count), "%d/%d", sTopic + 1, VG_TOPICS);
-            to_u16(count, sCount, 16);
+            to_u16(count, sCount, 32); /* (to_u16 keeps 12 places for a tag: 16 held 4 letters, "10/13" lost its 3) */
         }
         Font_SetScale(0.8f);
         Font_SetColorRGBA(0x89, 0xC3, 0xE5, 0x80);
-        Font_PrintAt(GL_X1 - 110, GL_Y0 + 10, sCount); /* (left-aligned, room for "13/13": nearer the edge, "10/13" lost its last figure) */
+        Font_PrintAt(GL_X1 - 72, GL_Y0 + 10, sCount);
         first = sPageStart[sPage];
         n = sPageStart[sPage + 1] - first;
         {
