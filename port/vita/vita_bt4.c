@@ -17,6 +17,9 @@
 #include <string.h>
 #include "plat_songs.h"
 #include "plat_stages.h"
+#ifdef BT4_VITA_NETLINK
+#include "vita_netlink_rename.h" /* (upstream's network files linked: these stand-ins unused) */
+#endif
 
 /* ---- variables of the PC build's files ---- */
 int gPortResim;                    /* gs/state.c: a frame run again after a rollback (never on the Vita) */

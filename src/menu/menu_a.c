@@ -385,9 +385,17 @@ void MainMenu_Init(s32 section) {
         }
 #elif defined(PORT_VITA) /* the Vita's earlier Tag Team entry (bt3.txt tagteam=2): the port's screen mode with the Vita's
                             text setup of a local room (port/vita/vita_main.c Vita_TagSetup, port/vita/vita_tag.c) */
+        {   /* bt3.txt online_menu=1 (online M2a, a build with BT4_VITA_NETLINK): the PC's "Tenkaichi Budokai Online"
+               entry after Tag Team, as the PC lists it */
+            extern s32 Vita_OnlineMenu(void);
+            if (i == MAINMENU_TAG && Vita_OnlineMenu()) {
+                gMainMenu->items[gMainMenu->itemCount++] = MAINMENU_TBO;
+            }
+        }
         if (i == 3) {
             extern int Vita_TagMenu(void);
-            if (Vita_TagMenu() == 2) {
+            extern s32 Vita_OnlineMenu(void);
+            if (Vita_TagMenu() == 2 && !Vita_OnlineMenu()) {
                 gMainMenu->items[gMainMenu->itemCount++] = MAINMENU_TBO;
             }
         }

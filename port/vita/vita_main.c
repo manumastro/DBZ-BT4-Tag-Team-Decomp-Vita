@@ -52,6 +52,7 @@ static FILE *sLog;
 static int sHeapCdram, sFloatChoice = -1; /* -1: ask */
 static int sM0, sPs2Float; /* bt3.txt m0, ps2float (vita_m0.c, vita_ps2float.c) */
 static unsigned long long sStart, sBattleStart, sLastDraw;
+static int sOnlineMenu; /* bt3.txt online_menu (Vita_OnlineMenu, below) */
 static int sTagMenu = 1; /* bt3.txt tagteam: 0 no Tag Team entry in the main menu, 1 BT4decomp's own screens, 2 the earlier
                             text setup (Vita_TagMenu, below) */
 unsigned gVitaVuMax[2], gVitaVuCut; /* gs_vu1.c: the interpreter's most in a list, runs left out */
@@ -2706,6 +2707,8 @@ static void read_settings(void) {
         } else if (strcmp(line, "tagteam") == 0) { /* 0: no Tag Team entry in the main menu; 1 BT4decomp's own Tag Team
                                                       screens (the default); 2 the Vita's earlier text setup (Vita_TagMenu) */
             sTagMenu = atoi(eq) < 0 || atoi(eq) > 2 ? 1 : atoi(eq);
+        } else if (strcmp(line, "online_menu") == 0) { /* (before the other online* lines: Vita_OnlineMenu) */
+            sOnlineMenu = atoi(eq) != 0;
         } else if (strncmp(line, "adhoc", 5) == 0) { /* Ad Hoc (port/vita/vita_adhoc.c): adhoc_test, adhoc_delay, ... */
             extern void Vita_AdhocSetting(const char *name, const char *value);
             Vita_AdhocSetting(line, eq);
@@ -3106,6 +3109,15 @@ int Vita_UnlockTakeChanged(void) {
    and the CPUs' difficulty, then the room is opened as the PC's offline test does (port_tbo.c Tb_TagUpdate) and the
    game's own character select follows. docs/vita/tagteam.md */
 int Vita_TagMenu(void) { return sTagMenu; }
+/* bt3.txt online_menu=1: BT4decomp's online hub in the main menu and behind it (online M2a); only in a build that links
+   its network files (BT4_VITA_NETLINK=1), 0 otherwise */
+int Vita_OnlineMenu(void) {
+#ifdef BT4_VITA_NETLINK
+    return sOnlineMenu;
+#else
+    return 0;
+#endif
+}
 
 int Vita_TagSetup(void) {
     extern void Port_TagCPUOptions(int fill, int difficulty), Port_TagModeOptions(int free_for_all, int quick);

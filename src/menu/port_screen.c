@@ -888,12 +888,15 @@ s32 PortScreen_Main(void) {
         Bgm_Play(0x816 + 2);
         do {
 #ifdef PORT_VITA
-            {   /* the Vita: no online hub; its own setup of a local Tag Team room (port/vita/vita_main.c): 2 to the
-                   character select, 0 back to the main menu */
+            extern s32 Vita_OnlineMenu(void);
+            if (!Vita_OnlineMenu()) {
+                /* the Vita without the online hub (bt3.txt online_menu=0, the default): its own setup of a local Tag
+                   Team room (port/vita/vita_main.c): 2 to the character select, 0 back to the main menu */
                 extern s32 Vita_TagSetup(void);
                 result = Vita_TagSetup();
-            }
-#else
+            } else
+#endif
+            { /* (the Vita with online_menu=1: BT4decomp's own online hub, as the PC) */
             result = PortTbo_Run();
             if(result==PORT_TBO_OPEN_TAG){
                 Adx_StopAll();
@@ -901,7 +904,7 @@ s32 PortScreen_Main(void) {
                 Bgm_Play(0x816+2);
                 continue;
             }
-#endif
+            }
             if (result == 2 && TeamSel_TagRun(2)) { result=3; break; }
         } while (result == 2 || result == PORT_TBO_OPEN_TAG);
         Adx_StopAll();

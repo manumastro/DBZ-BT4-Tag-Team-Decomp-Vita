@@ -7,7 +7,8 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 - **Multiplayer, the start** (nothing a player sees yet): BT4decomp's online code brought to its latest public release
   (0.1.39.6 R1.6: Ranked abandonment and results, sturdier sign-in); the Vita's network start-up and the PC's
   float arithmetic (built, not run on the console); **Ad Hoc** (Vita to Vita without internet) started: the system's
-  group dialog and a first check between Vitas (`adhoc_test`, not run on the console yet).
+  group dialog and a first check between Vitas (`adhoc_test`, not run on the console yet); BT4decomp's online menus
+  and its 1 vs 1 network code built for the Vita (a separate development build, `online_menu`; matches cannot start yet).
 
 ## v1.4.1 (2026-11-18)
 

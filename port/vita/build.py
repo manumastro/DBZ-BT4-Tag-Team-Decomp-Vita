@@ -26,6 +26,9 @@ Environment:
                        self-test; bt3.txt online, online_test, docs/vita/online-bt4.md). Default: 1 in the development
                        build, 0 in the release (whose program then has none of it)
     python3 port/vita/build.py netcheck   BT4decomp's network files compiled for the Vita, not linked: what builds
+    BT4_VITA_NETLINK=1 BT4decomp's 1 vs 1 network files linked (online M2a; with the network part): net.c, net_lobby.c,
+                       net_match.c, net_relay.c, net_chat.c, build_identity.c, plat_fprint.c, match_supabase.cpp, with
+                       port/vita/vita_netglue.c; vita_bt4.c's stand-ins renamed away (vita_netlink_rename.h); *_nl folders
     BT4_PS2FLOAT=1     the PS2 float model's variant (online play, docs/vita/online-bt4.md): the game's float instructions whose
                        result can differ from the PC's are replaced by calls of the model (port/vita/ps2float.py), chosen at
                        run time by bt3.txt ps2float=0/1; objects and package in their own folders (*_pf); =mul also the
@@ -49,6 +52,8 @@ P = str(SDK / "bin/arm-vita-eabi-")
 DEV = os.environ.get("BT3_VITA_DEV") == "1"
 PGO = os.environ.get("BT3_PGO", "")
 ONLINE = os.environ.get("BT4_VITA_ONLINE", "1" if DEV else "0") == "1"
+# BT4_VITA_NETLINK=1: BT4decomp's 1 vs 1 network files linked for real (online M2a; needs the network part)
+NETLINK = ONLINE and os.environ.get("BT4_VITA_NETLINK") == "1"
 if PGO not in ("", "gen", "use"):
     raise SystemExit("BT3_PGO: gen or use")
 # BT4_PS2FLOAT: the PS2 float model's variant (port/vita/ps2float.py)
@@ -57,7 +62,7 @@ if PS2F not in ("", "0", "1", "mul"):
     raise SystemExit("BT4_PS2FLOAT: 1 or mul")
 PS2F = "" if PS2F == "0" else PS2F
 PF_TAG = {"1": "_pf", "mul": "_pfm"}.get(PS2F, "")
-TAG = ("_dev" if DEV else "_rel") + ("_pgo" + PGO if PGO else "") + PF_TAG
+TAG = ("_dev" if DEV else "_rel") + ("_pgo" + PGO if PGO else "") + PF_TAG + ("_nl" if NETLINK else "")
 PGO_DIR = ROOT / "port/vita/pgo" / ("dev" if DEV else "rel")
 OBJ = ROOT / ("port/build/obj_vita" + TAG)
 OUT = ROOT / ("port/build/vita" + TAG)
@@ -88,7 +93,7 @@ COMMON = ["-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-w", "-DPOR
           '-DPORT_VITA_SFX="-vgl.txt"' if DEV else '-DPORT_VITA_SFX=".txt"', "-DPORT_VITA_GFX=1", "-DPORT_VITA_VGL=1",
           "-DMPEG2_PLAYER=1", "-DPORT_VITA_SOUND=1", "-DPORT_VITA_NATIVE=1",
           "-DPORT_VITA_BT4=1", "-DBT4_TAG_TEAM_EXPANDED=1", '-DPORT_VITA_HOME="ux0:data/bt4"', '-DPORT_VITA_ELF="SLUS_219.78"'] + ([] if DEV else ["-DPORT_VITA_RELEASE=1"]) + \
-         (["-DBT4_VITA_ONLINE=1"] if ONLINE else [])
+         (["-DBT4_VITA_ONLINE=1"] if ONLINE else []) + (["-DBT4_VITA_NETLINK=1"] if NETLINK else [])
 # Profile-guided builds (BT3_PGO): gen counts with atomic updates (several threads run the same code); use takes the
 # counts where there are some (a profile from an older source of a file is used as far as it fits, with a warning)
 # counts only (VitaSDK's libgcov has no value profilers, no atomic updates and no file writing): arcs, with the
@@ -335,6 +340,8 @@ def port_sources():
                 # the client's route checks call), built unchanged but for cloudflare_signal.inc's PORT_VITA lines
         out += [(V / "vita_sdl.c", "net"), (S / "gs/supabase_signal.cpp", "netcpp"), (S / "gs/update_sign.c", "net"),
                 (S / "gs/update_crypto.c", "net"), (S / "gs/update_monocypher.c", "net")]
+    if NETLINK:  # online M2a: upstream's 1 vs 1 session, chat, TURN, STUN, lobbies, identity, room client, unchanged
+        out += [(S / n, "netcpp" if n.endswith(".cpp") else "net") for n in NETLINK_FILES] + [(V / "vita_netglue.c", "net")]
     if PS2F:
         out += [(V / "vita_pftest.c", "ee"), (V / "vita_pftest.c", "pfcheck")]
     return out
@@ -344,6 +351,8 @@ def port_sources():
 # online plan, docs/vita/online-bt4.md): the 1 vs 1 session, its chat, TURN, STUN, lobbies, the room client, identity
 NETCHECK = ["gs/net.c", "gs/net_chat.c", "gs/net_relay.c", "gs/net_match.c", "gs/net_lobby.c", "gs/build_identity.c",
             "plat_fprint.c", "gs/match_supabase.cpp", "gs/tag_team_net.c", "gs/state.c"]
+# the ones BT4_VITA_NETLINK=1 links (Tag Team's network and the rollback's state.c not yet)
+NETLINK_FILES = [n for n in NETCHECK if n not in ("gs/tag_team_net.c", "gs/state.c")]
 
 
 def net_cmd(f, o):
