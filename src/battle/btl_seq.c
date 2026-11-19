@@ -600,11 +600,12 @@ extern s32 BtlPause_GetMenuPad(void);
 extern s32 BtlPause_GetPad(void);
 extern s32 PauseMenu_Update(s32 a, s32 b);     /* pause / result menu update */
 #ifdef PORT
-/* Read only after the Ranked observer has seen a battle abort. Both peers
- * run the same pause menu, so only the player driving it surrendered. */
+/* Only the accepted exit action identifies a surrender. A transport abort
+ * while someone happens to have the pause menu open is not their concession. */
 s32 Port_RankedPauseAbortPad(void) {
-    if (!(Battle_GetWork()->flags & BATTLE_FLAG_PAUSE_MENU) || !BattleResult_IsAborted() || Battle_IsRematchRequested()) return -1;
-    return BtlPause_GetMenuPad();
+    extern s32 PauseMenu_ConfirmedQuitPad(void);
+    if (!BattleResult_IsAborted() || Battle_IsRematchRequested()) return -1;
+    return PauseMenu_ConfirmedQuitPad();
 }
 extern int Port_NetActive(void); /* port/src/gs/net.c: 1 in an online match */
 extern int Port_NetMe(void);     /* which player this copy plays (0 or 1) */
@@ -1539,6 +1540,16 @@ s32 BtlSeqReady_Exit(BtlSeqWaitCtx *ctx) {
 
 /* Gives the result menu to pad 0 when one pad plays, else to the winning side. */
 void BtlSeq_SetResultPad(void) {
+#ifdef PORT
+    {
+        extern int Port_NetActive(void), Port_RankedActive(void);
+        if (Port_NetActive() && Port_RankedActive() && BattleResult_HasWinner()) {
+            /* Online has one physical pad per machine, but two shared pad slots. */
+            BtlPause_SetPad(BattleResult_GetWinnerSide());
+            return;
+        }
+    }
+#endif
     if (BtlPause_GetPadCount() == 1) {
         BtlPause_SetPad(0);
     } else {
