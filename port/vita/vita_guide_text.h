@@ -1,13 +1,18 @@
-/* The Vita Guide's words (port/vita/vita_guide.c), English and Spanish, in UTF-8. Written for every player: short
-   sentences, what to press, where to go. The contents are the players' questions on Reddit, most asked first
-   (psvita-agent notes/reddit-review-2026-11-19.md), and the README's answers. Keep them true to the code: a change of
-   a control, a folder or a setting changes its line here too.
+/* The Vita Guide's words (port/vita/vita_guide.c), English and Spanish, in UTF-8. Written for a player who knows
+   nothing: one idea a line, short words, the button's picture next to what it does, a heading over every group. The
+   contents are the players' questions on Reddit, most asked first (psvita-agent notes/reddit-review-2026-11-19.md),
+   and the README's answers. Keep them true to the code: a change of a control, a folder or a setting changes its line
+   here too.
 
-   Marks turned into the game's own button pictures (its font's <PAD=> tag, the pause menu's controls page's way):
-   {X} cross, {O} circle, {S} square, {T} triangle, {L1} {R1} {L2} {R2} {L3} {R3}, {SEL} SELECT, {ST} START,
-   {U} {D} {LT} {RT} the D-pad's arrows. "\n" starts a line, "\n\n" leaves a line empty. A topic longer than a page goes
-   on to the next page by itself. Avoid the words the Vita's text fixes rewrite ("the console", "(PS2)",
-   "PlayStation 2": port/vita/vita_text.c). */
+   Layout marks (vita_guide.c):
+   - a line starting with "# " is a heading (the guide's orange, a little space over it); a page breaks before a
+     heading when it can;
+   - "\n" starts a line; an empty line is half a line of space;
+   - {X} cross, {O} circle, {S} square, {T} triangle, {L1} {R1} {L2} {R2} {L3} {R3}, {U} {D} {LT} {RT} the D-pad's
+     arrows: the game's own button pictures (its font's <PAD=> tag); {SEL} and {ST} are written SELECT and START
+     (the game's pictures of those two are unlabelled pills).
+   Lines over the page's width wrap by themselves; keep them under ~40 letters so they do not. Avoid the words the
+   Vita's text fixes rewrite ("the console", "(PS2)", "PlayStation 2": port/vita/vita_text.c). */
 #ifndef VITA_GUIDE_TEXT_H
 #define VITA_GUIDE_TEXT_H
 
@@ -20,274 +25,373 @@ typedef struct VgTopic {
 
 static const VgTopic kVgEn[VG_TOPICS] = {
     {"Controls",
-     "Left stick: move.   {S} fight   {T} ki blast   {X} dash   {O} guard\n"
-     "{L1} (the Vita's L): ki charge.   {R1} (R): ascend.\n"
-     "{L2} blaster wave, {R2} descend, {L3}, {R3}: the Vita has no such buttons. They are on the rear touch pad "
-     "(next topic).\n\n"
-     "{ST}: pause. In a fight, pause > Vita Controls shows that fight's controls.\n"
-     "Close the game: hold {ST} + {SEL} for two seconds.\n"
-     "PS TV, or a paired DualShock: its own L2, R2, L3 and R3 work.\n"
-     "Other buttons: Options > Controller > Control Type > Custom."},
+     "# Fighting\n"
+     "Left stick   Move\n"
+     "{S}   Attack\n"
+     "{T}   Ki blast\n"
+     "{X}   Dash\n"
+     "{O}   Guard\n"
+     "{L1}   Charge ki\n"
+     "{R1}   Fly up\n"
+     "# Buttons the Vita does not have\n"
+     "{L2}   Blast wave        {R2}   Fly down\n"
+     "{L2} {R2} {L3} {R3}   Touch the rear pad\n"
+     "The next topic shows where.\n"
+     "# Pause and quit\n"
+     "{ST}   Pause\n"
+     "Hold {ST} + {SEL}   Quit the game"},
     {"Touch: L2, R2, L3, R3",
-     "The rear touch pad, in four quarters:\n"
-     "upper left {L2}   upper right {R2}   lower left {L3}   lower right {R3}\n\n"
-     "Options > Controller > Vita Settings > Touch moves each one to a corner of the front screen "
-     "({L2} {R2} the bottom corners, {L3} {R3} the top ones) or turns it off.\n"
-     "{SEL} + {L1} / {R1} also give {L2} / {R2}.\n\n"
-     "In the menus: tap an item to move to it, tap it again to choose it. Swipe to scroll. Tap with two fingers to "
-     "go back. A tap skips a film."},
-    {"Tag Team: start and setup",
-     "Main menu > Tag Team (or Duel > Tag).\n\n"
-     "Local Battle: choose the Mode (Singleplayer: you and CPU allies against CPUs), the size of each team, the time "
-     "and the CPU level, then Select Fighters. The help at the bottom says what each row does.\n"
-     "Recovery settings, Fighter settings and Battle rules hold the PC version's extra rules (revival, Senzu Beans, "
-     "fusions, health).\n\n"
-     "Character select: the teams pick in turns, then the stage and the music.\n\n"
-     "2 vs 2 plays well. 3 vs 3 and bigger teams work, but are still slow on the Vita."},
+     "# The back of the Vita\n"
+     "Touch the rear pad in one of four places:\n"
+     "{L2}   Top left\n"
+     "{R2}   Top right\n"
+     "{L3}   Bottom left\n"
+     "{R3}   Bottom right\n"
+     "# Another way\n"
+     "{SEL} + {L1}   Same as {L2}\n"
+     "{SEL} + {R1}   Same as {R2}\n"
+     "# Move them\n"
+     "Options > Controller > Vita Settings > Touch\n"
+     "Put them in the screen's corners, or off.\n"
+     "# In the menus\n"
+     "Tap an item, tap it again to choose it.\n"
+     "Swipe to scroll. Two fingers: go back."},
+    {"Tag Team: start",
+     "# How to start\n"
+     "Main menu > Tag Team > Local Battle\n"
+     "# Set up the battle\n"
+     "Mode: you and CPU friends against the CPU.\n"
+     "Choose the team size, time and CPU level.\n"
+     "Then choose Select Fighters.\n"
+     "# Choose the fighters\n"
+     "The teams pick in turns.\n"
+     "Then pick the stage and the music.\n"
+     "# Good to know\n"
+     "2 vs 2 runs smoothly.\n"
+     "3 vs 3 and bigger teams are still slow."},
     {"Tag Team: in the fight",
-     "Right stick: choose the enemy you target (a ring and a health bar mark him).\n"
-     "Tag Team > Camera mode > Target selection: right stick (the default), {L3} or the D-pad.\n\n"
-     "Stay near a downed ally: you revive him. More helpers are faster; moving or being hit stops it.\n"
-     "Hold {L2} and press {SEL}: eat a Senzu Bean, if the rules give you any.\n"
-     "{R3} + a direction, near a compatible ally: fusion. {L3} + {R3} splits a temporary one.\n\n"
-     "Everything else: the game's usual controls.\n"
-     "In the fight, pause > Vita Controls shows it all again."},
-    {"Tag Team: the HUD",
-     "Your gauges: top left, as in a 1 vs 1 fight.\n"
-     "Your allies: the column at the bottom left.\n"
-     "The enemy you target: the ring around him and his bar.\n"
-     "The radar, top right: where every fighter is.\n\n"
-     "Text and HUD sizes: tagui_scale and taghud_scale (percent) in ux0:data/bt4/bt3.txt, for the development build."},
+     "# Your target\n"
+     "Right stick   Change the enemy you aim at\n"
+     "A ring and a health bar mark him.\n"
+     "# Help your team\n"
+     "Stand next to a fallen ally   Revive him\n"
+     "Hold {L2} + press {SEL}   Eat a Senzu Bean\n"
+     "{R3} + a direction   Fuse with a near ally\n"
+     "{L3} + {R3}   Undo the fusion\n"
+     "# Forgot something?\n"
+     "In the fight: {ST} > Vita Controls"},
+    {"Tag Team: the screen",
+     "# What you see\n"
+     "Top left   Your health and ki\n"
+     "Bottom left   Your team\n"
+     "Ring and bar   The enemy you aim at\n"
+     "Top right   The radar: every fighter"},
     {"Unlock All",
-     "Every character and form, stage, song and item, and 4,850,000 Zenni.\n\n"
-     "Open its screen in one of three ways:\n"
-     "- hold {SEL} for about a second in the menus;\n"
-     "- Options > Controller > Vita Settings, then {S};\n"
-     "- press {SEL} as the game starts.\n"
-     "Then {X}. Your save is copied first: on the same screen {T} undoes it.\n\n"
-     "PS2 cheat codes do nothing here. Do not copy another port's save over yours: use Unlock All.\n"
-     "A fighter still locked after it? Send log.txt (topic Problems)."},
+     "# What you get\n"
+     "Every fighter, form, stage and song,\n"
+     "every item, and 4,850,000 Zenni.\n"
+     "# How to do it\n"
+     "In a menu, hold {SEL} for one second.\n"
+     "Or: Options > Controller > Vita Settings, {S}\n"
+     "Then press {X}.\n"
+     "# Changed your mind?\n"
+     "Your save is copied first.\n"
+     "On the same screen, {T} puts it back.\n"
+     "# Careful\n"
+     "PS2 cheat codes do nothing here.\n"
+     "Never copy another port's save over yours."},
     {"Vita Settings",
-     "Options > Controller > Vita Settings:\n"
-     "Touch: where L2, R2, L3, R3 are (rear pad, front corner, off).\n"
-     "Clashes: Square (default) wins beam and blow clashes with {S}; Stick wins them by turning the left stick. "
-     "ON / OFF below: the clash assist (hold the button, it presses for you).\n"
-     "2nd Pad: a second controller plays as player 2 (PS TV).\n"
-     "Mods: use the files in ux0:data/bt4/mods/. Its lower row: the anime soundtrack.\n"
-     "Stick (press {D} from the lower row): a dead zone of 0 to 40% and a soft response, if the sticks feel too quick.\n"
-     "{S}: Unlock All.\n"
-     "Reminder in fights: pause > Vita Controls, {S}."},
+     "# Where\n"
+     "Options > Controller > Vita Settings\n"
+     "# The rows\n"
+     "Touch   Where {L2} {R2} {L3} {R3} are\n"
+     "Clashes   Win clashes with {S} or the stick\n"
+     "2nd Pad   A second player (PS TV)\n"
+     "Mods   Your mods on or off\n"
+     "Mods, lower row   The anime music\n"
+     "Stick   Slower stick, if it feels too quick\n"
+     "{S}   Unlock All"},
     {"Anime soundtrack",
-     "The English game with the anime music of the Spanish release:\n"
-     "1. Copy your own Spanish B14 Rev2 .iso to ux0:data/bt4/es/ (the English one stays where it is).\n"
-     "2. Options > Controller > Vita Settings > Mods, lower row: ON.\n\n"
-     "The texts and voices stay English; the songs change from the next one.\n"
-     "Only the Spanish .iso in ux0:data/bt4/: the whole game in Spanish, with its music."},
+     "# English game, anime music\n"
+     "1. Copy your Spanish B14 Rev2 .iso\n"
+     "to ux0:data/bt4/es/\n"
+     "2. Options > Controller > Vita Settings:\n"
+     "Mods, lower row: ON\n"
+     "Texts and voices stay in English.\n"
+     "# The whole game in Spanish\n"
+     "Put only the Spanish .iso in ux0:data/bt4/"},
     {"Game files (the .iso)",
-     "You need your own image of Team BT4's B14 Rev2 for PS2: English (5,914,853,376 bytes) or Spanish "
-     "(5,396,742,144 bytes). Get it from Team BT4's official release (an ad blocker helps on download pages). "
-     "Other builds (B13, Beta X, Daima ones) do not work.\n\n"
-     "Copy the .iso (any name ending in .iso) to ux0:data/bt4/.\n"
-     "The .iso, not the .7z, .zip or .rar: unpack those on a computer with 7-Zip, not on a phone.\n"
-     "A FAT32 card cannot hold a file over 4 GB: format it as exFAT, or copy SLUS_219.78, BIN and DATA to "
-     "ux0:data/bt4/disc/.\n"
-     "\"Archive not found\" or \"cut short\": the .iso is too small. Copy it again.\n"
-     "An image in ux0:data/bt3/bt4/ (the BT3 port's) is found too.\n"
-     "Updating: install the new VPK over the old one. Saves and the .iso stay."},
+     "# What you need\n"
+     "Your own B14 Rev2 .iso by Team BT4,\n"
+     "English or Spanish. Get it from Team BT4.\n"
+     "Other versions (B13, Beta X) do not work.\n"
+     "# Where it goes\n"
+     "ux0:data/bt4/  (any name ending in .iso)\n"
+     "# Common mistakes\n"
+     "Copy the .iso, not the .7z, .rar or .zip.\n"
+     "Unpack it on a computer, not a phone.\n"
+     "A FAT32 card cannot hold over 4 GB:\n"
+     "use exFAT.\n"
+     "\"Archive not found\": copy the .iso again.\n"
+     "# Updating\n"
+     "Install the new VPK. Your saves stay."},
     {"Mods",
-     "Mods go in ux0:data/bt4/mods/, as for the BT3 Vita port: mods/pzs4us1/00042.bin takes the place of file 42 of "
-     "PZS4US1.AFS; a pack can have a folder of its own.\n\n"
-     "Vita Settings > Mods shows what is in use, and turns it all off from the next start without deleting anything.\n"
-     "Mods that change data files work. The PC version's Lua mods do not.\n"
-     "Very large mods may not fit in the Vita's memory: if the game stops at the start, turn Mods off."},
+     "# Where they go\n"
+     "ux0:data/bt4/mods/\n"
+     "mods/pzs4us1/00042.bin replaces\n"
+     "file 42 of PZS4US1.AFS.\n"
+     "# On or off\n"
+     "Options > Controller > Vita Settings > Mods\n"
+     "# Good to know\n"
+     "The PC version's Lua mods do not work.\n"
+     "Game stops at the start? Turn Mods off."},
     {"Problems? Send this",
-     "Open an issue on the port's GitHub page (manumastro/DBZ-BT4-Tag-Team-Decomp-Vita) and attach, from "
-     "ux0:data/bt4/:\n"
-     "- log.txt (and log-prev.txt);\n"
-     "- hang.txt and err.txt, if they are there;\n"
-     "- after an error C2-12828-1: the .psp2dmp file in ux0:data/.\n"
-     "Say what you were doing, your Vita (1000, 2000 or PS TV), the game's version and your plugins.\n\n"
-     "Picture smaller, with borders, in fights only: set Sharpscale's scaling mode to Original.\n"
-     "Heavy scenes slow: the CapUnlocker plugin helps."},
+     "# Tell us on GitHub\n"
+     "manumastro/DBZ-BT4-Tag-Team-Decomp-Vita\n"
+     "Open an issue there.\n"
+     "# Attach these files\n"
+     "From ux0:data/bt4/:\n"
+     "log.txt and log-prev.txt\n"
+     "hang.txt and err.txt, if you have them\n"
+     "Error C2-12828-1: the .psp2dmp in ux0:data/\n"
+     "# And say\n"
+     "What you were doing, your Vita model\n"
+     "and your plugins.\n"
+     "# Quick fixes\n"
+     "Small picture with borders: Sharpscale\n"
+     "scaling mode Original.\n"
+     "Slow scenes: the CapUnlocker plugin."},
     {"Not there yet",
-     "Online play, and matches with the PC version: not on the Vita yet.\n"
-     "Ad hoc between two Vitas: not yet.\n"
-     "Tag Team 3 vs 3 and bigger: they work, but slowly. 2 vs 2 is smooth.\n"
-     "The PC version's added songs and stages, its F1 menu (Lua mods, HUD editor) and a language choice in the "
-     "game.\n"
-     "Other builds than B14 Rev2 (B13, Beta X)."},
+     "# Coming later, maybe\n"
+     "Online play\n"
+     "Vita to Vita (ad hoc)\n"
+     "The PC version's new songs and stages\n"
+     "The PC version's F1 menu\n"
+     "# Works, but slowly\n"
+     "Tag Team 3 vs 3 and bigger\n"
+     "# Not supported\n"
+     "Other builds: B13, Beta X"},
     {"More questions",
-     "This port or arielxflores's? Both run B14 Rev2. This one is BT4 only, an app of its own with its own "
-     "speed-ups. They install side by side.\n"
-     "BT3 stays installed: this app does not replace it.\n"
-     "Daima characters or missions? Only what Team BT4's B14 Rev2 has.\n"
-     "Sticks too quick? Vita Settings > Stick. Clashes hard? Vita Settings > Clashes and its assist.\n"
-     "The game in Spanish? Use the Spanish B14 Rev2 image.\n"
-     "Updating? The new VPK over the old one."},
+     "# This port or arielxflores's?\n"
+     "Both play B14 Rev2. You can have both.\n"
+     "# Does it remove BT3?\n"
+     "No. Both stay installed.\n"
+     "# Daima fighters?\n"
+     "Only what B14 Rev2 has.\n"
+     "# The game in Spanish?\n"
+     "Use the Spanish B14 Rev2 .iso.\n"
+     "# Stick too quick? Clashes too hard?\n"
+     "See the topic Vita Settings."},
 };
 
 static const VgTopic kVgEs[VG_TOPICS] = {
     {"Controles",
-     "Stick izquierdo: moverse.   {S} golpe   {T} ráfaga de ki   {X} impulso   {O} defensa\n"
-     "{L1} (la L de la Vita): cargar ki.   {R1} (R): subir.\n"
-     "{L2} onda, {R2} bajar, {L3}, {R3}: la Vita no tiene esos botones. Están en el panel táctil trasero "
-     "(tema siguiente).\n\n"
-     "{ST}: pausa. En combate, pausa > Controles Vita muestra los controles de ese combate.\n"
-     "Cerrar el juego: mantén {ST} + {SEL} dos segundos.\n"
-     "PS TV o un DualShock emparejado: sus propios L2, R2, L3 y R3 funcionan.\n"
-     "Otros botones: Opciones > Mando > Tipo de control > Personalizado."},
+     "# Combate\n"
+     "Stick izquierdo   Moverte\n"
+     "{S}   Golpe\n"
+     "{T}   Ráfaga de ki\n"
+     "{X}   Impulso\n"
+     "{O}   Defensa\n"
+     "{L1}   Cargar ki\n"
+     "{R1}   Subir\n"
+     "# Botones que la Vita no tiene\n"
+     "{L2}   Onda              {R2}   Bajar\n"
+     "{L2} {R2} {L3} {R3}   Toca el panel trasero\n"
+     "El tema siguiente muestra dónde.\n"
+     "# Pausa y salir\n"
+     "{ST}   Pausa\n"
+     "Mantén {ST} + {SEL}   Cerrar el juego"},
     {"Táctil: L2, R2, L3, R3",
-     "El panel táctil trasero, en cuatro cuartos:\n"
-     "arriba a la izquierda {L2}   arriba a la derecha {R2}   abajo a la izquierda {L3}   abajo a la derecha {R3}\n\n"
-     "Opciones > Mando > Vita Settings > Touch lleva cada uno a una esquina de la pantalla "
-     "({L2} {R2} las esquinas de abajo, {L3} {R3} las de arriba) o lo apaga.\n"
-     "{SEL} + {L1} / {R1} también dan {L2} / {R2}.\n\n"
-     "En los menús: toca una opción para ir a ella y tócala otra vez para elegirla. Desliza para desplazarte. "
-     "Toca con dos dedos para volver. Un toque salta un vídeo."},
-    {"Tag Team: empezar y preparar",
-     "Menú principal > Tag Team (o Duelo > Tag).\n\n"
-     "Local Battle: elige el modo (Singleplayer: tú y aliados CPU contra la CPU), el tamaño de cada equipo, el tiempo "
-     "y el nivel de la CPU, y luego Select Fighters. La ayuda de abajo dice qué hace cada fila.\n"
-     "Recovery settings, Fighter settings y Battle rules tienen las reglas extra de la versión de PC (revivir, "
-     "semillas del ermitaño, fusiones, vida).\n\n"
-     "Selección de personajes: los equipos eligen por turnos, luego el escenario y la música.\n\n"
-     "2 contra 2 va bien. 3 contra 3 y equipos mayores funcionan, pero aún van lentos en la Vita."},
+     "# La parte de atrás de la Vita\n"
+     "Toca el panel trasero en uno de cuatro sitios:\n"
+     "{L2}   Arriba a la izquierda\n"
+     "{R2}   Arriba a la derecha\n"
+     "{L3}   Abajo a la izquierda\n"
+     "{R3}   Abajo a la derecha\n"
+     "# Otra forma\n"
+     "{SEL} + {L1}   Igual que {L2}\n"
+     "{SEL} + {R1}   Igual que {R2}\n"
+     "# Cambiarlos de sitio\n"
+     "Opciones > Mando > Vita Settings > Touch\n"
+     "Ponlos en las esquinas de la pantalla, o apágalos.\n"
+     "# En los menús\n"
+     "Toca una opción y tócala otra vez para elegirla.\n"
+     "Desliza para bajar. Dos dedos: volver."},
+    {"Tag Team: empezar",
+     "# Cómo empezar\n"
+     "Menú principal > Tag Team > Local Battle\n"
+     "# Prepara el combate\n"
+     "Modo: tú y amigos CPU contra la CPU.\n"
+     "Elige el tamaño del equipo, el tiempo y la CPU.\n"
+     "Luego elige Select Fighters.\n"
+     "# Elige los luchadores\n"
+     "Los equipos eligen por turnos.\n"
+     "Luego el escenario y la música.\n"
+     "# Bueno saber\n"
+     "2 contra 2 va fluido.\n"
+     "3 contra 3 y equipos mayores aún van lentos."},
     {"Tag Team: en combate",
-     "Stick derecho: elige el enemigo al que apuntas (lo marcan un anillo y una barra de vida).\n"
-     "Tag Team > Camera mode > Target selection: stick derecho (por defecto), {L3} o la cruceta.\n\n"
-     "Quédate cerca de un aliado caído: lo reanimas. Con más ayudantes es más rápido; moverte o recibir un golpe "
-     "lo corta.\n"
-     "Mantén {L2} y pulsa {SEL}: comes una semilla del ermitaño, si las reglas te dan alguna.\n"
-     "{R3} + una dirección, cerca de un aliado compatible: fusión. {L3} + {R3} separa una temporal.\n\n"
-     "Todo lo demás: los controles de siempre.\n"
-     "En combate, pausa > Controles Vita lo muestra otra vez."},
-    {"Tag Team: el HUD",
-     "Tus barras: arriba a la izquierda, como en un combate 1 contra 1.\n"
-     "Tus aliados: la columna de abajo a la izquierda.\n"
-     "El enemigo al que apuntas: el anillo a su alrededor y su barra.\n"
-     "El radar, arriba a la derecha: dónde está cada luchador.\n\n"
-     "Tamaños del texto y del HUD: tagui_scale y taghud_scale (por ciento) en ux0:data/bt4/bt3.txt, en la versión "
-     "de desarrollo."},
+     "# Tu objetivo\n"
+     "Stick derecho   Cambia el enemigo al que apuntas\n"
+     "Lo marcan un anillo y una barra de vida.\n"
+     "# Ayuda a tu equipo\n"
+     "Quédate junto a un aliado caído   Lo reanimas\n"
+     "Mantén {L2} + pulsa {SEL}   Semilla del ermitaño\n"
+     "{R3} + una dirección   Fusión con un aliado\n"
+     "{L3} + {R3}   Deshacer la fusión\n"
+     "# ¿Se te olvidó algo?\n"
+     "En combate: {ST} > Controles Vita"},
+    {"Tag Team: la pantalla",
+     "# Lo que ves\n"
+     "Arriba a la izquierda   Tu vida y tu ki\n"
+     "Abajo a la izquierda   Tu equipo\n"
+     "Anillo y barra   El enemigo al que apuntas\n"
+     "Arriba a la derecha   El radar: todos"},
     {"Desbloquear todo",
-     "Todos los personajes y formas, escenarios, canciones y objetos, y 4.850.000 Zenis.\n\n"
-     "Abre su pantalla de una de estas tres formas:\n"
-     "- mantén {SEL} un segundo en los menús;\n"
-     "- Opciones > Mando > Vita Settings, y luego {S};\n"
-     "- pulsa {SEL} al arrancar el juego.\n"
-     "Luego {X}. Antes se copia tu partida: en la misma pantalla {T} lo deshace.\n\n"
-     "Los trucos de PS2 no hacen nada aquí. No copies la partida de otro port sobre la tuya: usa Desbloquear todo.\n"
-     "¿Sigue bloqueado algún luchador? Envía log.txt (tema Problemas)."},
+     "# Lo que consigues\n"
+     "Todos los luchadores, formas, escenarios,\n"
+     "canciones y objetos, y 4.850.000 Zenis.\n"
+     "# Cómo hacerlo\n"
+     "En un menú, mantén {SEL} un segundo.\n"
+     "O: Opciones > Mando > Vita Settings, {S}\n"
+     "Luego pulsa {X}.\n"
+     "# ¿Te arrepientes?\n"
+     "Antes se copia tu partida.\n"
+     "En la misma pantalla, {T} la recupera.\n"
+     "# Cuidado\n"
+     "Los trucos de PS2 no hacen nada aquí.\n"
+     "No copies la partida de otro port."},
     {"Vita Settings",
-     "Opciones > Mando > Vita Settings:\n"
-     "Touch: dónde están L2, R2, L3, R3 (panel trasero, esquina de la pantalla, apagado).\n"
-     "Clashes: Square (por defecto) gana los choques de rayos y de golpes con {S}; Stick los gana girando el stick "
-     "izquierdo. ON / OFF debajo: la ayuda en los choques (mantén el botón y pulsa por ti).\n"
-     "2nd Pad: un segundo mando juega como jugador 2 (PS TV).\n"
-     "Mods: usa los archivos de ux0:data/bt4/mods/. Su fila de abajo: la banda sonora del anime.\n"
-     "Stick (pulsa {D} desde la fila de abajo): una zona muerta del 0 al 40% y una respuesta suave, si los sticks van "
-     "demasiado rápidos.\n"
-     "{S}: Desbloquear todo.\n"
-     "Recordatorio en combate: pausa > Controles Vita, {S}."},
-    {"Banda sonora del anime",
-     "El juego en inglés con la música del anime de la versión en español:\n"
-     "1. Copia tu .iso de B14 Rev2 en español a ux0:data/bt4/es/ (la inglesa se queda donde está).\n"
-     "2. Opciones > Mando > Vita Settings > Mods, fila de abajo: ON.\n\n"
-     "Textos y voces siguen en inglés; las canciones cambian desde la siguiente.\n"
-     "Solo la .iso en español en ux0:data/bt4/: todo el juego en español, con su música."},
-    {"Archivos del juego (la .iso)",
-     "Necesitas tu propia imagen de B14 Rev2 de Team BT4 para PS2: inglés (5.914.853.376 bytes) o español "
-     "(5.396.742.144 bytes). Consíguela de la versión oficial de Team BT4 (un bloqueador de anuncios ayuda en las "
-     "páginas de descarga). Otras versiones (B13, Beta X, las de Daima) no funcionan.\n\n"
-     "Copia la .iso (cualquier nombre que acabe en .iso) a ux0:data/bt4/.\n"
-     "La .iso, no el .7z, .zip o .rar: descomprímelos en un ordenador con 7-Zip, no en el móvil.\n"
-     "Una tarjeta FAT32 no admite archivos de más de 4 GB: formátala en exFAT, o copia SLUS_219.78, BIN y DATA a "
-     "ux0:data/bt4/disc/.\n"
-     "\"Archive not found\" o \"cut short\": la .iso es demasiado pequeña. Cópiala otra vez.\n"
-     "Una imagen en ux0:data/bt3/bt4/ (la del port de BT3) también se encuentra.\n"
-     "Actualizar: instala el VPK nuevo sobre el viejo. Las partidas y la .iso se quedan."},
+     "# Dónde\n"
+     "Opciones > Mando > Vita Settings\n"
+     "# Las filas\n"
+     "Touch   Dónde están {L2} {R2} {L3} {R3}\n"
+     "Clashes   Gana los choques con {S} o el stick\n"
+     "2nd Pad   Un segundo jugador (PS TV)\n"
+     "Mods   Tus mods, sí o no\n"
+     "Mods, fila de abajo   La música del anime\n"
+     "Stick   Stick más lento, si va rápido\n"
+     "{S}   Desbloquear todo"},
+    {"Música del anime",
+     "# Juego en inglés, música del anime\n"
+     "1. Copia tu .iso de B14 Rev2 en español\n"
+     "a ux0:data/bt4/es/\n"
+     "2. Opciones > Mando > Vita Settings:\n"
+     "Mods, fila de abajo: ON\n"
+     "Textos y voces siguen en inglés.\n"
+     "# Todo el juego en español\n"
+     "Deja solo la .iso en español en ux0:data/bt4/"},
+    {"Archivos del juego (.iso)",
+     "# Lo que necesitas\n"
+     "Tu propia .iso de B14 Rev2 de Team BT4,\n"
+     "en inglés o español. Consíguela de Team BT4.\n"
+     "Otras versiones (B13, Beta X) no funcionan.\n"
+     "# Dónde va\n"
+     "ux0:data/bt4/  (cualquier nombre .iso)\n"
+     "# Errores frecuentes\n"
+     "Copia la .iso, no el .7z, .rar o .zip.\n"
+     "Descomprímela en un ordenador, no en el móvil.\n"
+     "Una tarjeta FAT32 no admite más de 4 GB:\n"
+     "usa exFAT.\n"
+     "\"Archive not found\": copia la .iso otra vez.\n"
+     "# Actualizar\n"
+     "Instala el VPK nuevo. Tus partidas se quedan."},
     {"Mods",
-     "Los mods van en ux0:data/bt4/mods/, como en el port de BT3 para Vita: mods/pzs4us1/00042.bin sustituye al "
-     "archivo 42 de PZS4US1.AFS; un pack puede tener su propia carpeta.\n\n"
-     "Vita Settings > Mods muestra lo que se usa, y lo apaga todo desde el siguiente arranque sin borrar nada.\n"
-     "Los mods que cambian archivos de datos funcionan. Los mods Lua de la versión de PC no.\n"
-     "Los mods muy grandes pueden no caber en la memoria de la Vita: si el juego se para al arrancar, apaga Mods."},
+     "# Dónde van\n"
+     "ux0:data/bt4/mods/\n"
+     "mods/pzs4us1/00042.bin sustituye\n"
+     "al archivo 42 de PZS4US1.AFS.\n"
+     "# Sí o no\n"
+     "Opciones > Mando > Vita Settings > Mods\n"
+     "# Bueno saber\n"
+     "Los mods Lua de la versión de PC no van.\n"
+     "¿Se para al arrancar? Apaga los Mods."},
     {"¿Problemas? Envía esto",
-     "Abre un issue en la página de GitHub del port (manumastro/DBZ-BT4-Tag-Team-Decomp-Vita) y adjunta, de "
-     "ux0:data/bt4/:\n"
-     "- log.txt (y log-prev.txt);\n"
-     "- hang.txt y err.txt, si están;\n"
-     "- tras un error C2-12828-1: el archivo .psp2dmp de ux0:data/.\n"
-     "Di qué estabas haciendo, tu Vita (1000, 2000 o PS TV), la versión del juego y tus plugins.\n\n"
-     "Imagen más pequeña, con bordes, solo en combate: pon el modo de escala de Sharpscale en Original.\n"
-     "Escenas pesadas lentas: el plugin CapUnlocker ayuda."},
+     "# Cuéntanoslo en GitHub\n"
+     "manumastro/DBZ-BT4-Tag-Team-Decomp-Vita\n"
+     "Abre un issue allí.\n"
+     "# Adjunta estos archivos\n"
+     "De ux0:data/bt4/:\n"
+     "log.txt y log-prev.txt\n"
+     "hang.txt y err.txt, si los tienes\n"
+     "Error C2-12828-1: el .psp2dmp de ux0:data/\n"
+     "# Y di\n"
+     "Qué estabas haciendo, tu modelo de Vita\n"
+     "y tus plugins.\n"
+     "# Arreglos rápidos\n"
+     "Imagen pequeña con bordes: Sharpscale,\n"
+     "modo de escala Original.\n"
+     "Escenas lentas: el plugin CapUnlocker."},
     {"Lo que aún no hay",
-     "Juego en línea, y partidas con la versión de PC: aún no en la Vita.\n"
-     "Ad hoc entre dos Vitas: aún no.\n"
-     "Tag Team 3 contra 3 y mayores: funcionan, pero lentos. 2 contra 2 va fluido.\n"
-     "Las canciones y escenarios añadidos de la versión de PC, su menú F1 (mods Lua, editor del HUD) y elegir idioma "
-     "en el juego.\n"
-     "Versiones distintas de B14 Rev2 (B13, Beta X)."},
+     "# Quizá más adelante\n"
+     "Juego en línea\n"
+     "Vita con Vita (ad hoc)\n"
+     "Canciones y escenarios nuevos del PC\n"
+     "El menú F1 de la versión de PC\n"
+     "# Funciona, pero lento\n"
+     "Tag Team 3 contra 3 y mayores\n"
+     "# No soportado\n"
+     "Otras versiones: B13, Beta X"},
     {"Más preguntas",
-     "¿Este port o el de arielxflores? Los dos usan B14 Rev2. Este es solo BT4, una app propia con sus propias "
-     "mejoras de velocidad. Se instalan uno al lado del otro.\n"
-     "BT3 se queda instalado: esta app no lo sustituye.\n"
-     "¿Personajes o misiones de Daima? Solo lo que tiene B14 Rev2 de Team BT4.\n"
-     "¿Sticks muy rápidos? Vita Settings > Stick. ¿Choques difíciles? Vita Settings > Clashes y su ayuda.\n"
-     "¿El juego en español? Usa la imagen de B14 Rev2 en español.\n"
-     "¿Actualizar? El VPK nuevo sobre el viejo."},
+     "# ¿Este port o el de arielxflores?\n"
+     "Los dos usan B14 Rev2. Puedes tener los dos.\n"
+     "# ¿Quita BT3?\n"
+     "No. Los dos se quedan instalados.\n"
+     "# ¿Luchadores de Daima?\n"
+     "Solo lo que tiene B14 Rev2.\n"
+     "# ¿El juego en español?\n"
+     "Usa la .iso de B14 Rev2 en español.\n"
+     "# ¿Stick rápido? ¿Choques difíciles?\n"
+     "Mira el tema Vita Settings."},
 };
 
 /* The pause menu's page (a fight's controls): the 1 vs 1 page, then the Tag Team page in a Tag fight. %TOUCH% is the
-   line that says where L2 / R2 / L3 / R3 are now (Vita Settings > Touch). */
+   line that says where L2 / R2 / L3 / R3 are now (Vita Settings > Touch). Same marks as the guide. */
 static const char *const kVgFightEn[2] = {
-    "{S} fight   {T} ki blast   {X} dash   {O} guard\n"
-    "{L1} ki charge   {R1} ascend   {L2} blaster wave   {R2} descend\n"
+    "{S}   Attack            {T}   Ki blast\n"
+    "{X}   Dash              {O}   Guard\n"
+    "{L1}   Charge ki       {R1}   Fly up\n"
+    "{L2}   Blast wave     {R2}   Fly down\n"
     "%TOUCH%\n"
-    "{SEL} + {L1} / {R1} also give {L2} / {R2}.\n"
-    "Clashes: press {S} again and again (or {T}).\n"
-    "Close the game: hold {ST} + {SEL} for two seconds.\n"
-    "Everything else: main menu > Vita Guide.",
-    "Right stick: change the enemy you target.\n"
-    "Stay near a downed ally: revive him.\n"
-    "Hold {L2} + press {SEL}: Senzu Bean.\n"
-    "{R3} + direction near an ally: fusion.\n"
-    "{L3} + {R3}: split a temporary fusion.\n"
-    "Your allies: bottom left. Radar: top right.",
+    "Hold {ST} + {SEL}   Quit the game",
+    "Right stick   Change your target\n"
+    "Next to a fallen ally   Revive him\n"
+    "Hold {L2} + press {SEL}   Senzu Bean\n"
+    "{R3} + direction   Fusion\n"
+    "{L3} + {R3}   Undo the fusion",
 };
 static const char *const kVgFightEs[2] = {
-    "{S} golpe   {T} ráfaga de ki   {X} impulso   {O} defensa\n"
-    "{L1} cargar ki   {R1} subir   {L2} onda   {R2} bajar\n"
+    "{S}   Golpe              {T}   Ráfaga de ki\n"
+    "{X}   Impulso           {O}   Defensa\n"
+    "{L1}   Cargar ki       {R1}   Subir\n"
+    "{L2}   Onda              {R2}   Bajar\n"
     "%TOUCH%\n"
-    "{SEL} + {L1} / {R1} también dan {L2} / {R2}.\n"
-    "Choques: pulsa {S} una y otra vez (o {T}).\n"
-    "Cerrar el juego: mantén {ST} + {SEL} dos segundos.\n"
-    "Todo lo demás: menú principal > Guía Vita.",
-    "Stick derecho: cambia el enemigo al que apuntas.\n"
-    "Quédate cerca de un aliado caído: lo reanimas.\n"
-    "Mantén {L2} + pulsa {SEL}: semilla del ermitaño.\n"
-    "{R3} + dirección cerca de un aliado: fusión.\n"
-    "{L3} + {R3}: separa una fusión temporal.\n"
-    "Tus aliados: abajo a la izquierda. Radar: arriba a la derecha.",
+    "Mantén {ST} + {SEL}   Cerrar el juego",
+    "Stick derecho   Cambia de objetivo\n"
+    "Junto a un aliado caído   Lo reanimas\n"
+    "Mantén {L2} + pulsa {SEL}   Semilla\n"
+    "{R3} + dirección   Fusión\n"
+    "{L3} + {R3}   Deshacer la fusión",
 };
 
 /* The fight's one-line reminder (hudhelp), 1 vs 1 and Tag Team */
 static const char *const kVgHudEn[2] = {
-    "{L2} {R2} {L3} {R3}: %WHERE%   {ST}: Vita Controls",
-    "Right stick: target   {L2}+{SEL}: Senzu   {R3}+dir: fusion   {ST}: Vita Controls",
+    "{L2} {R2} {L3} {R3}: %WHERE%      {ST} > Vita Controls",
+    "Right stick: change target      {ST} > Vita Controls",
 };
 static const char *const kVgHudEs[2] = {
-    "{L2} {R2} {L3} {R3}: %WHERE%   {ST}: Controles Vita",
-    "Stick dcho.: objetivo   {L2}+{SEL}: semilla   {R3}+dir.: fusión   {ST}: Controles Vita",
+    "{L2} {R2} {L3} {R3}: %WHERE%      {ST} > Controles Vita",
+    "Stick derecho: cambiar objetivo      {ST} > Controles Vita",
 };
 
 /* The Tag Team setup page's legend (port_tbo.c, the Tag screens' own kit and lines) */
 static const char *const kVgTagEn[8] = {
-    "IN THE FIGHT", "Right stick: target", "Near a downed ally: revive", "L2 + SELECT: Senzu Bean",
-    "R3 + direction: fusion", "L3 + R3: split a fusion", "L2 R2 L3 R3: rear touch pad", "START > Vita Controls",
+    "IN THE FIGHT", "Right stick: target", "Near a fallen ally: revive", "L2 + SELECT: Senzu Bean",
+    "R3 + direction: fusion", "L3 + R3: undo a fusion", "L2 R2 L3 R3: rear touch pad", "START > Vita Controls",
 };
 static const char *const kVgTagEs[8] = {
-    "EN COMBATE", "Stick derecho: objetivo", "Cerca de un aliado caído: reanimar", "L2 + SELECT: semilla",
-    "R3 + dirección: fusión", "L3 + R3: separar fusión", "L2 R2 L3 R3: panel trasero", "START > Controles Vita",
+    "EN COMBATE", "Stick derecho: objetivo", "Junto a un aliado caído: reanimar", "L2 + SELECT: semilla",
+    "R3 + dirección: fusión", "L3 + R3: deshacer fusión", "L2 R2 L3 R3: panel trasero", "START > Controles Vita",
 };
 
 #endif

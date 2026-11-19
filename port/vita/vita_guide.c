@@ -337,8 +337,14 @@ static u64 *quads_begin(void) {
 #define RGBA(r, g, b, a) ((u32)(r) | ((u32)(g) << 8) | ((u32)(b) << 16) | ((u32)(a) << 24))
 
 /* ---- the guide over the main menu ---- */
-enum { GL_X0 = 18, GL_X1 = 494, GL_Y0 = 22, GL_Y1 = 426, GL_TEXT_X = 34, GL_TEXT_Y = 66, GL_STEP = 22, GL_ROWS = 14 }; /* (14 lines end 26 above the footer bar: a line of margin) */
-#define GL_SCALE 0.80f
+/* The window's measures (the menu's page, 512 x 448 units; on the Vita's screen a unit is ~1.9 pixels across and ~1.2
+   down). A page: lines GL_STEP apart (31 pixels), a heading GL_HGAP more above it (not at a page's top), an empty
+   line half a line; GL_H units of lines (the footer's bar below them). The letters at GL_SCALE (capitals ~18 pixels
+   on the screen, as the game's own message window), the headings at GL_HSCALE in the guide's orange. */
+enum { GL_X0 = 18, GL_X1 = 494, GL_Y0 = 22, GL_Y1 = 426, GL_TEXT_X = 34, GL_TEXT_Y = 64, GL_STEP = 26, GL_HGAP = 8,
+       GL_H = 324, GL_ROW = 25 };
+#define GL_SCALE 0.90f
+#define GL_HSCALE 0.95f
 static int sOpen, sTopic, sPage, sPages, sCursor, sLastTopic = -1, sLastPages;
 #define PAGES_MAX 16
 static int sPageStart[PAGES_MAX + 1]; /* the first line of each page, the line count after the last */
@@ -358,49 +364,176 @@ void Vita_GuideOpen(void) {
     Vita_Log("vita: guide: opened\n");
 }
 
-/* The pages of a topic: up to GL_ROWS lines each; a page that cannot hold the rest ends at its last paragraph's end
-   (an empty line) in its second half, else after its last line ending a sentence, so that no page holds a lone
-   line torn from the one before (the console's first run: "again." alone on a page) */
-static int line_ends_sentence(const u16 *l) {
-    int n = 0;
-    while (l[n]) {
-        n++;
+/* ---- a page's lines: kinds, cells, columns ----
+   After wrap(): each line's kind (empty, text, a heading: "# " first), and a text line cut into cells where 3 or more
+   spaces stand ("{S}   Attack"): the first cell at the margin, the second at its group's column (the widest first cell
+   of the lines under the same heading, and a margin), a third and fourth the same from the page's middle (two pairs
+   on a line). The cells stay in sLine (a 0 at each cut), so the font's queued commands point at them as before. */
+enum { LK_EMPTY, LK_TEXT, LK_HEAD };
+static u8 sKind[LINES_MAX], sCellN[LINES_MAX];
+static u8 sCellAt[LINES_MAX][4];
+static s16 sColA[LINES_MAX], sColB[LINES_MAX];
+
+static int cell_width(const u16 *s, f32 scale) { /* (the style at scale 1 pushed: letters measured, marks by their size) */
+    u16 letters[LINE_CHARS];
+    int n = 0, w = 0, k;
+    while (*s) {
+        if (s[0] == '<' && s[1] == 'P' && s[2] == 'A' && s[3] == 'D' && s[4] == '=') {
+            u16 name[3] = {0, 0, 0};
+            int i = 0;
+            s += 5;
+            while (*s && *s != '>') {
+                if (i < 3) {
+                    name[i++] = *s;
+                }
+                s++;
+            }
+            if (*s == '>') {
+                s++;
+            }
+            for (k = 0; k < MARKS; k++) {
+                if (kMarks[k].word == NULL && kMarks[k].name[0] == name[0] && kMarks[k].name[1] == name[1]) {
+                    w += (int)((f32)kMarks[k].advance * scale + 4.0f);
+                    break;
+                }
+            }
+            continue;
+        }
+        if (n < LINE_CHARS - 1) {
+            letters[n++] = *s;
+        }
+        s++;
     }
-    while (n > 0 && l[n - 1] == ' ') {
-        n--;
-    }
-    return n > 0 && (l[n - 1] == '.' || l[n - 1] == ':' || l[n - 1] == ';' || l[n - 1] == ')');
+    return w + word_width(letters, n, scale);
 }
 
+static void line_cells(f32 scale, int width) {
+    int l, a, b;
+    Font_PushStyle();
+    style_base();
+    for (l = 0; l < sLineCount; l++) {
+        u16 *s = sLine[l];
+        int i = 0, n = 1;
+        sCellAt[l][0] = 0;
+        sKind[l] = s[0] == 0 ? LK_EMPTY : (s[0] == '#' && s[1] == ' ') ? LK_HEAD : LK_TEXT;
+        if (sKind[l] == LK_HEAD) {
+            sCellAt[l][0] = 2;
+        }
+        if (sKind[l] == LK_TEXT) {
+            while (s[i] && n < 4) {
+                if (s[i] == ' ' && s[i + 1] == ' ' && s[i + 2] == ' ') {
+                    int j = i;
+                    while (s[j] == ' ') {
+                        j++;
+                    }
+                    if (s[j] == 0) {
+                        break;
+                    }
+                    s[i] = 0;
+                    sCellAt[l][n++] = (u8)(j < 255 ? j : 255);
+                    i = j;
+                    continue;
+                }
+                i++;
+            }
+            if (i == 0 && s[0] == 0 && n > 1) {
+                sCellAt[l][0] = sCellAt[l][1]; /* (a line that starts with spaces: one cell, at the column) */
+            }
+        }
+        sCellN[l] = (u8)(sKind[l] == LK_TEXT ? n : 1);
+    }
+    for (a = 0; a < sLineCount; a = b) { /* the columns of each heading's group */
+        int colA = 0, colB = 0;
+        for (b = a + 1; b < sLineCount && sKind[b] != LK_HEAD; b++) {
+        }
+        for (l = a; l < b; l++) {
+            if (sKind[l] == LK_TEXT && sCellN[l] >= 2) {
+                int w0 = cell_width(sLine[l] + sCellAt[l][0], scale);
+                if (w0 < width / 2 && w0 > colA) {
+                    colA = w0;
+                }
+                if (sCellN[l] >= 4) {
+                    int w2 = cell_width(sLine[l] + sCellAt[l][2], scale);
+                    if (w2 > colB) {
+                        colB = w2;
+                    }
+                }
+            }
+        }
+        for (l = a; l < b; l++) {
+            sColA[l] = (s16)(colA + 14);
+            sColB[l] = (s16)(colB + 14);
+        }
+    }
+    Font_PopStyle();
+}
+
+/* one line drawn at (x, y): its cells at their columns (the style set by the caller: a heading's or the text's) */
+static void line_draw(int l, int x, int y, int width) {
+    int k;
+    if (sKind[l] != LK_TEXT) {
+        if (sKind[l] == LK_HEAD) {
+            Font_PrintAt(x, y, sLine[l] + sCellAt[l][0]);
+        }
+        return;
+    }
+    for (k = 0; k < sCellN[l]; k++) {
+        int cx = x;
+        if (k == 1) {
+            cx = x + sColA[l];
+        } else if (k == 2) {
+            cx = x + width / 2;
+        } else if (k == 3) {
+            cx = x + width / 2 + sColB[l];
+        }
+        Font_PrintAt(cx, y, sLine[l] + sCellAt[l][k]);
+    }
+}
+
+/* a line's height on the page: a heading's space above it (not at the page's top), an empty line half a line */
+static int line_h(int l, int first) {
+    if (sKind[l] == LK_HEAD) {
+        return (first ? 0 : GL_HGAP) + GL_STEP + 2;
+    }
+    return sKind[l] == LK_EMPTY ? GL_STEP / 2 : GL_STEP;
+}
+
+/* The pages of a topic: lines as long as they fit in GL_H; a page that cannot hold the rest ends before its last
+   heading (a group of lines is not torn across two pages), and never with a heading at its foot */
 static void page_breaks(void) {
     int start = 0, pages = 0;
-    while (sLineCount > 0 && sLine[sLineCount - 1][0] == 0) {
+    while (sLineCount > 0 && sKind[sLineCount - 1] == LK_EMPTY) {
         sLineCount--; /* (no empty lines at the end) */
     }
     while (start < sLineCount && pages < PAGES_MAX) {
-        int end = start + GL_ROWS, b, next = -1;
-        while (start < sLineCount && sLine[start][0] == 0) {
+        int l, h = 0, end, lastHead = -1;
+        while (start < sLineCount && sKind[start] == LK_EMPTY) {
             start++; /* (a page does not start with an empty line) */
         }
         if (start >= sLineCount) {
             break;
         }
         sPageStart[pages++] = start;
-        if (sLineCount - start <= GL_ROWS) {
-            start = sLineCount;
-            break;
+        for (l = start; l < sLineCount; l++) {
+            int lh = line_h(l, l == start);
+            if (h + lh > GL_H) {
+                break;
+            }
+            if (sKind[l] == LK_HEAD && l > start) {
+                lastHead = l;
+            }
+            h += lh;
         }
-        for (b = end - 1; b > start + GL_ROWS / 2 && next < 0; b--) {
-            if (sLine[b][0] == 0) {
-                next = b; /* (a paragraph's end) */
+        end = l;
+        if (end < sLineCount && sKind[end] != LK_HEAD) {
+            if (lastHead > start + 1) {
+                end = lastHead; /* (the group that does not fit begins the next page) */
             }
         }
-        for (b = end - 1; b > start + GL_ROWS / 2 && next < 0; b--) {
-            if (line_ends_sentence(sLine[b])) {
-                next = b + 1; /* (a sentence's end) */
-            }
+        while (end - 1 > start && sKind[end - 1] == LK_HEAD) {
+            end--; /* (no heading at a page's foot) */
         }
-        start = next > start ? next : end;
+        start = end > start ? end : start + 1;
     }
     if (pages == 0) {
         sPageStart[pages++] = 0;
@@ -412,10 +545,8 @@ static void page_breaks(void) {
 /* one topic's lines (cached: wrapped again only when the topic changes) */
 static void topic_lines(int t) {
     if (t != sLastTopic) {
-        wrap(topics()[t].body, GL_X1 - GL_X0 - 34, GL_SCALE);
-        while (sLineCount > 0 && sLine[sLineCount - 1][0] == 0) {
-            sLineCount--; /* (no empty lines at the end) */
-        }
+        wrap(topics()[t].body, GL_X1 - GL_X0 - 44, GL_SCALE);
+        line_cells(GL_SCALE, GL_X1 - GL_X0 - 44);
         page_breaks();
         sLastTopic = t;
     }
@@ -560,8 +691,8 @@ void Vita_GuideDraw(void) {
     quad(&p, GL_X0, GL_Y0 + 34, GL_X1, GL_Y0 + 36, RGBA(0x89, 0xC3, 0xE5, 0x70));
     quad(&p, GL_X0, GL_Y1 - 32, GL_X1, GL_Y1 - 30, RGBA(0x89, 0xC3, 0xE5, 0x50));
     if (sTopic < 0) { /* the cursor's bar */
-        int y = GL_TEXT_Y - 3 + sCursor * 23;
-        quad(&p, GL_X0 + 10, y, GL_X1 - 10, y + 22, RGBA(0x30, 0x60, 0xA0, 0x50));
+        int y = GL_TEXT_Y - 3 + sCursor * GL_ROW;
+        quad(&p, GL_X0 + 10, y, GL_X1 - 10, y + GL_ROW - 1, RGBA(0x30, 0x60, 0xA0, 0x60));
     }
     Dma_EndDirect(p);
     }
@@ -578,7 +709,7 @@ void Vita_GuideDraw(void) {
     if (sTopic < 0) {
         to_u16(gVitaBt4English ? "Vita Guide" : "Guía Vita", sTitle, 96);
         Font_PrintAt(GL_TEXT_X, GL_Y0 + 7, sTitle);
-        Font_SetScale(0.9f);
+        Font_SetScale(GL_SCALE);
         shadow_mode(1);
         Font_SetShadowColorRGBA(0, 0, 0x10, 0x60);
         for (i = 0; i < VG_TOPICS; i++) {
@@ -586,12 +717,12 @@ void Vita_GuideDraw(void) {
             if (i == sCursor) {
                 Font_SetColorRGBA(0xF4, 0xFF, 0x3F, 0x80); /* the pause menu's cursor colour */
             } else {
-                Font_SetColorRGBA(0x89, 0xC3, 0xE5, 0x80); /* ... and its items' */
+                Font_SetColorRGBA(0xE8, 0xF0, 0xFF, 0x80); /* (white: the pause menu's blue was dim on the window) */
             }
-            Font_PrintAt(GL_TEXT_X + 12, GL_TEXT_Y + i * 23, sRow[i]);
+            Font_PrintAt(GL_TEXT_X + 12, GL_TEXT_Y + i * GL_ROW, sRow[i]);
         }
-        to_u16(gVitaBt4English ? "{U}{D} choose   {X} open   {T} back to the menu"
-                               : "{U}{D} elegir   {X} abrir   {T} volver al menú", sFoot, 160);
+        to_u16(gVitaBt4English ? "{U}{D} Choose     {X} Open     {T} Close"
+                               : "{U}{D} Elegir     {X} Abrir     {T} Cerrar", sFoot, 160);
     } else {
         int first, n;
         topic_lines(sTopic);
@@ -606,30 +737,37 @@ void Vita_GuideDraw(void) {
         Font_SetScale(0.8f);
         Font_SetColorRGBA(0x89, 0xC3, 0xE5, 0x80);
         Font_PrintAt(GL_X1 - 14, GL_Y0 + 10, sCount);
-        style_body();
         first = sPageStart[sPage];
         n = sPageStart[sPage + 1] - first;
-        while (n > 0 && sLine[first + n - 1][0] == 0) {
-            n--; /* (a page's empty last line: the paragraph's end) */
-        }
-        for (i = 0; i < n; i++) {
-            Font_PrintAt(GL_TEXT_X, GL_TEXT_Y + i * GL_STEP, sLine[first + i]);
+        {
+            int y = GL_TEXT_Y;
+            for (i = 0; i < n; i++) {
+                int l = first + i, top = i == 0;
+                if (sKind[l] == LK_HEAD) {
+                    style_heading();
+                    Font_SetScale(GL_HSCALE);
+                    line_draw(l, GL_TEXT_X, y + (top ? 0 : GL_HGAP), GL_X1 - GL_X0 - 34);
+                } else if (sKind[l] == LK_TEXT) {
+                    style_body();
+                    line_draw(l, GL_TEXT_X + 10, y, GL_X1 - GL_X0 - 44);
+                }
+                y += line_h(l, top);
+            }
         }
         if (sPages > 1) {
-            char pg[64];
-            snprintf(pg, sizeof(pg), gVitaBt4English ? "{LT}{RT} page %d of %d   {T} contents" : "{LT}{RT} página %d de %d   {T} índice",
+            char pg[80];
+            snprintf(pg, sizeof(pg), gVitaBt4English ? "{LT}{RT} Page %d of %d     {T} Topics" : "{LT}{RT} Página %d de %d     {T} Temas",
                      sPage + 1, sPages);
             to_u16(pg, sFoot, 160);
         } else {
-            to_u16(gVitaBt4English ? "{LT}{RT} other topics   {T} contents   {ST} close"
-                                   : "{LT}{RT} otros temas   {T} índice   {ST} cerrar", sFoot, 160);
+            to_u16(gVitaBt4English ? "{LT}{RT} Other topics     {T} Topics"
+                                   : "{LT}{RT} Otros temas     {T} Temas", sFoot, 160);
         }
     }
-    Font_SetAlign(0);
-    Font_SetScale(0.75f);
-    shadow_mode(1);
+    style_body();
+    Font_SetScale(0.82f);
     Font_SetColorRGBA(0xD0, 0xE0, 0xF0, 0x80);
-    Font_PrintAt(GL_TEXT_X, GL_Y1 - 25, sFoot);
+    Font_PrintAt(GL_TEXT_X, GL_Y1 - 26, sFoot);
     Font_PopStyle();
     if (sLogFrames > 0) {
         sLogFrames--;
@@ -718,14 +856,15 @@ int Vita_GuideFightFunc(int pad) {
     return 0;
 }
 
-static u16 sFightTitle[48], sFightFoot[128];
+static u16 sFightTitle[48], sFightFoot[160];
 void Vita_GuideFightPage(int x0, int x1, int y0, int y1) {
     const char *body = (gVitaBt4English ? kVgFightEn : kVgFightEs)[sTagFight ? sFightPage : 0];
-    char foot[160];
-    int i, n;
-    f32 scale = 0.78f;
+    char foot[200];
+    int i, n, y, step = 27, width = x1 - x0 - 12;
+    f32 scale = 0.90f;
 
-    wrap(body, x1 - x0 - 8, scale);
+    wrap(body, width, scale);
+    line_cells(scale, width);
     sLastTopic = -1; /* (the lines are shared with the guide's) */
     Font_PushStyle();
     style_heading();
@@ -735,20 +874,25 @@ void Vita_GuideFightPage(int x0, int x1, int y0, int y1) {
         to_u16(gVitaBt4English ? "Vita Controls" : "Controles Vita", sFightTitle, 48);
     }
     Font_SetAlign(1);
-    Font_PrintAt((x0 + x1) / 2, y0 + 4, sFightTitle);
+    Font_PrintAt((x0 + x1) / 2, y0 + 2, sFightTitle);
     style_body();
     Font_SetScale(scale);
-    n = sLineCount < 10 ? sLineCount : 10;
-    for (i = 0; i < n; i++) {
-        Font_PrintAt(x0 + 4, y0 + 34 + i * 22, sLine[i]);
+    n = 0;
+    y = y0 + 36;
+    for (i = 0; i < sLineCount && y + step <= y1 - 30; i++) {
+        if (sKind[i] == LK_TEXT) {
+            line_draw(i, x0 + 6, y, width);
+            n++;
+        }
+        y += sKind[i] == LK_EMPTY ? step / 2 : step;
     }
-    snprintf(foot, sizeof(foot), gVitaBt4English ? "%s{S} reminder: %s   {T} back" : "%s{S} recordatorio: %s   {T} volver",
-             sTagFight ? (gVitaBt4English ? "{LT}{RT} page   " : "{LT}{RT} página   ") : "",
-             hudhelp_mode() == 1 ? "ON" : hudhelp_mode() == 2 ? (gVitaBt4English ? "first fights" : "primeros combates") : "OFF");
-    to_u16(foot, sFightFoot, 128);
-    Font_SetScale(0.7f);
+    snprintf(foot, sizeof(foot), gVitaBt4English ? "%s{S} Reminder: %s     {T} Back" : "%s{S} Recordatorio: %s     {T} Volver",
+             sTagFight ? (gVitaBt4English ? "{LT}{RT} Page     " : "{LT}{RT} Página     ") : "",
+             hudhelp_mode() == 1 ? (gVitaBt4English ? "on" : "sí") : hudhelp_mode() == 2 ? (gVitaBt4English ? "first fights" : "primeros combates") : "no");
+    to_u16(foot, sFightFoot, 160);
+    Font_SetScale(0.78f);
     Font_SetColorRGBA(0xD0, 0xE0, 0xF0, 0x80);
-    Font_PrintAt(x0 + 4, y1 - 20, sFightFoot);
+    Font_PrintAt(x0 + 6, y1 - 22, sFightFoot);
     Font_PopStyle();
     if (sFightLog > 0) {
         sFightLog--;
@@ -759,6 +903,8 @@ void Vita_GuideFightPage(int x0, int x1, int y0, int y1) {
 
 /* ---- the fight's reminder line (src/battle/battle.c, after the HUD, before the font is flushed) ---- */
 static int sHudFrames, sHudCounted;
+#define HUD_SCALE 0.82f /* (0.7 and see-through before: the console's run, too small to read in a fight) */
+#define HUD_Y 414
 static u16 sHud[200];
 
 /* a fight began (src/battle/hud_0.c PauseMenu_Init) */
@@ -789,21 +935,36 @@ void Vita_GuideHudHint(int visible) {
     }
     sHudFrames++;
     if (sHudFrames == 1 || sHud[0] == 0) {
-        wrap((gVitaBt4English ? kVgHudEn : kVgHudEs)[sTagFight], 2000, 0.7f);
+        wrap((gVitaBt4English ? kVgHudEn : kVgHudEs)[sTagFight], 2000, HUD_SCALE);
         sLastTopic = -1;
         memcpy(sHud, sLine[0], sizeof(sHud) < sizeof(sLine[0]) ? sizeof(sHud) : sizeof(sLine[0]));
+    }
+    {   /* a dark strip under the line (the game's own message box's way: an untextured sprite, blended), then the line */
+        static int sHudW;
+        u64 *p;
+        if (sHudFrames == 1 || sHudW == 0) {
+            Font_PushStyle();
+            style_base();
+            sHudW = cell_width(sHud, HUD_SCALE);
+            Font_PopStyle();
+        }
+        if (!(gVitaGuideTest & 64)) { /* (guidetest bit 64: the line without its strip) */
+        p = quads_begin();
+        quad(&p, 256 - sHudW / 2 - 12, HUD_Y - 4, 256 + sHudW / 2 + 12, HUD_Y + 22, RGBA(0x00, 0x04, 0x14, 0x58));
+        Dma_EndDirect(p);
+        }
     }
     FontIcon_SetPadType(0);
     Font_PushStyle();
     style_base();
     Font_SetAlign(1);
-    Font_SetScale(0.7f);
+    Font_SetScale(HUD_SCALE);
     Font_SetSpacing(0, 0);
     shadow_mode(1);
     Font_SetShadowOffset(1, 1);
-    Font_SetShadowColorRGBA(0, 0, 0, 0x60);
-    Font_SetColorRGBA(0xFF, 0xFF, 0xFF, 0x68);
-    Font_PrintAt(256, 412, sHud);
+    Font_SetShadowColorRGBA(0, 0, 0, 0x70);
+    Font_SetColorRGBA(0xFF, 0xFF, 0xFF, 0x80);
+    Font_PrintAt(256, HUD_Y, sHud);
     Font_PopStyle();
 }
 

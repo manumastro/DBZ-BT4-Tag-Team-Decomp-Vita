@@ -155,8 +155,12 @@ static int tbo_ab(int v) { /* (2: the soak's B battles only) */
     extern int gVitaAbSide;
     return v == 2 ? gVitaAbSide == 1 : v != 0;
 }
+/* the atlas (tbo/ui/tag_ui_vita.vt) not in the package (an eboot.bin sent over an older install): taguivita's way is then
+   left for the separate pictures, so that the main menu's emblem and the screens' kit and buttons still show (the
+   console's run vgr1, 2026-11-19: "cannot read app0:tbo/ui/tag_ui_vita.vt", no emblem, no buttons) */
+static volatile int sUiAtlasGone;
 int Vita_TagUiVita(void) {
-    return tbo_ab(gVitaTagUiVita);
+    return tbo_ab(gVitaTagUiVita) && !sUiAtlasGone;
 }
 /* (src/menu/tag_team_select.inc) the screens' letters at 100 because of taguivita, not because tagui_scale says so */
 int Vita_TagUiDefault100(void) {
@@ -1338,8 +1342,9 @@ static unsigned tbo_ui_atlas(void) {
         char path[160];
         uint32_t w = 0, h = 0, *px = tbo_vt("tag_ui_vita", &w, &h, path, sizeof(path));
         if (px == NULL) {
-            Vita_Log("tbo: cannot read %s\n", path);
+            Vita_Log("tbo: cannot read %s: the Tag Team screens' separate pictures instead\n", path);
             sUiAtlas.missing = 1;
+            sUiAtlasGone = 1;
             return 0;
         }
         sUiAtlas.tex = Vita_VglTexRgba(px, (int)w, (int)h); /* (drawn at its size: no smaller copies) */
@@ -1462,9 +1467,8 @@ void Vita_TboFrameEnd(void) {
         unsigned ids[24], n, i;
         sBootDone = 1;
         letters_start();
-        if (Vita_TagUiVita()) {
-            tbo_ui_atlas(); /* (taguivita: the emblem is the atlas's) */
-            sEmblem.missing = 1;
+        if (Vita_TagUiVita() && tbo_ui_atlas() != 0) {
+            sEmblem.missing = 1; /* (taguivita: the emblem is the atlas's) */
         } else {
             maker_ask(0, TBO_MAIN_TAG_EMBLEM, &sEmblem);
         }
