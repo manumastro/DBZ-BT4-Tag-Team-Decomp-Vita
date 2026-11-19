@@ -780,7 +780,7 @@ void Vita_GuideDraw(void) {
         }
         Font_SetScale(0.8f);
         Font_SetColorRGBA(0x89, 0xC3, 0xE5, 0x80);
-        Font_PrintAt(GL_X1 - 66, GL_Y0 + 10, sCount); /* (left-aligned: right-aligned, "10/13" lost its last figure) */
+        Font_PrintAt(GL_X1 - 110, GL_Y0 + 10, sCount); /* (left-aligned, room for "13/13": nearer the edge, "10/13" lost its last figure) */
         first = sPageStart[sPage];
         n = sPageStart[sPage + 1] - first;
         {
