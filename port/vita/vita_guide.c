@@ -778,10 +778,9 @@ void Vita_GuideDraw(void) {
             snprintf(count, sizeof(count), "%d/%d", sTopic + 1, VG_TOPICS);
             to_u16(count, sCount, 16);
         }
-        Font_SetAlign(2);
         Font_SetScale(0.8f);
         Font_SetColorRGBA(0x89, 0xC3, 0xE5, 0x80);
-        Font_PrintAt(GL_X1 - 14, GL_Y0 + 10, sCount);
+        Font_PrintAt(GL_X1 - 66, GL_Y0 + 10, sCount); /* (left-aligned: right-aligned, "10/13" lost its last figure) */
         first = sPageStart[sPage];
         n = sPageStart[sPage + 1] - first;
         {

@@ -63,6 +63,19 @@ extern int gVitaGuideTest;
 static int PortMainMenu_Box(float box[4]) {
     return !(gVitaGuideTest & 128) && Vita_FlashCustomBox(box);
 }
+/* (a diagnostic, guidetest bit 256: the rows' passes written in the log, a few) */
+static void PortMainMenu_Trace(const char *who, s32 pass, s32 alpha, f32 x, f32 y, f32 sx, f32 sy) {
+    extern void Vita_Log(const char *fmt, ...);
+    static s32 calls, told;
+    float box[4];
+    s32 ok;
+    if (!(gVitaGuideTest & 256) || told >= 120 || (calls++ % 7) != 0) return;
+    told++;
+    ok = Vita_FlashCustomBox(box);
+    Vita_Log("mainmenu: %s pass %d alpha %d at %d,%d scale %d/%d box %d: %d,%d - %d,%d (x100)\n", who, pass, alpha,
+             (int)x, (int)y, (int)(sx * 100), (int)(sy * 100), ok, (int)(box[0] * 100), (int)(box[1] * 100),
+             (int)(box[2] * 100), (int)(box[3] * 100));
+}
 #endif
 typedef struct OnlineLabelProp {
     u32 flags;f32 x,y,alpha,scaleX,scaleY,color;MFlashUv uv;
@@ -87,6 +100,7 @@ static void PortMainMenu_OnlineLabel(void *arg,OnlineLabelProp *p){
     if(p->flags&8)alpha=(s32)(alpha*p->alpha);
 #ifdef PORT_VITA
     if(MAINMENU_VITA_GUIDE()){
+        PortMainMenu_Trace("guide",arg!=NULL,alpha,x,y,sx,sy);
         float box[4];unsigned id=PortMainMenu_Box(box)?Vita_GuideLetterId(arg!=NULL):0;
         if(!id){Vita_GuideMenuLabel(x,y,sx,sy,alpha,arg!=NULL);return;}
         /* "Vita Guide" in the menu's own lettering (put together from the disc's letters), over the row's label box */
@@ -126,6 +140,9 @@ static void PortMainMenu_TagSprite(void *arg,TagSpriteProp *p) {
     if(p->flags&2){x+=p->x;y+=p->y;}
     if(p->flags&8)alpha=(s32)(alpha*p->alpha);
     Ps_PageSet();Ps_SetShift(0);
+#ifdef PORT_VITA
+    PortMainMenu_Trace("tag",icon,alpha,x,y,sx,sy);
+#endif
 #ifdef PORT_VITA
     {float box[4];
      if(PortMainMenu_Box(box)){

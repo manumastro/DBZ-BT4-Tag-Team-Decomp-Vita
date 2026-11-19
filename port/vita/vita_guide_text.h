@@ -36,8 +36,7 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "# Buttons the Vita does not have\n"
      "{L2}   Blast wave\n"
      "{R2}   Fly down\n"
-     "They and {L3} {R3} are on the rear touch pad:\n"
-     "the next topic shows where.\n"
+     "These and {L3} {R3}: rear touch pad (next topic).\n"
      "# Pause and quit\n"
      "{ST}   Pause\n"
      "Hold {ST} + {SEL}   Quit the game"},
@@ -198,8 +197,7 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "# Botones que la Vita no tiene\n"
      "{L2}   Onda\n"
      "{R2}   Bajar\n"
-     "Están, con {L3} {R3}, en el panel trasero:\n"
-     "el tema siguiente muestra dónde.\n"
+     "Estos y {L3} {R3}: panel trasero (tema siguiente).\n"
      "# Pausa y salir\n"
      "{ST}   Pausa\n"
      "Mantén {ST} + {SEL}   Cerrar el juego"},

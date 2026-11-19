@@ -362,7 +362,37 @@ uint32_t *TboText_Pixels(uint32_t id, uint32_t *version, uint32_t *w, uint32_t *
     if (cov == NULL) {
         return NULL;
     }
+#ifdef PORT_VITA
+    if ((lw != l.w || lh != l.h) && lw > 0 && lh > 0 && lw <= l.w + 8 && lh <= l.h + 8 && l.w <= lw + 8 && l.h <= lh + 8) {
+        /* (the Vita: a few pixels otherwise than measured; the Tag screens' "Change", 2026-11-19, never got a picture
+           this way: the coverage cut or padded to the measured size, the letters where they are) */
+        static int told;
+        uint8_t *fit = calloc((size_t)l.w * l.h, 1);
+        if (told < 8) {
+            extern void Vita_Log(const char *fmt, ...);
+            told++;
+            Vita_Log("tbo_text: \"%s\" written %d x %d, measured %d x %d: fitted\n", l.text, lw, lh, l.w, l.h);
+        }
+        if (fit != NULL) {
+            for (y = 0; y < lh && y < l.h; y++) {
+                memcpy(fit + (size_t)y * l.w, cov + (size_t)y * lw, (size_t)(lw < l.w ? lw : l.w));
+            }
+            free(cov);
+            cov = fit;
+            lw = l.w;
+            lh = l.h;
+        }
+    }
+#endif
     if (lw != l.w || lh != l.h) { /* (the font changed since it was measured: it is measured again next frame) */
+#ifdef PORT_VITA
+        static int toldOther;
+        if (toldOther < 8) {
+            extern void Vita_Log(const char *fmt, ...);
+            toldOther++;
+            Vita_Log("tbo_text: \"%s\" written %d x %d, measured %d x %d: no picture\n", l.text, lw, lh, l.w, l.h);
+        }
+#endif
         free(cov);
         return NULL;
     }

@@ -45,6 +45,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <psp2/io/fcntl.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/io/stat.h>
@@ -680,7 +681,11 @@ static int maker_thread(unsigned args, void *argp) {
         j.t->failVersion = version;
         j.t->readyFrame = gGsFrame;
         if (j.line) {
-            j.t->madeVersion = version;
+            /* (nothing made: asked again, at most 60 times a version, as line_asked does) */
+            j.t->madeVersion = px == NULL && ++j.t->lineTries <= 60 ? 0 : version;
+            if (px != NULL) {
+                j.t->lineTries = 0;
+            }
             if (sGatePending > 0) {
                 sGatePending--; /* (tbotext=1: one line fewer that the screen waits for) */
             }
@@ -1340,6 +1345,23 @@ static int letter_thread(unsigned args, void *argp) {
         free(sGuidePic[1]);
         sGuidePic[0] = letter_fallback(guide, 0);
         sGuidePic[1] = letter_fallback(guide, 1);
+    }
+    {   /* (a diagnostic, guidetest bit 256: the four pictures written as raw 512 x 32 RGBA to ux0:data/bt4/letters_*.rgba) */
+        extern int gVitaGuideTest;
+        if (gVitaGuideTest & 256) {
+            unsigned char *pics[4] = {sLetterPic[0], sLetterPic[1], sGuidePic[0], sGuidePic[1]};
+            static const char *const names[4] = {"tag0", "tag1", "guide0", "guide1"};
+            int k;
+            for (k = 0; k < 4; k++) {
+                char path[96];
+                SceUID fd;
+                snprintf(path, sizeof(path), PORT_VITA_HOME "/letters_%s.rgba", names[k]);
+                if (pics[k] != NULL && (fd = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666)) >= 0) {
+                    sceIoWrite(fd, pics[k], 512 * 32 * 4);
+                    sceIoClose(fd);
+                }
+            }
+        }
     }
     __sync_synchronize();
     sLetterState = 2;
