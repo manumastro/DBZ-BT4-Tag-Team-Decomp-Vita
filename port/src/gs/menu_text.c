@@ -2467,7 +2467,14 @@ uint8_t *MenuText_LineRender(int kind, const char *text, int cap, int pad, int *
 #define HEADING_BASE 30   /* the baseline, from the row's top */
 #define HEADING_HEIGHT 42 /* the row */
 #define HEADING_MARGIN 8  /* left of the letters' edge, and right of their end */
+#ifdef PORT_VITA
+/* (bt3.txt taguivita, port/vita/vita_tbo.c) the heading written at its row's own size, capitals of 22 pixels, about as
+   the Vita shows it (19-22), and drawn without smaller copies: not four times larger and sampled down */
+extern int Vita_TagUiVita(void);
+#define HEADING_RES (Vita_TagUiVita() ? 1 : 4)
+#else
 #define HEADING_RES 4
+#endif
 
 static int heading_label(const char *text, MenuLabel *label) {
     int adv, w, h, base;

@@ -295,6 +295,46 @@ u32 Ps_Uv(f32 t) {
     return v < 0 ? 0 : v > 0x3FFF ? 0x3FFF : (u32)v;
 }
 
+#ifdef PORT_VITA
+#include "../../port/vita/vita_ui_atlas.h"
+/* (bt3.txt taguivita, port/vita/vita_tbo.c) The screens drawn the game's menus' way: pieces at their pixel size, lines
+   written with the capitals they show. The menus are drawn at 960 x 544, the GS's 512 x 448 over the whole of it; the
+   page is sPsPw x sPsPh of it. */
+extern int Vita_TagUiMenus(void);
+extern int gVitaTboWantCap, gVitaTboWantSx, gVitaTboWantSy; /* port/src/gs/tbo_text.c */
+static s32 sPsSnap; /* (Ps_Line: the line's corner on a whole pixel) */
+static f32 Ps_PxX(void) { return sPsPw / 512.0f * (960.0f / 512.0f); } /* pixels a unit of the page, across */
+static f32 Ps_PxY(void) { return sPsPh / 448.0f * (544.0f / 448.0f); } /* and down */
+/* Capitals `cap` units high: the whole pixels they are written with (returned) and *k, what makes them that tall. */
+static s32 Ps_VitaCap(f32 cap, f32 *k) {
+    f32 px = cap * Ps_PxY();
+    s32 n = (s32)(px + 0.5f);
+    n = n < 5 ? 5 : n > 64 ? 64 : n;
+    *k = px > 0.0f ? (f32)n / px : 1.0f;
+    return n;
+}
+static s32 Ps_VitaMilli(f32 r) {
+    s32 m = (s32)(r * 1000.0f + 0.5f);
+    return m < 100 ? 100 : m > 1000 ? 1000 : m;
+}
+static void Ps_VitaWant(s32 cap, s32 sx, s32 sy) {
+    gVitaTboWantCap = cap;
+    gVitaTboWantSx = sx;
+    gVitaTboWantSy = sy;
+}
+/* A page coordinate moved onto the nearest whole pixel of the screen. */
+static f32 Ps_SnapX(f32 x) {
+    f32 g = (sPsPx + (x + sPsShift) * sPsPw / 512.0f) * (960.0f / 512.0f);
+    g = (f32)(s32)(g + 4096.5f) - 4096.0f;
+    return (g * (512.0f / 960.0f) - sPsPx) * 512.0f / sPsPw - sPsShift;
+}
+static f32 Ps_SnapY(f32 y) {
+    f32 g = (sPsPy + y * sPsPh / 448.0f) * (544.0f / 448.0f);
+    g = (f32)(s32)(g + 4096.5f) - 4096.0f;
+    return (g * (448.0f / 544.0f) - sPsPy) * 448.0f / sPsPh;
+}
+#endif
+
 /* A picture's part (u, v in 0..1) over a box of the SCREEN, tinted (0x80 per channel = as it is). */
 static void Ps_SpriteScreenFiltered(s32 id, f32 x0, f32 y0, f32 x1, f32 y1, f32 u0, f32 v0, f32 u1, f32 v1, u32 tint, s32 alpha,s32 mips) {
     u64 *p;
@@ -307,6 +347,27 @@ static void Ps_SpriteScreenFiltered(s32 id, f32 x0, f32 y0, f32 x1, f32 y1, f32 
         extern int Vita_TboOn(void);
         if (!Vita_TboOn()) {
             return;
+        }
+    }
+#endif
+#ifdef PORT_VITA
+    if (Vita_TagUiMenus()) {
+        /* (bt3.txt taguivita) the kit's pieces, the buttons, the logo and the main menu's emblem from one atlas made at
+           the pixel size they show (port/vita/vita_ui_atlas.h, tools/vita_ui_atlas.py): the same box, the piece's part */
+#define PS_VUA(pic, bx, by, bw, bh) {pic, bx, by, bw, bh},
+        static const s16 box[][5] = {VUA_BOXES(PS_VUA)};
+#undef PS_VUA
+        s32 i, want = id == TBO_TAG_LOGO_OFF ? TBO_TAG_LOGO : id;
+        for (i = 0; i < (s32)(sizeof(box) / sizeof(box[0])); i++) {
+            if (box[i][0] == want) {
+                u0 = ((f32)box[i][1] + u0 * (f32)box[i][3]) / (f32)VUA_W;
+                u1 = ((f32)box[i][1] + u1 * (f32)box[i][3]) / (f32)VUA_W;
+                v0 = ((f32)box[i][2] + v0 * (f32)box[i][4]) / (f32)VUA_H;
+                v1 = ((f32)box[i][2] + v1 * (f32)box[i][4]) / (f32)VUA_H;
+                id = TBO_VITA_UI;
+                mips = 0;
+                break;
+            }
         }
     }
 #endif
@@ -481,6 +542,13 @@ extern float Vita_TboTextScale(void);
 f32 Ps_TextWidth(char *str, f32 scale) {
 #ifdef PORT_VITA
     scale *= Vita_TboTextScale();
+    if (Vita_TagUiMenus()) { /* (taguivita: measured as it is written and drawn, Ps_TextExOuterXY) */
+        f32 k, m;
+        Ps_VitaWant(Ps_VitaCap(PS_CELL_UNITS * scale * PS_CAP_OF_CELL, &k), 1000, 1000);
+        m = (f32)PortTbo_TextMeasure(str, 0);
+        Ps_VitaWant(0, 1000, 1000);
+        return m / 1000.0f * PS_CELL_UNITS * scale * k * PS_CAP_OF_CELL * PS_UNIT_X * Port_MenuTextNarrow();
+    }
 #endif
     return (f32)PortTbo_TextMeasure(str, 0) / 1000.0f * PS_CELL_UNITS * scale * PS_CAP_OF_CELL * PS_UNIT_X * Port_MenuTextNarrow();
 }
@@ -521,6 +589,14 @@ void Ps_Line(s32 id, f32 x, f32 base, f32 cap, f32 fit, u32 top, u32 bottom, u32
     f32 y0 = base - (f32)PortTbo_TextInfo(id, 3) * ky;
     f32 h = (f32)PortTbo_TextInfo(id, 2) * ky;
     s32 band;
+#ifdef PORT_VITA
+    if (sPsSnap) { /* (taguivita: a texel a pixel, its corner on a pixel's) */
+        f32 sx0 = Ps_SnapX(x0), sy0 = Ps_SnapY(y0);
+        x1 += sx0 - x0;
+        x0 = sx0;
+        y0 = sy0;
+    }
+#endif
 
     if (bands == 0) {
         Ps_Sprite(id, x0, y0, x1, y0 + h, 0.0f, 0.5f, 1.0f, 1.0f, Ps_Tint(line), alpha);
@@ -556,6 +632,23 @@ void Ps_TextExOuterXY(f32 x, f32 y, char *str, f32 scaleX, f32 scaleY, f32 width
         }
     }
 #endif
+#ifdef PORT_VITA
+    s32 vitaCap = 0;
+    f32 vitaFit = 1.0f;
+    if (Vita_TagUiMenus() && str[0] != 0) { /* (taguivita) capitals of whole pixels, the line as narrow as it is drawn */
+        f32 k, wm;
+        vitaCap = Ps_VitaCap(PS_CELL_UNITS * scaleY * PS_CAP_OF_CELL, &k);
+        y -= PS_CELL_UNITS * scaleY * (k - 1.0f) * (PS_BASE_OF_CELL - PS_CAP_OF_CELL * 0.5f);
+        scaleX *= k;
+        scaleY *= k;
+        Ps_VitaWant(vitaCap, 1000, 1000);
+        wm = (f32)PortTbo_TextMeasure(str, 0) / 1000.0f * PS_CELL_UNITS * scaleX * PS_CAP_OF_CELL * PS_UNIT_X * Port_MenuTextNarrow();
+        if (width > 0.0f && wm > width) {
+            vitaFit = width / wm < 0.6f ? 0.6f : width / wm;
+        }
+        Ps_VitaWant(vitaCap, Ps_VitaMilli(vitaFit * scaleX / scaleY * PS_UNIT_X * Port_MenuTextNarrow() * Ps_PxX() / Ps_PxY()), 1000);
+    }
+#endif
     f32 cell = PS_CELL_UNITS * scaleY;
     f32 cap = cell * PS_CAP_OF_CELL;
     f32 fit = 1.0f;
@@ -568,14 +661,27 @@ void Ps_TextExOuterXY(f32 x, f32 y, char *str, f32 scaleX, f32 scaleY, f32 width
     {   /* (bt3.txt tboui=0: no line put together, port/vita/vita_tbo.c) */
         extern int Vita_TboOn(void);
         if (!Vita_TboOn()) {
+            Ps_VitaWant(0, 1000, 1000);
             return;
         }
     }
-#endif
+    id = str[0] == 0 ? -1 : PortTbo_TextId(str, 0);
+    Ps_VitaWant(0, 1000, 1000);
+    if (id < 0) {
+        return;
+    }
+#else
     if (str[0] == 0 || (id = PortTbo_TextId(str, 0)) < 0) {
         return;
     }
+#endif
     w = (f32)PortTbo_TextInfo(id, 0) / 1000.0f * PS_CELL_UNITS * scaleX * PS_CAP_OF_CELL * PS_UNIT_X * Port_MenuTextNarrow();
+#ifdef PORT_VITA
+    if (vitaCap > 0) { /* (the squeeze the line was made with) */
+        fit = vitaFit;
+        w *= fit;
+    } else
+#endif
     if (width > 0.0f && w > width) {
         fit = width / w;
         if (fit < 0.6f) {
@@ -601,17 +707,24 @@ void Ps_TextExOuterXY(f32 x, f32 y, char *str, f32 scaleX, f32 scaleY, f32 width
                     cap, lineFit, top, bottom, outer, 0, alpha);
         }
     }
+#ifdef PORT_VITA
+    sPsSnap = vitaCap > 0;
+#endif
     Ps_Line(id, x, y + cell * PS_BASE_OF_CELL, cap, lineFit, top, bottom, line, 0, alpha); /* the outline under the fill */
 #ifdef PORT_VITA
-    {   /* (bt3.txt taghudvita, port/vita/vita_tbo.c) a fill of one colour in one sprite, not three alike */
+    {   /* (bt3.txt taghudvita / taguivita, port/vita/vita_tbo.c) a fill of one colour in one sprite, not three alike */
         extern int Vita_TagHudVita(void);
-        if (top == bottom && Vita_TagHudVita()) {
+        if (top == bottom && (Vita_TagHudVita() || vitaCap > 0)) {
             Ps_Line(id, x, y + cell * PS_BASE_OF_CELL, cap, lineFit, top, bottom, line, 1, alpha);
+            sPsSnap = 0;
             return;
         }
     }
 #endif
     Ps_Line(id, x, y + cell * PS_BASE_OF_CELL, cap, lineFit, top, bottom, line, 3, alpha);
+#ifdef PORT_VITA
+    sPsSnap = 0;
+#endif
 }
 
 /* A line of letters with an optional second border outside its dark outline. */
@@ -654,6 +767,47 @@ void Ps_Heading(f32 x, f32 y, char *str, f32 scale, f32 width, s32 alpha) {
         }
     }
 #endif
+#ifdef PORT_VITA
+    if (Vita_TagUiMenus() && str[0] != 0) {
+        /* (taguivita) the heading written at its row's own size (capitals 22 pixels, menu_text.c HEADING_RES 1): drawn
+           22 pixels high when it is within a tenth of that (the title, 21), else made the size it is drawn; as narrow
+           as it is drawn; its corner on a whole pixel */
+        f32 px = cap * Ps_PxY(), wm, sy = 1.0f;
+        if (px > 22.0f * 0.9f && px < 22.0f * 1.1f) {
+            f32 k = 22.0f / px;
+            y -= cell * (k - 1.0f) * (PS_BASE_OF_CELL - PS_CAP_OF_CELL * 0.5f);
+            scale *= k;
+            cell *= k;
+            cap *= k;
+            ky = cap / 1000.0f;
+        } else if (px < 22.0f) {
+            sy = px / 22.0f;
+        }
+        Ps_VitaWant(22, 1000, 1000);
+        wm = (f32)PortTbo_TextMeasure(str, 0) / 1000.0f * cap * PS_UNIT_X * Port_MenuTextNarrow();
+        if (width > 0.0f && wm > width) {
+            fit = width / wm < 0.6f ? 0.6f : width / wm;
+        }
+        Ps_VitaWant(-1, Ps_VitaMilli(sy * fit * PS_UNIT_X * Port_MenuTextNarrow() * Ps_PxX() / Ps_PxY()), Ps_VitaMilli(sy));
+        id = PortTbo_TextId(str, 2);
+        Ps_VitaWant(0, 1000, 1000);
+        if (id < 0) {
+            return;
+        }
+        w = (f32)PortTbo_TextInfo(id, 0) / 1000.0f * cap * PS_UNIT_X * Port_MenuTextNarrow() * fit;
+        if (sPsAlign == 1) {
+            x -= w * 0.5f;
+        } else if (sPsAlign == 2) {
+            x -= w;
+        }
+        kx = ky * fit * PS_UNIT_X * Port_MenuTextNarrow();
+        x0 = Ps_SnapX(x - (f32)PortTbo_TextInfo(id, 4) * kx);
+        y0 = Ps_SnapY(y + cell * PS_BASE_OF_CELL - (f32)PortTbo_TextInfo(id, 3) * ky);
+        Ps_Sprite(id, x0, y0, x0 + (f32)PortTbo_TextInfo(id, 1) * kx, y0 + (f32)PortTbo_TextInfo(id, 2) * ky, 0.0f, 0.0f, 1.0f, 1.0f,
+                  Ps_Tint(0xFFFFFF), alpha);
+        return;
+    }
+#endif
     if (str[0] == 0 || (id = PortTbo_TextId(str, 2)) < 0) {
         return;
     }
@@ -683,6 +837,13 @@ void Ps_Heading(f32 x, f32 y, char *str, f32 scale, f32 width, s32 alpha) {
 f32 Ps_MsgWidth(char *str, f32 scale) {
 #ifdef PORT_VITA
     scale *= Vita_TboTextScale();
+    if (Vita_TagUiMenus()) { /* (taguivita: measured as it is written and drawn, Ps_MsgDraw) */
+        f32 k, m;
+        Ps_VitaWant(Ps_VitaCap(PS_MSG_CAP * scale, &k), 1000, 1000);
+        m = (f32)PortTbo_TextMeasure(str, 1);
+        Ps_VitaWant(0, 1000, 1000);
+        return m / 1000.0f * PS_MSG_CAP * scale * k * PS_UNIT_X * Port_MenuTextNarrow();
+    }
 #endif
     return (f32)PortTbo_TextMeasure(str, 1) / 1000.0f * PS_MSG_CAP * scale * PS_UNIT_X * Port_MenuTextNarrow();
 }
@@ -691,6 +852,13 @@ extern int PortTbo_TextIdLiteral(const char *,int),PortTbo_TextMeasureLiteral(co
 f32 Ps_MsgWidthLiteral(char *str,f32 scale){
 #ifdef PORT_VITA
     scale*=Vita_TboTextScale();
+    if (Vita_TagUiMenus()) {
+        f32 k, m;
+        Ps_VitaWant(Ps_VitaCap(PS_MSG_CAP * scale, &k), 1000, 1000);
+        m = (f32)PortTbo_TextMeasureLiteral(str, 1);
+        Ps_VitaWant(0, 1000, 1000);
+        return m / 1000.0f * PS_MSG_CAP * scale * k * PS_UNIT_X * Port_MenuTextNarrow();
+    }
 #endif
     return (f32)PortTbo_TextMeasureLiteral(str,1)/1000.0f*PS_MSG_CAP*scale*PS_UNIT_X*Port_MenuTextNarrow();
 }
@@ -712,12 +880,32 @@ static void Ps_MsgDraw(f32 x, f32 y, char *str, f32 scale, s32 alpha,s32 literal
         }
     }
 #endif
+#ifdef PORT_VITA
+    if (Vita_TagUiMenus() && str[0] != 0) { /* (taguivita) capitals of whole pixels, the line as narrow as it is drawn */
+        f32 k;
+        s32 n = Ps_VitaCap(PS_MSG_CAP * scale, &k);
+        y -= (k - 1.0f) * scale * (PS_MSG_BASE - PS_MSG_CAP * 0.5f);
+        scale *= k;
+        Ps_VitaWant(n, Ps_VitaMilli(PS_UNIT_X * Port_MenuTextNarrow() * Ps_PxX() / Ps_PxY()), 1000);
+        sPsSnap = 1;
+    }
+    id = str[0] == 0 ? -1 : literal ? PortTbo_TextIdLiteral(str, 1) : PortTbo_TextId(str, 1);
+    Ps_VitaWant(0, 1000, 1000);
+    if (id < 0) {
+        sPsSnap = 0;
+        return;
+    }
+#else
     if (str[0] == 0 || (id = literal?PortTbo_TextIdLiteral(str,1):PortTbo_TextId(str, 1)) < 0) {
         return;
     }
+#endif
     Ps_Line(id, x, y + PS_MSG_BASE * scale, PS_MSG_CAP * scale, 1.0f, 0, 0, Ps_Rgba(16, 20, 40, 255), 0, alpha);
     Ps_Line(id, x, y + PS_MSG_BASE * scale, PS_MSG_CAP * scale, 1.0f, Ps_Rgba(255, 255, 255, 255),
             Ps_Rgba(255, 255, 255, 255), 0, 1, alpha);
+#ifdef PORT_VITA
+    sPsSnap = 0;
+#endif
 }
 void Ps_Msg(f32 x,f32 y,char *str,f32 scale,s32 alpha){Ps_MsgDraw(x,y,str,scale,alpha,0);}
 void Ps_MsgLiteral(f32 x,f32 y,char *str,f32 scale,s32 alpha){Ps_MsgDraw(x,y,str,scale,alpha,1);}

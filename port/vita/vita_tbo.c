@@ -51,6 +51,7 @@
 #include "vita_paths.h"
 #include "../../include/menu/tbo_art.h"
 #include "vita_hud_atlas.h" /* (TBO_VITA_HUD) */
+#include "vita_ui_atlas.h"  /* (TBO_VITA_UI) */
 
 extern void Vita_Log(const char *fmt, ...);
 extern unsigned gGsFrame;
@@ -101,7 +102,23 @@ int gVitaTboTextPct = 100;
    room, the talk box's lines broken again), their capitals' middle where it was; in a fight taghud_scale is used, and
    the HUD's gauges, the target's marks and the allies' column grow by it too (src/battle/tag_team_hud.inc, PORT_VITA).
    tbotextpct (earlier) multiplies both. */
-int gVitaTagUiScale = 130, gVitaTagHudScale = 135;
+int gVitaTagUiScale = -1, gVitaTagHudScale = 135; /* (tagui_scale -1: 100 with taguivita, 130 without; below) */
+/* bt3.txt taguivita (default 1 since branch wip/tagui-vita, not compared on the console yet; 0 the way before; 2 the
+   soak's B battles): the Tag Team screens (setup pages, character select's captions, talk box, headings, prompts, the
+   main menu's emblem) drawn the way the game's own menus are (docs/vita/tagteam.md "The Vita's Tag Team screens"):
+   - the kit's pieces (bars, windows, talk box, buttons, logo, emblem) from one atlas made at build time at the pixel
+     size they show on the 960 x 544 screen (tbo/ui/tag_ui_vita.vt, 512 x 248, 496 KB, resident; tools/vita_ui_atlas.py),
+     sampled 1:1 without smaller copies, instead of ~20 textures of the PC's pictures stretched to powers of two and
+     sampled down through their mipmaps;
+   - every line of letters written with the capitals it shows (the capitals' pixels rounded, the line drawn that size)
+     and, as the page narrows the letters across, made that narrow at write time with an area filter: one texel a
+     pixel, its corner on a whole pixel, no smaller copies (tbo_text.c; line_pixels below); the headings written at
+     their row's own resolution (menu_text.c HEADING_RES 1);
+   - the letters at the PC's proportions on the page (tagui_scale 100: at 130 the rows' words filled their bars and the
+     talk box ran to three lines);
+   - the backdrop (2 MB) given back in a fight and read again after it (it was kept for the whole session). */
+int gVitaTagUiVita = 1;
+int Vita_TagUiVita(void);
 /* bt3.txt taghudvita (default 1 since branch wip/taghud-vita, not compared on the console yet; 0 the way before; 2 the
    soak's B battles): the Tag Team fight's HUD drawn the way the game's own HUD is (the developer: "optimized for the
    Vita as the normal fights' HUD is, in proportions and resolution"; docs/vita/tagteam.md "The Vita's Tag Team HUD"):
@@ -131,11 +148,25 @@ float Vita_TboTextScale(void) {
     if (Vita_InBattle() && Vita_TagHudVita()) { /* (taghudvita: the HUD's words at the game's HUD text size, below) */
         return pct_scale(gVitaTboTextPct) * TAGHUD_VITA_TEXT;
     }
-    return pct_scale(gVitaTboTextPct) * pct_scale(Vita_InBattle() ? gVitaTagHudScale : gVitaTagUiScale);
+    return pct_scale(gVitaTboTextPct) *
+           pct_scale(Vita_InBattle() ? gVitaTagHudScale : gVitaTagUiScale >= 0 ? gVitaTagUiScale : Vita_TagUiVita() ? 100 : 130);
 } /* (the report) lines made when asked, their ms, lines that had to wait for a picture */
 static int tbo_ab(int v) { /* (2: the soak's B battles only) */
     extern int gVitaAbSide;
     return v == 2 ? gVitaAbSide == 1 : v != 0;
+}
+int Vita_TagUiVita(void) {
+    return tbo_ab(gVitaTagUiVita);
+}
+/* (src/menu/tag_team_select.inc) the screens' letters at 100 because of taguivita, not because tagui_scale says so */
+int Vita_TagUiDefault100(void) {
+    return gVitaTagUiScale < 0 && Vita_TagUiVita();
+}
+/* (src/menu/port_screen.c) the screens' kit from the atlas and their lines at their pixel size: the menus only (a
+   fight's pieces are the HUD's, taghudvita) */
+int Vita_TagUiMenus(void) {
+    extern int Vita_InBattle(void);
+    return Vita_TagUiVita() && !Vita_InBattle();
 }
 #define TEXT_ON() tbo_ab(gVitaTboText)
 #define MIP_ON() tbo_ab(gVitaTboMip)
@@ -188,6 +219,7 @@ static const char *const kTboNames[TBO_ART_COUNT] = {TBO_ART_LIST(TBO_NAME)};
 #undef TBO_NAME
 static TboTex sPic[TBO_ART_COUNT], sText[TBO_TEXT_SLOTS], sEmblem, sLetters[2];
 static TboTex sHudAtlas; /* (taghudvita: tbo/ui/tag_hud_vita.vt, 128 x 112, 56 KB, kept from its first use) */
+static TboTex sUiAtlas;  /* (taguivita: tbo/ui/tag_ui_vita.vt, 512 x 248, 496 KB, kept from the first seconds) */
 
 static int tbo_on(void) {
     extern int gVitaAbSide;
@@ -715,6 +747,10 @@ static unsigned tbo_prefetch_ids(unsigned *ids) {
     extern int Port_GameProfilePortuguese(void);
     extern int Port_GameProfileEnglish(void);
     ids[n++] = TBO_TAG_ART;
+    if (Vita_TagUiVita()) { /* (taguivita: the kit, the buttons, the logo and the emblem are the atlas's, sUiAtlas) */
+        ids[n++] = Port_GameProfilePortuguese() ? TBO_TAG_BUTTONS_PT : Port_GameProfileEnglish() ? TBO_TAG_BUTTONS_EN : TBO_TAG_BUTTONS_ES;
+        return n;
+    }
     ids[n++] = TBO_KIT_WINDOW;
     ids[n++] = TBO_KIT_SEL;
     ids[n++] = TBO_KIT_BAR;
@@ -745,6 +781,10 @@ static int tbo_resident(const TboTex *t) {
     }
     if (t == &sEmblem) {
         return 1;
+    }
+    if (t == &sPic[TBO_TAG_ART] && Vita_TagUiVita()) {
+        extern int Vita_InBattle(void);
+        return !Vita_InBattle(); /* (taguivita: the backdrop's 2 MB given back in a fight, Vita_TboFrameEnd) */
     }
     n = tbo_prefetch_ids(ids);
     for (i = 0; i < n; i++) {
@@ -879,10 +919,84 @@ static uint32_t *tbo_pot_stretch(uint32_t *px, uint32_t *pw, uint32_t *ph) {
 
 /* A line's picture as the texture takes it: written (tbo_text.c, at the Vita's size with tbotextsize=1), at most
    1024 x 128, a heading stretched to powers of two for its smaller copies. NULL: none. */
+/* (taguivita) One side of a picture to n samples, each the area it covers (the colour weighted by the alpha, as
+   tbo_half): a line written at its capitals' pixels made as narrow as the page draws it, so that a texel is a pixel.
+   Takes px. */
+static uint32_t *tbo_area(uint32_t *px, uint32_t *pw, uint32_t *ph, uint32_t n, int across) {
+    uint32_t w = *pw, h = *ph, src = across ? w : h, other = across ? h : w, o, k, i;
+    float scale = (float)src / (float)n;
+    uint32_t *dst;
+    if (n == 0 || n == src || n > 2048 || (dst = malloc((size_t)n * other * 4)) == NULL) {
+        return px;
+    }
+    for (k = 0; k < other; k++) {
+        for (o = 0; o < n; o++) {
+            float a = (float)o * scale, b = (float)(o + 1) * scale, s[4] = {0, 0, 0, 0}, plain[3] = {0, 0, 0}, ws = 0;
+            uint32_t out = 0, ch;
+            if (scale < 1.0f) { /* (going up: linear; not expected) */
+                a = ((float)o + 0.5f) * scale - 0.5f;
+                b = a + 1.0f;
+            }
+            for (i = a < 0 ? 0 : (uint32_t)a; (float)i < b && i < src; i++) {
+                float wt = ((float)(i + 1) < b ? (float)(i + 1) : b) - ((float)i > a ? (float)i : a);
+                uint32_t c = across ? px[k * w + i] : px[i * w + k], al = c >> 24;
+                if (wt <= 0) {
+                    continue;
+                }
+                for (ch = 0; ch < 3; ch++) {
+                    s[ch] += (float)((c >> (ch * 8)) & 0xFF) * (float)al * wt;
+                    plain[ch] += (float)((c >> (ch * 8)) & 0xFF) * wt;
+                }
+                s[3] += (float)al * wt;
+                ws += wt;
+            }
+            if (ws <= 0) {
+                ws = 1;
+            }
+            for (ch = 0; ch < 3; ch++) {
+                float v = s[3] > 0 ? s[ch] / s[3] : plain[ch] / ws;
+                out |= ((uint32_t)(v + 0.5f) > 255 ? 255u : (uint32_t)(v + 0.5f)) << (ch * 8);
+            }
+            {
+                uint32_t al = (uint32_t)(s[3] / ws + 0.5f);
+                out |= (al > 128 ? 128u : al) << 24;
+            }
+            if (across) {
+                dst[k * n + o] = out;
+            } else {
+                dst[o * w + k] = out;
+            }
+        }
+    }
+    free(px);
+    if (across) {
+        *pw = n;
+    } else {
+        *ph = n;
+    }
+    return dst;
+}
+
 static uint32_t *line_pixels(uint32_t id, uint32_t *version, uint32_t *w, uint32_t *h) {
+    extern int TboText_Fine(uint32_t id);
+    extern int TboText_VitaScale(uint32_t id, int *sx, int *sy); /* tbo_text.c: thousandths; 0 none */
     uint32_t *px = TboText_Pixels(id, version, w, h);
+    int sx = 1000, sy = 1000;
+    if (px != NULL && TboText_VitaScale(id, &sx, &sy)) {
+        /* (taguivita) a texel a pixel: as narrow (and, a heading, as tall) as it is drawn */
+        uint32_t nw = (uint32_t)(((uint64_t)*w * (uint32_t)sx + 500) / 1000), nh = (uint32_t)(((uint64_t)*h * (uint32_t)sy + 500) / 1000);
+        if (sx > 0 && sx < 1000 && nw >= 1) {
+            px = tbo_area(px, w, h, nw, 1);
+        }
+        if (px != NULL && sy > 0 && sy < 1000 && nh >= 1) {
+            px = tbo_area(px, w, h, nh, 0);
+        }
+    }
     if (px != NULL) {
         px = tbo_fit(px, w, h, 1024, 128);
+    }
+    if (px != NULL && TboText_Fine(id)) {
+        return px; /* (at its size on the screen: no smaller copies, any width) */
     }
     if (px != NULL && MIP_ON() && (!tbo_pot(*w) || !tbo_pot(*h))) {
         px = tbo_pot_stretch(px, w, h); /* (a heading: any size) */
@@ -1218,6 +1332,29 @@ static unsigned tbo_letters(int lit) {
     return tbo_make(t, px, w, h, lit ? "main menu lettering, chosen" : "main menu lettering", 0);
 }
 
+/* (taguivita) tbo/ui/tag_ui_vita.vt, read on the drawing thread the first time (496 KB, no decoding) and kept */
+static unsigned tbo_ui_atlas(void) {
+    if (sUiAtlas.tex == 0 && !sUiAtlas.missing) {
+        char path[160];
+        uint32_t w = 0, h = 0, *px = tbo_vt("tag_ui_vita", &w, &h, path, sizeof(path));
+        if (px == NULL) {
+            Vita_Log("tbo: cannot read %s\n", path);
+            sUiAtlas.missing = 1;
+            return 0;
+        }
+        sUiAtlas.tex = Vita_VglTexRgba(px, (int)w, (int)h); /* (drawn at its size: no smaller copies) */
+        free(px);
+        if (sUiAtlas.tex != 0) {
+            sUiAtlas.bytes = w * h * 4;
+            gVitaTboN[0]++;
+            gVitaTboN[3]++;
+            gVitaTboN[4] += sUiAtlas.bytes;
+            Vita_Log("tbo: %s: %u x %u, kept (the Tag Team screens' kit at its pixel size)\n", path, (unsigned)w, (unsigned)h);
+        }
+    }
+    return sUiAtlas.tex;
+}
+
 /* The renderer (vita_vgl.c state_of_, the drawing thread): the texture of picture `id`, 0 for none (not drawn).
    *mip: it has its smaller copies (tbomip=1): to be sampled with them. */
 static unsigned tbo_texture(uint32_t id, int *mip) {
@@ -1273,6 +1410,9 @@ static unsigned tbo_texture(uint32_t id, int *mip) {
         }
         return sHudAtlas.tex;
     }
+    if (id == TBO_VITA_UI) { /* (taguivita) the screens' kit at its pixel size: read once, kept */
+        return tbo_ui_atlas();
+    }
     if (id == TBO_MAIN_TAG_EMBLEM || (id < TBO_ART_COUNT && id != TBO_RADAR)) {
         unsigned tex = tbo_picture(id);
         *mip = tex != 0 && (id == TBO_MAIN_TAG_EMBLEM ? sEmblem.mip : sPic[id].mip);
@@ -1322,7 +1462,12 @@ void Vita_TboFrameEnd(void) {
         unsigned ids[24], n, i;
         sBootDone = 1;
         letters_start();
-        maker_ask(0, TBO_MAIN_TAG_EMBLEM, &sEmblem);
+        if (Vita_TagUiVita()) {
+            tbo_ui_atlas(); /* (taguivita: the emblem is the atlas's) */
+            sEmblem.missing = 1;
+        } else {
+            maker_ask(0, TBO_MAIN_TAG_EMBLEM, &sEmblem);
+        }
         n = tbo_prefetch_ids(ids); /* the Tag Team set, resident from now on (tbo_resident) */
         for (i = 0; i < n; i++) {
             if (sPic[ids[i]].tex == 0 && !sPic[ids[i]].missing) {
@@ -1361,6 +1506,32 @@ void Vita_TboFrameEnd(void) {
         }
     }
     gVitaTboPhase = 4;
+    if (gVitaTboPre && sBootDone && Vita_TagUiVita()) {
+        /* (taguivita) the backdrop behind the Tag Team screens (960 x 544, 2 MB): given back two seconds into a fight,
+           read again by the maker as soon as the fight is over (the game's own screens load their backdrops too) */
+        extern int Vita_InBattle(void);
+        TboTex *t = &sPic[TBO_TAG_ART];
+        if (Vita_InBattle()) {
+            if ((gGsFrame & 63) == 16 && t->tex != 0 && gGsFrame - t->frame > 60) {
+                Vita_VglTexFree(t->tex);
+                t->tex = 0;
+                gVitaTboN[2]++;
+                gVitaTboN[3]--;
+                gVitaTboN[4] -= t->bytes;
+                Vita_Log("tbo: the Tag Team backdrop given back in the fight: %u textures held, %u KB\n", gVitaTboN[3], gVitaTboN[4] / 1024);
+            }
+        } else if (t->tex == 0 && !t->missing && (gGsFrame & 15) == 8) {
+            int state;
+            pthread_mutex_lock(&sMaker);
+            state = t->state;
+            pthread_mutex_unlock(&sMaker);
+            if (state == 0) {
+                maker_ask(0, TBO_TAG_ART, t);
+            } else if (state == 2) {
+                tbo_picture(TBO_TAG_ART);
+            }
+        }
+    }
     if (gVitaTboPre && (gGsFrame & 63) == 32 && gGsFrame - sPreAsked > KEEP_FRAMES) {
         /* the menus have not been shown for 20 s (a fight): the pixels kept for the Tag Team screens given back */
         unsigned i;

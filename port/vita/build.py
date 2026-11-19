@@ -446,6 +446,11 @@ def vpk():
     subprocess.run([sys.executable, str(ROOT / "port/vita/tools/vita_hud_atlas.py"), str(vt)], check=True)
     extra += ["-a", f"{vt / 'tag_hud_vita.vt'}=tbo/ui/tag_hud_vita.vt"]
     n += 1
+    # the Tag Team screens' kit as one atlas at its pixel size on the 960 x 544 screen (bt3.txt taguivita,
+    # tools/vita_ui_atlas.py; its boxes in port/vita/vita_ui_atlas.h)
+    subprocess.run([sys.executable, str(ROOT / "port/vita/tools/vita_ui_atlas.py"), str(ui), str(vt)], check=True)
+    extra += ["-a", f"{vt / 'tag_ui_vita.vt'}=tbo/ui/tag_ui_vita.vt"]
+    n += 1
     extra += ["-a", f"{ui / 'CREDITS.md'}=tbo/ui/CREDITS.md"]
     n += 1
     fonts = ROOT / "port/third_party/fonts"

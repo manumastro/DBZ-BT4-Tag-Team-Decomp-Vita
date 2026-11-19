@@ -37,6 +37,7 @@ typedef struct {
     int advance, w, h, base, pad, cap, outline;
 #ifdef PORT_VITA
     int fine; /* (taghudfine) written at the HUD's capitals: made again when that changes */
+    int vsx, vsy; /* (taguivita) thousandths: made this much narrower (and, a heading, shorter) at write time; 1000 none */
 #endif
 } TboLine;
 
@@ -58,8 +59,21 @@ int gVitaTboTextSize = 1;
 /* (bt3.txt taghudfine, vita_tbo.c Vita_TagHudCap: in a battle the lines are written with capitals about their size on
    the fight's picture, with an outline of 1) */
 extern int Vita_TagHudCap(void);
-static int line_cap(int kind) { int f = Vita_TagHudCap(); return f > 0 ? f : gVitaTboTextSize ? (kind == 0 ? 40 : 24) : (kind == 0 ? 80 : 48); }
-static int line_outline(int kind) { return gVitaTboTextSize || Vita_TagHudCap() > 0 ? 1 : (kind == 0 ? 3 : 2); }
+/* (bt3.txt taguivita, src/menu/port_screen.c under PORT_VITA) the screens' lines written with the capitals they show,
+   in pixels (gVitaTboWantCap, 0: as below), and made gVitaTboWantSx / Sy thousandths as wide / tall when the renderer
+   takes them (vita_tbo.c line_pixels): a texel a pixel. A line of the same words at another size is another line. Set
+   by the game's thread around PortTbo_TextId / PortTbo_TextMeasure only. */
+int gVitaTboWantCap, gVitaTboWantSx = 1000, gVitaTboWantSy = 1000;
+static int line_cap(int kind) {
+    int f = Vita_TagHudCap();
+    if (gVitaTboWantCap > 0 && kind != 2) {
+        return gVitaTboWantCap;
+    }
+    return f > 0 ? f : gVitaTboTextSize ? (kind == 0 ? 40 : 24) : (kind == 0 ? 80 : 48);
+}
+static int line_outline(int kind) { return gVitaTboTextSize || Vita_TagHudCap() > 0 || gVitaTboWantCap > 0 ? 1 : (kind == 0 ? 3 : 2); }
+/* (a heading: gVitaTboWantCap -1, written at its row's own resolution, menu_text.c HEADING_RES) */
+static int line_fine(int kind) { return Vita_TagHudCap() > 0 || (kind == 2 ? gVitaTboWantCap < 0 : gVitaTboWantCap > 0); }
 #else
 static int line_cap(int kind) { return kind == 0 ? 80 : 48; }
 static int line_outline(int kind) { return kind == 0 ? 3 : 2; }
@@ -74,6 +88,11 @@ static int line_measure(TboLine *l, uint32_t generation) {
     if (sVersion == 0) {
         l->version = sVersion = 1;
     }
+#ifdef PORT_VITA
+    l->vsx = gVitaTboWantSx;
+    l->vsy = gVitaTboWantSy;
+    l->fine = line_fine(l->kind);
+#endif
     if (l->kind == 2) {
         l->outline = 0;
         l->advance = MenuText_HeadingMeasure(l->text, &l->cap, &l->w, &l->h, &l->base, &l->pad);
@@ -81,9 +100,6 @@ static int line_measure(TboLine *l, uint32_t generation) {
     }
     l->cap = line_cap(l->kind);
     l->outline = line_outline(l->kind);
-#ifdef PORT_VITA
-    l->fine = Vita_TagHudCap() > 0;
-#endif
     l->pad = l->outline + 2;
     l->advance = MenuText_LineMeasure(l->kind, l->text, l->cap, l->pad, &l->w, &l->h, &l->base);
     return l->advance > 0;
@@ -109,10 +125,18 @@ static int text_id(const char *text, int kind, int translate) {
     pthread_mutex_lock(&sLock);
     for (i = 0; i < TBO_TEXT_SLOTS; i++) {
         TboLine *l = &sLines[i];
+#ifdef PORT_VITA
+        /* (taguivita: the size it is written at and its narrowing are part of the line) */
+        if (l->version != 0 && l->kind == kind && strncmp(l->text, text, TEXT_MAX - 1) == 0 &&
+            (kind == 2 || gVitaTboWantCap <= 0 || l->cap == gVitaTboWantCap) &&
+            (gVitaTboWantCap == 0 ? l->vsx == 1000 && l->vsy == 1000 : l->vsx == gVitaTboWantSx && l->vsy == gVitaTboWantSy)) {
+#else
         if (l->version != 0 && l->kind == kind && strncmp(l->text, text, TEXT_MAX - 1) == 0) {
+#endif
             l->askedMs = now; l->askedFrame = gGsFrame;
 #ifdef PORT_VITA
-            if ((l->generation != generation || l->fine != (Vita_TagHudCap() > 0)) && !line_measure(l, generation)) {
+            if ((l->generation != generation || l->fine != line_fine(kind) ||
+                 (gVitaTboWantCap == 0 && kind != 2 && l->cap != line_cap(kind))) && !line_measure(l, generation)) {
 #else
             if (l->generation != generation && !line_measure(l, generation)) {
 #endif
@@ -185,6 +209,20 @@ int PortTbo_TextInfo(int id, int what) {
 }
 
 #ifdef PORT_VITA
+/* (vita_tbo.c line_pixels, taguivita) how much narrower / shorter the line's picture is made, in thousandths: 1 when
+   it is to be, 0 none */
+int TboText_VitaScale(uint32_t id, int *sx, int *sy) {
+    int r = 0;
+    pthread_mutex_lock(&sLock);
+    if (id >= TBO_TEXT_BASE && id < TBO_TEXT_BASE + TBO_TEXT_SLOTS) {
+        const TboLine *l = &sLines[id - TBO_TEXT_BASE];
+        *sx = l->vsx;
+        *sy = l->vsy;
+        r = l->fine && (l->vsx != 1000 || l->vsy != 1000) && l->vsx > 0 && l->vsy > 0;
+    }
+    pthread_mutex_unlock(&sLock);
+    return r;
+}
 /* (vita_tbo.c tbo_make, taghudfine) the line was written at the HUD's capitals: no smaller copies */
 int TboText_Fine(uint32_t id) {
     int r = 0;

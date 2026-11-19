@@ -2305,7 +2305,7 @@ static void read_settings(void) {
         } else if (strcmp(line, "tagtarget") == 0) { /* Tag Team's target choice until the player picks one (vita_gfx.c): 0 L3, 1 (default) the right stick, 2 the D-pad */
             extern int gVitaTagTargetDefault;
             gVitaTagTargetDefault = atoi(eq);
-        } else if (strcmp(line, "tagui_scale") == 0) { /* the Tag Team screens' letters, percent of the PC's (vita_tbo.c): 130 (default), 100 the PC's */
+        } else if (strcmp(line, "tagui_scale") == 0) { /* the Tag Team screens' letters, percent of the PC's (vita_tbo.c): by default 100 with taguivita, 130 without */
             extern int gVitaTagUiScale;
             gVitaTagUiScale = atoi(eq);
         } else if (strcmp(line, "taghud_scale") == 0) { /* the Tag Team fight's HUD (letters, gauges, target marks), percent of the PC's: 135 (default), 100 the PC's */
@@ -2314,6 +2314,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "taghudfine") == 0) { /* the Tag Team fight's HUD for the 640 x 368 picture: its lines written at their size, no stroke under 1.25 pixels (vita_tbo.c): 0 (default) off, 1 on, 2 the soak's B battles */
             extern int gVitaTagHudFine;
             gVitaTagHudFine = atoi(eq);
+        } else if (strcmp(line, "taguivita") == 0) { /* the Tag Team screens the game's menus' way: the kit from one atlas at its pixel size, lines written with the capitals they show, the backdrop given back in a fight (vita_tbo.c): 1 (default), 0 the way before, 2 the soak's B battles */
+            extern int gVitaTagUiVita;
+            gVitaTagUiVita = atoi(eq);
         } else if (strcmp(line, "taghudvita") == 0) { /* the Tag Team fight's HUD the game's HUD's way: gauges as the 1 vs 1 HUD's, not narrowed twice, shapes from one atlas, the game's timer, words at the HUD's size (vita_tbo.c): 1 (default), 0 the way before, 2 the soak's B battles */
             extern int gVitaTagHudVita;
             gVitaTagHudVita = atoi(eq);

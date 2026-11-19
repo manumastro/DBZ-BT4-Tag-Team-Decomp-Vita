@@ -234,7 +234,11 @@ static void TeamSel_TagCaption(s32 seat,s32 pending){
     /* (the Vita, tagui_scale) the header's and the teams' captions had capitals of 8-9 pixels on the 5-inch screen:
        a third larger again (the screens' own tagui_scale on top), centred on their bars; the teams' bar a little
        taller, the red team's line kept left of the prompts */
-    Ps_Text(24+left,Ps_TextTop(15,.56f*1.3f),sTagTransition?"TAG TEAM | PREPARING STAGE SELECT":"TAG TEAM | CHARACTER SELECT",.56f*1.3f,365-2*left,3);
+    /* (bt3.txt taguivita: the screens' letters at the PC's size, tagui_scale 100, so these keep their v1.4.1 size, now
+       written with the capitals they show: the header's ~15 pixels, as the game's own names on this screen) */
+    extern int Vita_TagUiDefault100(void);
+    f32 vk=Vita_TagUiDefault100()?1.3f:1.0f;
+    Ps_Text(24+left,Ps_TextTop(15,.56f*1.3f*vk),sTagTransition?"TAG TEAM | PREPARING STAGE SELECT":"TAG TEAM | CHARACTER SELECT",.56f*1.3f*vk,365-2*left,3);
 #else
     Ps_Text(24+left,7,sTagTransition?"TAG TEAM | PREPARING STAGE SELECT":"TAG TEAM | CHARACTER SELECT",.56f,365-2*left,3);
 #endif
@@ -257,7 +261,7 @@ static void TeamSel_TagCaption(s32 seat,s32 pending){
         {char pageText[40];sprintf(pageText," | %d-%d/%d",sTagPage[team]*5+1,(sTagPage[team]+1)*5<Port_TagTeamCount(team)?(sTagPage[team]+1)*5:Port_TagTeamCount(team),Port_TagTeamCount(team));Ps_Cat(line,pageText,128);}
         if(turn==seat)Ps_Cat(line,pending?(char *)PortOnline_Text(" | CONFIRMING"):Port_TagCPU(seat)?(char *)PortOnline_Text(" | SELECT CPU"):(char *)PortOnline_Text(" | YOUR TURN"),128);
 #ifdef PORT_VITA
-        Ps_Text(team?273:20+left,Ps_TextTop(434.5f,.43f*1.4f),line,.43f*1.4f,team?120:217-left,team?1:3);
+        Ps_Text(team?273:20+left,Ps_TextTop(434.5f,.43f*1.4f*vk),line,.43f*1.4f*vk,team?120:217-left,team?1:3);
 #else
         Ps_Text(team?273:20+left,433,line,.43f,217-left,team?1:3);
 #endif

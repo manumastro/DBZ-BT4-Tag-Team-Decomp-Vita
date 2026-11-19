@@ -300,19 +300,103 @@ to be reused. What remains, with what each needs:
 
 | Screen / overlay | Where (upstream) | Today on the Vita | Needs |
 |---|---|---|---|
-| Tag Team setup pages: mode, rules, health, recovery, fusion, settings, shared (`Tb_DrawTag*`) | `src/menu/port_tbo.c` 2724-2990 | PC kit pictures (`kit_*.png`) halved to ~640, TrueType lines at `tagui_scale` 130, 960 x 544 | the kit's bars, windows and capsules made at their pixel size on 960 x 544 (9-slice in an atlas), rows' lines at their capitals; count sprites per page (each `Ps_Panel` is 9) |
-| Tag Team character select (header, team rows, cursor, hexagon cells, "Goku (Mid)" bars, OK) | `src/menu/tag_team_select.inc` | the PC's art and lines scaled; the header line small | the hexagon cells and bars as atlas pieces at their size; the header in the game's menu font size; the faces from the game's sheet (already) |
-| The talk box (hosts' lines) and headings (`Ps_Msg*`, `Ps_Heading`) | `src/menu/port_screen.c` | lines at capitals 24 / 40 drawn smaller, several bands | written at the capitals shown; one band where one colour |
-| Button prompts (`btn_*.png`, `Ps_Prompt*`) | `port/tbo/ui`, `port_screen.c` 718-790 | PC button pictures halved, mipmapped | the Vita's own buttons (the game's prompt sprites, or an atlas at ~20 px) |
-| Backdrop / poster behind the screens (`tag_team_art`) | `port/tbo/ui` | 960 x 544 picture (the film off: `tbomovie=0`) | fine as a full-screen picture; check its VRAM (~2 MB) is freed in a fight |
-| Main menu's Tag Team entry, emblem | `menu_a.c`, `bt4_main_lettering.inc` | the disc's own lettering (done), emblem cut from the PC logo | emblem at its pixel size (kept, ~600 KB with the lettering) |
-| The Tag Team pause menu (`sTagPauseMenu`) | `src/battle/hud_0.c` 138 | the game's pause menu with Tag rows | check its rows are the game's font (not TrueType); else as the setup pages |
+| Tag Team setup pages: mode, rules, health, recovery, fusion, settings, shared (`Tb_DrawTag*`) | `src/menu/port_tbo.c` 2724-2990 | **done with `taguivita` (above), not run on the console**; before: PC kit pictures (`kit_*.png`) halved to ~640, TrueType lines at `tagui_scale` 130 | the kit's bars, windows and capsules made at their pixel size on 960 x 544 (9-slice in an atlas), rows' lines at their capitals; count sprites per page (each `Ps_Panel` is 9) |
+| Tag Team character select (header, team rows, cursor, hexagon cells, "Goku (Mid)" bars, OK) | `src/menu/tag_team_select.inc` | **captions, windows, prompts done with `taguivita`**; the cells, bars, OK and names are the game's own team select | the hexagon cells and bars as atlas pieces at their size; the header in the game's menu font size; the faces from the game's sheet (already) |
+| The talk box (hosts' lines) and headings (`Ps_Msg*`, `Ps_Heading`) | `src/menu/port_screen.c` | **done with `taguivita`** (the box under the page is the game's MsgWin) | written at the capitals shown; one band where one colour |
+| Button prompts (`btn_*.png`, `Ps_Prompt*`) | `port/tbo/ui`, `port_screen.c` 718-790 | **done with `taguivita`** (atlas, 24 px); in a fight still the mipmapped picture (`tag_team_hud.inc` 192) | the Vita's own buttons (the game's prompt sprites, or an atlas at ~20 px) |
+| Backdrop / poster behind the screens (`tag_team_art`) | `port/tbo/ui` | **`taguivita`: given back in fights**; 960 x 540 picture (the film off: `tbomovie=0`) | fine as a full-screen picture; check its VRAM (~2 MB) is freed in a fight |
+| Main menu's Tag Team entry, emblem | `menu_a.c`, `bt4_main_lettering.inc` | the disc's own lettering (done), **emblem from the atlas at 47 x 48 with `taguivita`** | emblem at its pixel size (kept, ~600 KB with the lettering) |
+| The Tag Team pause menu (`sTagPauseMenu`) | `src/battle/hud_0.c` 138 | **the game's own** (rows of `gPauseMenuVersus`): nothing to do | check its rows are the game's font (not TrueType); else as the setup pages |
 | Names over fighters (`fight_panels.c`) | `port/src/fight_panels.c` | TrueType lines, now not narrowed (`taghudvita`) | sized as the target's name; one line per fighter cached |
-| The assist / fusion / relay panel (`TagHud_Assist`) | `tag_team_hud.inc` 115-171 | gradient quads, lines, glyphs from the atlas (`taghudvita`) | its panel as an atlas piece (gradient 146 x 34 units), the relay's three links as pieces |
+| The assist / fusion / relay panel (`TagHud_Assist`) | `tag_team_hud.inc` 115-171 | gradient quads, lines, glyphs from the atlas (`taghudvita`); **reviewed: kept** (a plain quad costs no more than a piece) | its panel as an atlas piece (gradient 146 x 34 units), the relay's three links as pieces |
 | Revival cylinder and its label (`TagHud_Revival`) | `tag_team_hud.inc` 466-517 | 24 projected quads + rim strokes (min 1.25 px), a label | keep the projection (3D); the label box and plus sign as atlas pieces |
 | Spectator labels ("Switch fighter", L1/R1) and split-screen labels | `tag_team_hud.inc` 415-450, 554 | lines and atlas glyphs | sizes checked on the console |
 | The HUD editor (`tag_team_hud_editor.inc`) | `src/menu/tag_team_hud_editor.inc` | PC only? (to check it is reachable on the Vita) | if reachable: as the setup pages |
 | Online screens (lobby, ranked, join, profile: `Tb_Draw*` 2398-3270) | `src/menu/port_tbo.c` | not reachable offline | with the online work (`docs/vita/online-bt4.md`) |
+
+### The Vita's Tag Team screens (`taguivita`, 2026-11-19, branch `wip/tagui-vita`)
+
+The same rule for the screens the PC port adds (the developer, 2026-11-19: everything must be optimized for the Vita
+like the game's own HUD and menus; look first at how the original makes its equivalent). How the game makes its own
+menus: its pieces (windows, bars, icons) are small sheets made for its screen and resident while the menu is up; its
+words are one sprite a letter from a resident font sheet (`src/battle/col_c.c` `Font_PutSprite`), drawn at the size
+the sheet has them. How v1.4.1 made the Tag Team screens: 19 textures of the PC's pictures (100-2168 pixels across)
+stretched to powers of two and sampled down through their mipmaps (a bar 512 x 64 shown 28 pixels tall, a button
+256 x 256 shown 23), 7.3 MB with the mipmaps and the backdrop, resident for the whole session, fights included; each
+line of letters written with capitals of 40 (the talk box 24), halved to 128 rows at most and sampled down through
+mipmaps to the 11-18 pixels it shows, at 0.755 of its width (the 4:3 page's letters, `Port_MenuTextNarrow`): soft,
+grainy letters. `taguivita=1` (default 1, not compared on the console yet; `0` the way before; `2` the soak's B
+battles) keeps upstream's logic and layout (what is shown, where, the options) and makes the look the game's way:
+
+- **The kit from one atlas at its pixel size** (`port/vita/tools/vita_ui_atlas.py` -> `tbo/ui/tag_ui_vita.vt`, 512 x 248,
+  496 KB, read once in the first seconds and kept; boxes in `port/vita/vita_ui_atlas.h`, picture 0x241): every piece made
+  from the PC's picture with an area filter at the size it shows on 960 x 544, with 2 pixels of its own edge round it.
+  `Ps_SpriteScreenFiltered` (`src/menu/port_screen.c`, `PORT_VITA`) draws a piece by its box in the atlas: the same
+  sprites, the same layout (the screens place pictures by their sizes in units), one texture instead of nine.
+- **Lines written with the capitals they show** (`tbo_text.c` `gVitaTboWantCap/Sx/Sy`, `vita_tbo.c` `line_pixels`): the
+  capitals' pixels are rounded (the line drawn up to 4 % larger or smaller to match), the line written at that size with
+  a 1-pixel outline and made 0.755 as wide with an area filter (what the page does to it when it is drawn), so a texel
+  is a pixel; its corner is put on a whole pixel; no mipmaps. A line of the same words at another size is another line.
+  The headings (`Ps_Heading`) are written at their row's own size (capitals 22, `menu_text.c` `HEADING_RES` 1, not 88).
+  A line of one colour (the chosen row's) is 2 sprites, not 4.
+- **The PC's proportions** (`tagui_scale` 100 by default with it; the 130 of v1.4.1 was a pure enlargement against the
+  blur: the rows' words filled their bars, the talk box ran to three lines). The character select's captions keep their
+  v1.4.1 size (header capitals ~15 pixels, as the game's own names on that screen; teams' ~12). `tagui_scale=115` is
+  the knob if 100 reads too small on the console.
+- **The backdrop** (`tag_team_art`, 960 x 540, 2 MB) given back two seconds into a fight, read again by the maker as soon
+  as the fight is over (the game's own screens load their backdrops when they open).
+
+Sizes on the 960 x 544 screen (the page's unit 1.416 pixels across, 1.214 down):
+
+| Element | Shown | v1.4.1 texture | `taguivita=1` |
+|---|---|---|---|
+| Row bar / selection (`kit_bar`, `kit_sel`; setup, options, rules, recovery, fighter pages) | 28-30 px tall | 512 x 64 + mips, sampled at ~0.45 | 356 x 28 / 335 x 28, 1:1 |
+| Compact keys, gold / steel badges | 28 px | 128 x 128, 256 x 64 + mips | 45 x 28, 42 x 28, 106 x 28, 114 x 28 |
+| Window (`kit_window`), its corner | corner 13 px | 512 x 256 + mips (corner 54 texels) | 124 x 60 (corner 13) |
+| Talk / dialog box (`kit_dialog`) | corner 19.5 px | 512 x 128 + mips | 340 x 54 |
+| Pad buttons (prompts, rows' arrows) | 22-24 px | 256 x 256 (arrows 512 x 256, START 256 x 128) + mips, each | 24 x 24 (40 x 24, 58 x 24) |
+| Tag Team logo (title) | 262 x 87 px | 512 x 128 + mips, twice (on / off) | 262 x 88, once |
+| Main menu's emblem | ~44 x 41 px | 256 x 256 + mips | 47 x 48 |
+| Rows' words (`Ps_Text` .68-.70) | capitals 11 px (14-15 at `tagui_scale` 130) | written at 40, halved, mips, 0.755 wide | written at 11, 0.755 made at write time, 1:1 |
+| Talk box (`Ps_MsgLiteral` 1.08) / prompts | capitals 15 / 14 px | written at 24, mips | written at 15 / 14, 1:1 |
+| Headings (`Ps_Heading`) | capitals ~21 px | written at 88, halved, stretched to powers of two, mips | written at 22, 1:1 |
+| Select header / teams' captions | capitals ~15 / ~12 px | written at 40, mips | written at 15 / 12, 1:1 |
+
+Cost (the Tag Team "Local Battle" page, 10 rows, the cursor on a row with a value; counted from the code and the
+build's texture sizes; the game's own menus for reference):
+
+| | The game's own menus | v1.4.1 | `taguivita=1` |
+|---|---|---|---|
+| Sprites a picture | one a letter (a 30-letter line = 30) plus its pieces | ~125: backdrop 1, logo 1, window 9, rows 30, lines 22 (4 each, the talk box's 2), prompts' buttons 4 | ~121 (the chosen row's two lines 2 sprites each) |
+| Textures drawn from | its sheets | 9 pictures + 22 lines | 2 pictures (atlas, backdrop) + 22 lines |
+| Kept for the screens | small sheets while the menu is up | 7.3 MB (19 textures with mipmaps, backdrop 2 MB), the whole session | atlas 496 KB + the Duel menu's Tag lettering 341 KB; + the backdrop 2 MB outside fights |
+| The page's lines | the font sheet | ~3.6 MB (estimate from the fonts' metrics: 22 lines at 40 / 24 with mipmaps) | ~1.3 MB (written at 11-15, no mipmaps) |
+| Sampling | 1:1 | trilinear from 2-4 times larger | bilinear 1:1, whole pixels |
+
+So the memory the Tag Team screens keep goes from 7.3 MB (fights included) to 2.9 MB on the screens and 0.8 MB in a
+fight, and the drawing is no heavier (four sprites fewer; the kit's pieces from one texture). Not measured on the
+console yet: the report's `tboui` line gives the textures held and their KB.
+
+Reviewed, nothing to change: the Tag Team pause menu (`sTagPauseMenu`, `hud_0.c`) and the results menu ("Team 1 wins",
+Rematch, ...) are the game's own menus with some rows taken out; the assist / relay panel in a fight (`TagHud_Assist`)
+is one plain gradient quad (as cheap as an atlas piece and without edges to alias), a 1-unit bar, the portrait, the
+label and the keys (already `taghudvita`'s); the revival cylinder is projected in 3D (kept).
+
+Preview without the console: `port/vita/tools/tagui_preview.py` (Pillow): the setup page drawn from the atlas and lines
+written as the Vita writes them (the menu font DejaVu Sans Condensed Bold, the talk box's Fira Sans Condensed Bold,
+both narrowed to 0.755: measured on the console's screenshots against the fonts' advances), under the console's
+screenshot of today's page; the character select's captions over its screenshot.
+
+Console check (settings in `psvita-agent/sets/bt4/`, with the `.inputs.json` of the same name): `taguivita_menu_on` /
+`taguivita_menu_off` (the setup pages, as `tagscale_menu_*`), `taguivita_menu_115` (the letters 15 % larger),
+`taguivita_select_on` (character select), `taguivita_entry_en` (the main menu's emblem and the screens in English),
+`taguivita_2v2_on` (a 2 vs 2 fight: nothing must change; the report's `tboui` KB lower). To look at: the bars' rims
+and the window's corners sharp, the words sharp and not touching their bars' edges, the prompts' buttons sharp, the
+logo, the emblem; the log's `tag_ui_vita.vt: 512 x 248, kept`.
+
+Not done yet (next): the HUD editor (`tag_team_hud_editor.inc`: reachable on the Vita? it draws with the same kit, so
+it gets the atlas and the lines already), the online screens (with the online work), the button glyph of the fight's
+relay panel (`tag_team_hud.inc` 192, still the mipmapped picture), the hosts' pictures (online only).
 
 ## Where the Vita stands
 

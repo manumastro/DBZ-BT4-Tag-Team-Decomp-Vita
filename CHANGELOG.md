@@ -9,6 +9,10 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
   bottom left, the game's own timer at the top, a sharp radar and target ring, and readable names and labels (before,
   the gauges sat away from the corner and every word was squeezed to three quarters of its width). It also draws less
   each frame.
+- **The Tag Team screens drawn like the game's own menus** (`taguivita=1`, not yet run on the console): the bars,
+  windows, buttons and logo are now made for the Vita's screen (sharp edges instead of soft ones), every word is
+  written at the exact size it is shown (no more blurry or grainy letters), the words have the PC's proportions again
+  (they no longer fill the bars), and the Tag Team screens keep about 4 MB less memory busy, 6 MB less during fights.
 
 ## v1.4.1 (2026-11-18)
 
