@@ -337,7 +337,8 @@ void Vita_GuideOpen(void) {
     extern void Vita_VglLogFrames(int n);
     sOpen = 1;
     sLogFrames = 3;
-    Vita_VglLogFrames(2); /* (the renderer's batch log of the guide's first two pictures: what reached the GPU) */
+    Vita_VglLogFrames(8); /* (the renderer's batch log of the next pictures: the guide's first ones, a list or three behind
+                             the game's, and the lists that are not drawn are not logged) */
     sTopic = -1; /* the contents */
     sPage = 0;
     Snd_PlaySe(1, 1);
@@ -446,6 +447,7 @@ extern FontGlyph *Font_FindGlyph(u16 ch, void *slotOut);
 #define SCRATCH_QW 12288
 static u64 sScratch[SCRATCH_QW];
 static int sCmd0; /* the first command of ours this picture */
+#define W(k) (unsigned)(sScratch[k] >> 32), (unsigned)sScratch[k] /* (a 64-bit word as two halves: the log's printf has no %llx) */
 static void log_cmds(const char *who, int first) {
     int i, n = (int)Font_GetCmdCount(), total = 0;
     char line[600];
@@ -481,11 +483,10 @@ static void log_cmds(const char *who, int first) {
             hex[h] = 0;
             Vita_Log("vita: guide: %s: first text at %d,%d: %d characters, %d with a glyph: %s\n", who, tmp.x, tmp.y, len, found, hex);
             Vita_Log("vita: guide: %s: its state: scale %d/%d %%, colour %08x, shadow %u, clip %u,%u-%u,%u, align %u, flags %d, "
-                     "begin %d, tag %d; %d sprites, the first: xyz %llx uv %llx rgba %llx tex0 %llx\n",
+                     "begin %d, tag %d; %d sprites, the first: tex0 %08x%08x rgbaq %08x%08x uv %08x%08x xyz %08x%08x\n",
                      who, (int)(tmp.scaleX * 100.0f), (int)(tmp.scaleY * 100.0f), (unsigned)tmp.color, (unsigned)tmp.shadowMode,
                      tmp.clipX0, tmp.clipY0, tmp.clipX1, tmp.clipY1, (unsigned)tmp.align, (int)tmp.flags, tmp.begin != NULL,
-                     tmp.tag != NULL, sprites, sprites ? (unsigned long long)sScratch[5] : 0ULL, sprites ? (unsigned long long)sScratch[4] : 0ULL,
-                     sprites ? (unsigned long long)sScratch[3] : 0ULL, sprites ? (unsigned long long)sScratch[2] : 0ULL);
+                     tmp.tag != NULL, sprites, W(2), W(3), W(4), W(5));
         }
     }
     Vita_Log("vita: guide: %s: commands %d..%d, %d sprites made, a command:%s\n", who, first, n - 1, total, line);
@@ -630,6 +631,8 @@ void Vita_GuideMenuLabel(f32 x, f32 y, f32 sx, f32 sy, int alpha, int lit) {
     FontIcon_SetPadType(0);
     Font_PushStyle();
     style_base();
+    Font_SetBeginCallback(NULL); /* (no button pictures in the label: the icon sheet is not uploaded for it) */
+    Font_SetTagCallback(NULL, NULL);
     Font_SetScaleXY(1.30f * sx, 1.30f * sy); /* the plate's row is 32 high: capitals as tall as its neighbours' */
     Font_SetScale(1.0f);
     Font_SetSpacing(0, 0);
