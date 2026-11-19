@@ -26,6 +26,12 @@
 #include <stdio.h>
 #include <string.h>
 #include "types.h"
+/* The game's sources are built with port_compat.h, where u64 is 64 bits; this file (port/vita, "hard") is not, and
+   types.h's u64 is `unsigned long`: 32 bits on the Vita. The GS packet words written here must be the game's 64-bit
+   ones (the first builds wrote the window's quads as 32-bit words: a GIF stream of garbage that sent every primitive
+   after it into another frame buffer, the black screen and 0.4 pictures a second). */
+#undef u64
+#define u64 unsigned long long
 #include "sys/pad.h"
 #include "vita_guide_text.h"
 #include "battle/col_c.h"
@@ -68,7 +74,8 @@ extern void Vita_Log(const char *fmt, ...);
 int gVitaGuide = 1;    /* bt3.txt vitaguide: 1 (default) the entries and the legend; 0 none of them */
 int gVitaHudHelp = -1;
 int gVitaGuideTest = 0; /* bt3.txt guidetest (development, the black window's hunt): bits leaving parts out of the guide's
-                           picture: 1 the window's quads, 2 the flush before them, 4 the 4:3 page's markers, 8 the icons */ /* bt3.txt hudhelp: over the saved one (Vita Controls' SQUARE); -1 the saved one */
+                           picture: 1 the window's quads, 2 the flush before them, 4 the 4:3 page's markers, 8 the icons,
+                           16 all its text, 32 the letters' shadows and outlines */ /* bt3.txt hudhelp: over the saved one (Vita Controls' SQUARE); -1 the saved one */
 #define HUDHELP_FIGHTS 5    /* hudhelp 2: in the first fights */
 #define HUDHELP_FRAMES 1200 /* ... their first 20 seconds */
 
@@ -418,6 +425,10 @@ int Vita_GuideInput(void) {
    message window leaves its own (a clip box that grows letter by letter, its scale): text drawn with it came out
    clipped to a sliver and scaled wrong (the console's first run: a black screen, glyphs as huge sprites, scissor
    0 0 113 1). As the game's own pages do (dialog.c, pad_watch.c), nothing is taken from before. */
+static void shadow_mode(int m) { /* (guidetest bit 32: no shadow, a sprite a letter) */
+    Font_SetShadowMode((gVitaGuideTest & 32) ? 0 : m);
+}
+
 static void style_base(void) {
     Font_SetScaleXY(1.0f, 1.0f);
     Font_SetScale(1.0f);
@@ -425,7 +436,7 @@ static void style_base(void) {
     Font_SetAlign(0);
     Font_SetFlags(0);
     Font_SetClip(0, 0, 0x200, 0x1C0);
-    Font_SetShadowMode(0);
+    shadow_mode(0);
     Font_SetShadowOffset(1, 1);
     Font_SetColorRGBA(0xFF, 0xFF, 0xFF, 0x80);
     if (gVitaGuideTest & 8) { /* (test: no icons, their tags printed as letters) */
@@ -497,7 +508,7 @@ static void style_body(void) {
     Font_SetAlign(0);
     Font_SetScale(GL_SCALE);
     Font_SetSpacing(0, 0);
-    Font_SetShadowMode(1); /* the drop shadow: 2 sprites a letter */
+    shadow_mode(1); /* the drop shadow: 2 sprites a letter */
     Font_SetShadowOffset(1, 1);
     Font_SetShadowColorRGBA(0, 0, 0x10, 0x60);
     Font_SetColorRGBA(0xFF, 0xFF, 0xFF, 0x80);
@@ -508,7 +519,7 @@ static void style_heading(void) {
     Font_SetAlign(0);
     Font_SetScale(1.0f);
     Font_SetSpacing(0, 0);
-    Font_SetShadowMode(2); /* the outline, as the pause menu's headings */
+    shadow_mode(2); /* the outline, as the pause menu's headings */
     Font_SetShadowOffset(1, 1);
     Font_SetShadowColorRGBA(0x30, 0x10, 0x00, 0x60);
     Font_SetColorRGBA(0xFF, 0xB0, 0x40, 0x80);
@@ -552,6 +563,12 @@ void Vita_GuideDraw(void) {
     Dma_EndDirect(p);
     }
     sCmd0 = (int)Font_GetCmdCount();
+    if (gVitaGuideTest & 16) { /* (test: the window only) */
+        if (!(gVitaGuideTest & 4)) {
+            Port_MenuPage(0);
+        }
+        return;
+    }
 
     FontIcon_SetPadType(0);
     Font_PushStyle();
@@ -560,7 +577,7 @@ void Vita_GuideDraw(void) {
         to_u16(gVitaBt4English ? "Vita Guide" : "Guía Vita", sTitle, 96);
         Font_PrintAt(GL_TEXT_X, GL_Y0 + 7, sTitle);
         Font_SetScale(0.9f);
-        Font_SetShadowMode(1);
+        shadow_mode(1);
         Font_SetShadowColorRGBA(0, 0, 0x10, 0x60);
         for (i = 0; i < VG_TOPICS; i++) {
             to_u16(topics()[i].title, sRow[i], 96);
@@ -605,7 +622,7 @@ void Vita_GuideDraw(void) {
     }
     Font_SetAlign(0);
     Font_SetScale(0.75f);
-    Font_SetShadowMode(1);
+    shadow_mode(1);
     Font_SetColorRGBA(0xD0, 0xE0, 0xF0, 0x80);
     Font_PrintAt(GL_TEXT_X, GL_Y1 - 25, sFoot);
     Font_PopStyle();
@@ -636,7 +653,7 @@ void Vita_GuideMenuLabel(f32 x, f32 y, f32 sx, f32 sy, int alpha, int lit) {
     Font_SetScaleXY(1.30f * sx, 1.30f * sy); /* the plate's row is 32 high: capitals as tall as its neighbours' */
     Font_SetScale(1.0f);
     Font_SetSpacing(0, 0);
-    Font_SetShadowMode(2);
+    shadow_mode(2);
     Font_SetShadowOffset(1, 1);
     Font_SetShadowColorRGBA(0x10, 0x08, 0x30, alpha > 0x80 ? 0x80 : alpha);
     if (lit) {
@@ -781,7 +798,7 @@ void Vita_GuideHudHint(int visible) {
     Font_SetAlign(1);
     Font_SetScale(0.7f);
     Font_SetSpacing(0, 0);
-    Font_SetShadowMode(1);
+    shadow_mode(1);
     Font_SetShadowOffset(1, 1);
     Font_SetShadowColorRGBA(0, 0, 0, 0x60);
     Font_SetColorRGBA(0xFF, 0xFF, 0xFF, 0x68);
