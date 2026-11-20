@@ -655,6 +655,37 @@ What each must show:
 - a fight played by the developer (`online_m0_rec`, by hand, then `online_m0_play_pf1` and `online_m0_playtab_pf1`
   played back): the three state logs the same; the recording also drives the PC's `BT3_PAD_PLAY` run.
 
+## Sessions inside the running game (`session_inproc`, 2026-11-20)
+
+The lobbies (Create Match, Join by address, the Ad Hoc lobby) need a session that the lobby outlives: on the PC's
+64-bit programs `gs/state.c` keeps the game's state and puts it back (the game starts again from its first blank for
+the match, and the menus come back after it). The Vita's version is `port/vita/vita_session.c` (network builds,
+bt3.txt `session_inproc=1`; 3 measures only; 0, the default, keeps the restart through `session.txt`):
+
+- what it keeps: the game's global variables (15 ranges, 2.1 MB: the game's objects and the port files the game goes
+  through, from the linker's map by `port/vita/tools/vita_state_list.py`, written into the program's `gVitaStateList`
+  after the link with the link addresses of two marks), the game heap (28.3 MB), the blocks the game took outside it
+  (`Port_LowAlloc`, `Port_GameBigAlloc`: listed by `vita_session.c`, never freed while a snapshot holds one), the game
+  thread's stack and its registers (`vita_session_a.S`);
+- how: 4 KB pieces, zero pieces not stored, the menus' snapshot stored only where it differs from the start's; put
+  back from a stack at the bottom of the game thread's own (the kernel stops a thread whose stack pointer is outside
+  its stack when it makes a system call: a C-heap stack crashed in `free()`);
+- around it: async reads into the game's memory drained (`Vita_ReadDrain`) and the game's reads on its own thread
+  during the session (`Vita_ReadSync`), the render thread idle (`Port_GsSync`), GS memory kept and put back with the
+  pages' generations moved on (`gs_core.c` `Gs_StateKeep/Back` under `PORT_VITA`), `Port_AdxResync`, the PC's way of
+  computing (`gVitaSimExact`) and `online_neutral` set for the session and undone after.
+
+Console, 2026-11-20 (build `vita_dev_pf_nl`, sets `online_sess_s1..s3`, pictures `port/build/online_review/v3`):
+the start's snapshot 188 KB in 273 ms; the menus' 9-14 MB in 220-240 ms; a session starts 334 ms (test) or
+760-780 ms (lobby) after it is asked for and comes back in 95-100 ms; free C heap 41 MB after each return, stable.
+The Vita hosted a lobby by address (`BT3_LOBBY=lobby:7000`), the PC R1.6 joined, two matches inside the running game,
+back to the lobby after each (`BT3_LOBBY_DO ... waitseq 6|back`). Fights identical to the PC's; open: the copies
+part at a fight's restart from the result menu (blank 23936 of run b: the 5th fight's start after 4 identical ones;
+blank 7776 of run c, as the owner went back to the lobby: the Vita left the result screen 18 blanks before the PC
+heard it), and after the return the Vita shows the hub, not the lobby window (the lobby lives on).
+Fixed on the way: `PortSpecMenu_Text` (the battle menus' port lines) answered NULL on the Vita: a lobby match's result
+menu crashed.
+
 ## Versions and compatibility
 
 What a client must match to play a PC:
