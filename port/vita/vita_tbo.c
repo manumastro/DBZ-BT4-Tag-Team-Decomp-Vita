@@ -1264,6 +1264,8 @@ static unsigned char *sLetterPic[2];
 #define TBO_VITA_GUIDE_OFF 0x242
 #define TBO_VITA_GUIDE_ON 0x243
 static unsigned char *sGuidePic[2];
+static unsigned char *sOnlinePic[2]; /* "Tenkaichi Budokai Online" (bt3.txt online_menu: the main menu's online entry, as the PC's) */
+static TboTex sOnlineLetters[2];
 static volatile int sLetterState; /* 0 not begun, 1 being made, 2 done (sLetterPic NULL: not made) */
 extern uint8_t *MenuText_LineRender(int kind, const char *text, int cap, int pad, int *w, int *h, int *base); /* menu_text.c */
 extern void MenuText_LinePrewarm(int kind, int cap);
@@ -1326,9 +1328,12 @@ static int letter_thread(unsigned args, void *argp) {
     sceIoMkdir(LETTER_HOME, 0777);
     if (Vita_MemberFile("pzs4us1", 448, root) && Vita_MemberFile("pzs4us1", 449, root)) {
         extern int MenuLabels_Bt4MainItems(const char *root, const char *const *labels, int count, unsigned char **out);
-        const char *labels[2] = {"Tag Team", Port_GameProfileEnglish() ? "Vita Guide" : "Gu\xC3\xAD" "a Vita"};
-        unsigned char *pics[4] = {NULL, NULL, NULL, NULL};
-        ok = MenuLabels_Bt4MainItems(root, labels, 2, pics);
+        extern int Vita_OnlineMenu(void);
+        const char *labels[3] = {"Tag Team", Port_GameProfileEnglish() ? "Vita Guide" : "Gu\xC3\xAD" "a Vita", "Tenkaichi Budokai Online"};
+        unsigned char *pics[6] = {NULL, NULL, NULL, NULL, NULL, NULL};
+        ok = MenuLabels_Bt4MainItems(root, labels, Vita_OnlineMenu() ? 3 : 2, pics);
+        sOnlinePic[0] = pics[4];
+        sOnlinePic[1] = pics[5];
         sLetterPic[0] = pics[0];
         sLetterPic[1] = pics[1];
         sGuidePic[0] = pics[2];
@@ -1347,6 +1352,15 @@ static int letter_thread(unsigned args, void *argp) {
         free(sLetterPic[1]);
         sLetterPic[0] = letter_fallback("Tag Team", 0);
         sLetterPic[1] = letter_fallback("Tag Team", 1);
+    }
+    {
+        extern int Vita_OnlineMenu(void);
+        if (Vita_OnlineMenu() && (sOnlinePic[0] == NULL || sOnlinePic[1] == NULL)) {
+            free(sOnlinePic[0]);
+            free(sOnlinePic[1]);
+            sOnlinePic[0] = letter_fallback("Tenkaichi Budokai Online", 0);
+            sOnlinePic[1] = letter_fallback("Tenkaichi Budokai Online", 1);
+        }
     }
     if (sGuidePic[0] == NULL || sGuidePic[1] == NULL) {
         const char *guide = Port_GameProfileEnglish() ? "Vita Guide" : "Gu\xC3\xAD" "a Vita";
@@ -1396,9 +1410,9 @@ static void letters_start(void) {
     }
 }
 
-static unsigned tbo_letters(int lit, int guide) {
-    TboTex *t = guide ? &sGuideLetters[lit] : &sLetters[lit];
-    unsigned char *const *pic = guide ? sGuidePic : sLetterPic;
+static unsigned tbo_letters(int lit, int guide) { /* guide: 0 Tag Team, 1 the Vita Guide, 2 the online entry */
+    TboTex *t = guide == 2 ? &sOnlineLetters[lit] : guide ? &sGuideLetters[lit] : &sLetters[lit];
+    unsigned char *const *pic = guide == 2 ? sOnlinePic : guide ? sGuidePic : sLetterPic;
     uint32_t w = 512, h = 32, *px;
     size_t i;
 
@@ -1426,7 +1440,8 @@ static unsigned tbo_letters(int lit, int guide) {
     if (MIP_ON()) {
         tbo_bleed(px, w, h);
     }
-    return tbo_make(t, px, w, h, guide ? (lit ? "Vita Guide lettering, chosen" : "Vita Guide lettering")
+    return tbo_make(t, px, w, h, guide == 2 ? (lit ? "online entry lettering, chosen" : "online entry lettering") :
+                                 guide ? (lit ? "Vita Guide lettering, chosen" : "Vita Guide lettering")
                                        : (lit ? "main menu lettering, chosen" : "main menu lettering"), 0);
 }
 
@@ -1490,7 +1505,7 @@ static unsigned tbo_texture(uint32_t id, int *mip) {
         return gated ? 0 : tex;
     }
     if (gated && id != TBO_MAIN_TAG_OFF && id != TBO_MAIN_TAG_ON && id != TBO_MAIN_TAG_EMBLEM && id != TBO_VITA_GUIDE_OFF &&
-        id != TBO_VITA_GUIDE_ON) {
+        id != TBO_VITA_GUIDE_ON && id != TBO_MAIN_ONLINE_OFF && id != TBO_MAIN_ONLINE_ON) {
         gVitaTboGated++;
         return 0;
     }
@@ -1500,6 +1515,11 @@ static unsigned tbo_texture(uint32_t id, int *mip) {
         tbo_prefetch();
         tex = tbo_letters(id == TBO_MAIN_TAG_ON, 0);
         *mip = tex != 0 && sLetters[id == TBO_MAIN_TAG_ON].mip;
+        return tex;
+    }
+    if (id == TBO_MAIN_ONLINE_OFF || id == TBO_MAIN_ONLINE_ON) { /* (the main menu's online entry, online_menu=1) */
+        unsigned tex = tbo_letters(id == TBO_MAIN_ONLINE_ON, 2);
+        *mip = tex != 0 && sOnlineLetters[id == TBO_MAIN_ONLINE_ON].mip;
         return tex;
     }
     if (id == TBO_VITA_GUIDE_OFF || id == TBO_VITA_GUIDE_ON) {

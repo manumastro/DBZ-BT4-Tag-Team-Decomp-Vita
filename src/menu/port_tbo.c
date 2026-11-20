@@ -570,11 +570,14 @@ static void Tb_Note(char *line) {
 /* Without a server (bt3.txt online_server) the Vita has no online service: Quick Match, Ranked and Tournament say so
    instead of waiting for it; Create Match and Join work by address (the lobby and the match are the PC's). */
 extern int Vita_NetHasServer(void);
+extern int Port_GameProfileEnglish(void);
+#define TB_VITA_ES (!Port_GameProfileEnglish()) /* (the Spanish disc: these lines are not in online_language.c's catalog) */
 static void Tb_AddrOpen(void);
 static s32 Tb_VitaNoService(s32 hub) {
     if (Vita_NetHasServer() || (hub != HUB_QUICK && hub != HUB_RANKED && hub != HUB_TOURNAMENT)) return 0;
     Snd_PlaySe(1, 2);
-    Tb_Note("Not on the Vita yet: it needs the online service. Use Create Match or Join with an IP address.");
+    Tb_Note(TB_VITA_ES ? "A\xC3\xBAn no en Vita: necesita el servicio online. Usa Crear partida o Unirse."
+                       : "Not on the Vita yet: it needs the online service. Use Create Match or Join with an IP address.");
     return 1;
 }
 #endif
@@ -1905,6 +1908,12 @@ static void Tb_HubUpdate(s32 live) {
         return;
     }
     Ps_Move(&sTb->hubCur, HUB_COUNT);
+#ifdef PORT_VITA
+    if (pad->gamePressed & (PADG_CROSS | PADG_CIRCLE | PADG_START)) { /* (the console review: what the hub got) */
+        extern void Vita_Log(const char *fmt, ...);
+        Vita_Log("tbo: hub press 0x%x on row %d, nickname state %d\n", (unsigned)pad->gamePressed, (int)sTb->hubCur, (int)sTb->nicknameState);
+    }
+#endif
     if (pad->gamePressed & PADG_CROSS) {
         if (sTb->hubCur != HUB_RANKED && sTb->hubCur != HUB_PROFILE && !Tb_NicknameCanPlay()) return;
 #ifdef PORT_VITA
@@ -2059,7 +2068,8 @@ static void Tb_CreateUpdate(s32 live) {
         case CR_METHOD:
 #ifdef PORT_VITA
             if(Vita_AdhocMenuOn()){sTb->createAddress=Ps_Wrap(sTb->createAddress+side,Vita_NetHasServer()?0:1,2);break;}
-            if(!Vita_NetHasServer()){sTb->createAddress=1;Tb_Note("Room codes need the online service: not on the Vita yet. Use By Address.");break;}
+            if(!Vita_NetHasServer()){sTb->createAddress=1;Tb_Note(TB_VITA_ES?"Los c\xC3\xB3" "digos de sala necesitan el servicio online. Usa Por direcci\xC3\xB3n.":
+                                                                             "Room codes need the online service: not on the Vita yet. Use By Address.");break;}
 #endif
             sTb->createAddress=!sTb->createAddress;break;
         case CR_BATTLE:sTb->battle=Ps_Wrap(sTb->battle+side,0,4);break;
@@ -5415,11 +5425,14 @@ static char *Tb_Help(void) {
 #ifdef PORT_VITA
         if (!Vita_NetHasServer()) { /* (no online service on the Vita: what works, said plainly) */
             if (sTb->hubCur == HUB_QUICK || sTb->hubCur == HUB_RANKED || sTb->hubCur == HUB_TOURNAMENT)
-                return "Not on the Vita yet: it needs the online service. Use Create Match or Join.";
+                return TB_VITA_ES ? "A\xC3\xBAn no est\xC3\xA1 en Vita: necesita el servicio online. Usa Crear partida o Unirse."
+                                  : "Not on the Vita yet: it needs the online service. Use Create Match or Join.";
             if (sTb->hubCur == HUB_CREATE)
-                return "Host a match: other players join with your IP address and port (same Wi-Fi, or port forwarded).";
+                return TB_VITA_ES ? "Organiza una partida: los dem\xC3\xA1s se unen con tu IP y puerto (misma Wi-Fi o puerto abierto en el router)."
+                                  : "Host a match: other players join with your IP address and port (same Wi-Fi, or port forwarded).";
             if (sTb->hubCur == HUB_JOIN)
-                return "Join a match: type the host's IP address and port (for example 192.168.1.20:7000).";
+                return TB_VITA_ES ? "\xC3\x9Anete a una partida: escribe la IP y el puerto del anfitri\xC3\xB3n (por ejemplo 192.168.1.20:7000)."
+                                  : "Join a match: type the host's IP address and port (for example 192.168.1.20:7000).";
         }
 #endif
         return sTbHubSay[sTb->hubCur];

@@ -163,8 +163,17 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "scaling mode Original.\n"
      "Slow scenes: the CapUnlocker plugin."},
     {"Not there yet",
+#ifdef BT4_VITA_NETLINK
+     "# Online now (1 vs 1)\n"
+     "Main menu > Tenkaichi Budokai Online:\n"
+     "Create Match, or Join with the host's IP.\n"
+     "# Coming later, maybe\n"
+     "Quick Match, Ranked, Tournament\n"
+     "Online Tag Team\n"
+#else
      "# Coming later, maybe\n"
      "Online play\n"
+#endif
      "Vita to Vita (ad hoc)\n"
      "The PC version's new songs and stages\n"
      "The PC version's F1 menu\n"
@@ -321,8 +330,17 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "modo de escala Original.\n"
      "Escenas lentas: el plugin CapUnlocker."},
     {"Lo que aún no hay",
+#ifdef BT4_VITA_NETLINK
+     "# En línea ya (1 contra 1)\n"
+     "Menú principal > Tenkaichi Budokai Online:\n"
+     "Crear partida, o Unirse con la IP del otro.\n"
+     "# Quizá más adelante\n"
+     "Partida rápida, Clasificatorias, Torneo\n"
+     "Tag Team en línea\n"
+#else
      "# Quizá más adelante\n"
      "Juego en línea\n"
+#endif
      "Vita con Vita (ad hoc)\n"
      "Canciones y escenarios nuevos del PC\n"
      "El menú F1 de la versión de PC\n"
