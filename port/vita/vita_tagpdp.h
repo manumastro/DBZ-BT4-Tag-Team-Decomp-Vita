@@ -27,12 +27,12 @@
  * Every packet carries the ack fields for its peer, so acks ride on any traffic. A bare ack packet goes out only when
  * nothing else went to that peer within 20 ms of a control packet from it.
  *
- * Control channel, per peer: a send window of 64 messages (TagPdp_Send returns -1 when it is full); a message is resent
- * every 150 ms until acknowledged; duplicates are dropped; a reorder buffer of 64; delivered in order.
- * Unreliable channel: delivered as received, never resent; one inbox shared by all members (128 messages; a message
- * that finds it full is dropped and counted).
+ * Control channel, per peer: a send window of TAGPDP_WINDOW (32) messages (TagPdp_Send returns -1 when it is full); a message is resent
+ * every 150 ms until acknowledged; duplicates are dropped; a reorder buffer of the same size; delivered in order.
+ * Unreliable channel: delivered as received, never resent; one inbox shared by all members (TAGPDP_INBOX, 32: TagPdp_Poll stops
+ * receiving while it is full, so the rest waits in the socket; a message that still finds it full is dropped and counted).
  *
- * Memory: about 350 KB per TagPdp (the windows are fixed arrays). No malloc. Keep it static or in a pool.
+ * Memory: 154,808 bytes per TagPdp with the defaults (4 members; 5 vs 5 rooms would need TAGPDP_MAX_PEERS 10) (the windows are fixed arrays). No malloc. Keep it static or in a pool.
  * Single-threaded: call TagPdp_Poll once a frame, then TagPdp_Read until it returns -1.
  */
 
