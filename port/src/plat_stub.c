@@ -520,7 +520,14 @@ static int sPadSockets;
 int scePad2CreateSocket() { return sPadSockets++; }
 #ifdef PORT_VITA /* the second controller is there while a pad is paired for player 2 (PS TV; limeking614-dev's fork) */
 extern int Vita_Pad2Present(void);
+#ifdef BT4_VITA_NETLINK
+/* in an online match player 2's pad is the other player's, from gs/net.c: always there, as on the PC (without this
+   the versus select said "No controller connected" and the two games parted at the fight's start: console run
+   online_m3_vs_pc_host, 2026-11-20) */
+int scePad2GetState(int socket) { extern int Port_NetActive(void); return socket == 1 && !Vita_Pad2Present() && !Port_NetActive() ? 0 : 1; }
+#else
 int scePad2GetState(int socket) { return socket == 1 && !Vita_Pad2Present() ? 0 : 1; }
+#endif
 #else
 int scePad2GetState() { return 1; }            /* connected and ready */
 #endif
