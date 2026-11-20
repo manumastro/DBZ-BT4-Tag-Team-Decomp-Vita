@@ -928,7 +928,9 @@ static void ed_help(int a, char *l1, char *l2, int size) {
     } else if (d) {
         Vita_RemapMaskText(d, t, sizeof(t), 0);
     } else {
-        snprintf(t, sizeof(t), "%s", en ? "none" : "ninguno");
+        /* (no pair by default: the game's own chord, or the touch place, is the way: "none" read as "cannot") */
+        snprintf(t, sizeof(t), "%s", a <= VR_R3 ? (en ? "no pair (touch only)" : "sin pareja (solo táctil)")
+                                                : (en ? "no pair (the game's buttons work)" : "sin pareja (valen los del juego)"));
     }
     if (strchr(l1, '\n') == NULL) {
         snprintf(l2, (size_t)size, en ? "Default: %s" : "Por defecto: %s", t);
