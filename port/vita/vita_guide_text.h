@@ -40,8 +40,7 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "# Buttons the Vita does not have\n"
      "{L2}   Blast wave\n"
      "{R2}   Fly down\n"
-     "These and {L3} {R3} are touch buttons:\n"
-     "the next topic says where you touch them.\n"
+     "These and {L3} {R3}: touch, see the next topic.\n"
      "# Pause and quit\n"
      "{ST}   Pause\n"
      "Hold %K:quit%   Quit the game"},
@@ -199,8 +198,7 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "# Botones que la Vita no tiene\n"
      "{L2}   Onda\n"
      "{R2}   Bajar\n"
-     "Estos y {L3} {R3} son botones táctiles:\n"
-     "el tema siguiente dice dónde tocarlos.\n"
+     "Estos y {L3} {R3}: táctiles, mira el tema siguiente.\n"
      "# Pausa y salir\n"
      "{ST}   Pausa\n"
      "Mantén %K:quit%   Cerrar el juego"},

@@ -1220,6 +1220,7 @@ static int sHudFrames, sHudCounted;
 #define HUD_SCALE 0.82f /* (0.7 and see-through before: the console's run, too small to read in a fight) */
 #define HUD_Y 414
 static u16 sHud[200];
+static int sHudX = 256; /* the line's middle (Vita_GuideHudHint) */
 
 /* a fight began (src/battle/hud_0.c PauseMenu_Init) */
 void Vita_GuideFightStart(int tag) {
@@ -1256,15 +1257,20 @@ void Vita_GuideHudHint(int visible) {
     {   /* a dark strip under the line (the game's own message box's way: an untextured sprite, blended), then the line */
         static int sHudW;
         u64 *p;
+        int cx;
         if (sHudFrames == 1 || sHudW == 0) {
             Font_PushStyle();
             style_base();
             sHudW = cell_width(sHud, HUD_SCALE);
             Font_PopStyle();
         }
+        /* (the strip's left end kept right of the Tag allies' gauges at the foot's left, about 80 units: a longer
+           line, the D-pad target's, went under them on the console, remap_tagfight_en) */
+        cx = 256 - sHudW / 2 - 12 < 84 ? 84 + 12 + sHudW / 2 : 256;
+        sHudX = cx;
         if (!(gVitaGuideTest & 64)) { /* (guidetest bit 64: the line without its strip) */
         p = quads_begin();
-        quad(&p, 256 - sHudW / 2 - 12, HUD_Y - 4, 256 + sHudW / 2 + 12, HUD_Y + 22, RGBA(0x00, 0x04, 0x14, 0x58));
+        quad(&p, cx - sHudW / 2 - 12, HUD_Y - 4, cx + sHudW / 2 + 12, HUD_Y + 22, RGBA(0x00, 0x04, 0x14, 0x58));
         Dma_EndDirect(p);
         }
     }
@@ -1278,7 +1284,7 @@ void Vita_GuideHudHint(int visible) {
     Font_SetShadowOffset(1, 1);
     Font_SetShadowColorRGBA(0, 0, 0, 0x70);
     Font_SetColorRGBA(0xFF, 0xFF, 0xFF, 0x80);
-    Font_PrintAt(256, HUD_Y, sHud);
+    Font_PrintAt(sHudX, HUD_Y, sHud);
     Font_PopStyle();
 }
 
