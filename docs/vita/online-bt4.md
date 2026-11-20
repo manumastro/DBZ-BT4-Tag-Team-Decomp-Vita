@@ -228,12 +228,15 @@ on the same LAN, By Address (no server), with nobody holding the pads.
   table of seed 1): connected, both at the character select at blank 1754, the table's presses picked the fighters and
   stage, a fight ran (hp 50000/50000 -> 26160/24420) and a second one began; 37,969 fight blanks, the two state logs the
   same in every one, no desync. (Headless runs faster than 60 blanks a second; the Vita paces the match at 60.)
-- The PDP transport for Tag Team (T1 step 2, not wired in yet): `port/vita/vita_tagpdp.c` (reliable ordered control
-  channel with seq/ack/ack bits + a cumulative ack, resend every 150 ms, 64 outstanding, reorder window 64; unreliable
-  channel as is; session id filter; members 0-3; ~350 KB per endpoint in fixed arrays) over a send/recv/clock ops
-  table, so it runs on the host: `gcc -O2 -Wall -Wextra -I port/vita port/vita/vita_tagpdp.c
-  port/vita/tools/tagpdp_test.c` passes 8 cases (2 and 3 members, 0/10/30 % loss with duplication and reordering,
-  a foreign session ignored, 70,000 messages across the sequence wrap). Not in build.py yet.
+- The PDP transport for Tag Team (T1 step 2): `port/vita/vita_tagpdp.c` (reliable ordered control channel with
+  seq/ack/ack bits + a cumulative ack, resend every 150 ms, 32 outstanding, reorder window 32; unreliable channel as
+  is; session id filter; members 0-3; 154,808 bytes an endpoint in fixed arrays, was ~350 KB with windows of 64/128:
+  the receive loop now stops while the inbox is full, so what is not read waits in the socket's buffer) over a
+  send/recv/clock ops table, so it runs on the host: `gcc -O2 -Wall -Wextra -I port/vita port/vita/vita_tagpdp.c
+  port/vita/tools/tagpdp_test.c` passes 8 cases (2 and 3 members, 0/10/30 % loss with duplication and reordering, a
+  foreign session ignored, 70,000 messages across the sequence wrap), with windows of 32 and 64. Linked in the
+  `BT4_VITA_NETLINK=1` builds, with the same test (7 cases, fewer messages) behind bt3.txt `tagpdp_test=1/2` (set
+  `online_t1_tagpdp`). Nothing else calls the transport yet (next: `vita_tag_net.c`).
 
 ## What a player has (PC)
 

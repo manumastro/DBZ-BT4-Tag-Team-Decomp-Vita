@@ -346,6 +346,8 @@ def port_sources():
         out += [(S / n, "netcpp" if n.endswith(".cpp") else "net") for n in NETLINK_FILES] + [(V / "vita_netglue.c", "net")]
         # Tag Team between Vitas (T1, first step): the room owner's authority (shared/tag_kernel.c) and its wire
         out += [(S / "tag_team_wire.c", "hard"), (V / "vita_tag_authority.c", "hard")]
+        # its transport over datagrams (vita_tagpdp.c) and that transport's loopback test (bt3.txt tagpdp_test)
+        out += [(V / "vita_tagpdp.c", "hard"), (V / "tools/tagpdp_test.c", "hard")]
     if PS2F:
         out += [(V / "vita_pftest.c", "ee"), (V / "vita_pftest.c", "pfcheck")]
     return out

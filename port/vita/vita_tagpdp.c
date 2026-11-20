@@ -10,7 +10,7 @@
 
 #define TAGPDP_MAGIC 0x5450u
 #define TAGPDP_CH_ACK 2
-#define TAGPDP_MASK (TAGPDP_WINDOW - 1)   /* 64 divides 65536, so seq & MASK stays right across the wrap */
+#define TAGPDP_MASK (TAGPDP_WINDOW - 1)   /* a power of two divides 65536, so seq & MASK stays right across the wrap */
 
 static void put16(uint8_t *b, uint16_t v) {
     b[0] = (uint8_t)(v & 0xff);
@@ -287,7 +287,9 @@ int TagPdp_Poll(TagPdp *p) {
     if (!p)
         return 0;
     now = p->ops->now_ms(p->ctx);
-    for (i = 0; i < 256; i++) {
+    /* (stops while the inbox is full: what is not read stays in the socket's own buffer until TagPdp_Read makes room,
+       so a burst is not dropped here; the inbox then only needs about a frame's worth) */
+    for (i = 0; i < 256 && p->inbox_count < TAGPDP_INBOX; i++) {
         int from = -1;
         int n = p->ops->recv(p->ctx, &from, buf, (int)sizeof buf);
         if (n <= 0)

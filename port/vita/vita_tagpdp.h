@@ -43,8 +43,12 @@
 #define TAGPDP_HEADER 20
 #define TAGPDP_MAX_PACKET (TAGPDP_HEADER + TAGPDP_MAX_PAYLOAD)
 #define TAGPDP_RECV_SIZE 1444     /* the buffer the transport receives into (a whole packet is < 1444) */
-#define TAGPDP_WINDOW 64          /* control messages outstanding per peer, and the reorder buffer's size */
-#define TAGPDP_INBOX 128          /* delivered messages waiting for TagPdp_Read */
+#ifndef TAGPDP_WINDOW              /* control messages outstanding per peer, and the reorder buffer's size (a power of two) */
+#define TAGPDP_WINDOW 32
+#endif
+#ifndef TAGPDP_INBOX               /* delivered messages waiting for TagPdp_Read (read every frame: a frame's worth is enough) */
+#define TAGPDP_INBOX 32
+#endif
 #define TAGPDP_RESEND_MS 150
 #define TAGPDP_ACK_MS 20
 

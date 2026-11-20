@@ -53,6 +53,7 @@ static int sHeapCdram, sFloatChoice = -1; /* -1: ask */
 static int sM0, sPs2Float; /* bt3.txt m0, ps2float (vita_m0.c, vita_ps2float.c) */
 static unsigned long long sStart, sBattleStart, sLastDraw;
 static int sOnlineMenu; /* bt3.txt online_menu (Vita_OnlineMenu, below) */
+static int sTagPdpTest; /* bt3.txt tagpdp_test: Tag Team's transport, its loopback test at start (development) */
 static int sTagMenu = 1; /* bt3.txt tagteam: 0 no Tag Team entry in the main menu, 1 BT4decomp's own screens, 2 the earlier
                             text setup (Vita_TagMenu, below) */
 unsigned gVitaVuMax[2], gVitaVuCut; /* gs_vu1.c: the interpreter's most in a list, runs left out */
@@ -2731,6 +2732,8 @@ static void read_settings(void) {
             sTagMenu = atoi(eq) < 0 || atoi(eq) > 2 ? 1 : atoi(eq);
         } else if (strcmp(line, "online_menu") == 0) { /* (before the other online* lines: Vita_OnlineMenu) */
             sOnlineMenu = atoi(eq) != 0;
+        } else if (strcmp(line, "tagpdp_test") == 0) { /* Tag Team's transport, its loopback test at start (1; 2 then quit) */
+            sTagPdpTest = atoi(eq);
         } else if (strncmp(line, "adhoc", 5) == 0) { /* Ad Hoc (port/vita/vita_adhoc.c): adhoc_test, adhoc_delay, ... */
             extern void Vita_AdhocSetting(const char *name, const char *value);
             Vita_AdhocSetting(line, eq);
@@ -3635,6 +3638,22 @@ int __wrap_main(int argc, char **argv) {
         start_step("the network");
         if (Vita_NetBoot()) { /* online_test=2: the run ends after the self-test, as an exitafter run does */
             logf_("vita: exitafter: the network self-test ended the run (online_test=2)\n");
+            quit();
+        }
+    }
+    if (sTagPdpTest) { /* bt3.txt tagpdp_test (development, BT4_VITA_NETLINK=1): port/vita/tools/tagpdp_test.c on the
+                          Vita, endpoints in one process over an in-memory lossy link; 2: the run ends after it */
+#ifdef BT4_VITA_NETLINK
+        extern int Vita_TagPdpTest(void);
+        int r;
+        start_step("the Tag Team transport's test");
+        r = Vita_TagPdpTest();
+        logf_("vita: tagpdp_test: %s\n", r == 0 ? "passed" : r == 1 ? "FAILED" : "not run (no memory)");
+#else
+        logf_("vita: tagpdp_test: this build has no Tag Team transport (build.py BT4_VITA_NETLINK=1)\n");
+#endif
+        if (sTagPdpTest == 2) {
+            logf_("vita: exitafter: the Tag Team transport's test ended the run (tagpdp_test=2)\n");
             quit();
         }
     }

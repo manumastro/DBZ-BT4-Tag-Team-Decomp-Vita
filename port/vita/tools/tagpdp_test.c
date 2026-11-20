@@ -17,11 +17,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include "vita_tagpdp.h"
+#ifdef PORT_VITA
+/* The same test in the Vita's development build (BT4_VITA_NETLINK=1, bt3.txt tagpdp_test=1 or 2: vita_main.c calls
+   Vita_TagPdpTest at start, before the game), lighter (fewer messages, no sequence-wrap case), its lines in the log */
+extern void Vita_Log(const char *fmt, ...);
+#define printf Vita_Log
+#endif
 
 #define MAX_EP 3
 #define PKT_MAX 4096
+#ifdef PORT_VITA
+#define CTL_MAX 1000
+#define UNREL_MAX 500
+#else
 #define CTL_MAX 5000
 #define UNREL_MAX 2000
+#endif
 #define TICK_LIMIT_MS 600000u     /* simulated time per case */
 #define TAIL_MS 400u              /* after everything is delivered, let the last unreliable copies arrive */
 
@@ -73,7 +84,8 @@ typedef struct Result {
     uint32_t pairs;
 } Result;
 
-static Run run;
+static Run *sRunMem; /* (about 2.8 MB: on the heap, only while the test runs) */
+#define run (*sRunMem)
 
 static void fail(const char *fmt, ...) {
     va_list ap;
@@ -446,7 +458,7 @@ static void lossy(Case *c, int loss_pct) {
     c->unrel_msgs = UNREL_MAX;
 }
 
-int main(void) {
+static int test_main(void) {
     Case cases[8];
     const char *names[8] = {
         "2 members, loss 0%", "2 members, loss 10%", "2 members, loss 30%",
@@ -476,7 +488,11 @@ int main(void) {
     all_pairs(&cases[7], 2, 0x51A7E000u); lossy(&cases[7], 2);
     cases[7].ctl_msgs = 70000;
     cases[7].unrel_msgs = 0;
+#ifdef PORT_VITA
+    nc = 7; /* (the 70,000-message case takes minutes on the Vita: the host test runs it) */
+#else
     nc = 8;
+#endif
 
     for (i = 0; i < nc; i++) {
         Result res;
@@ -499,3 +515,28 @@ int main(void) {
     printf("%d of %d cases passed\n", nc - failures, nc);
     return failures ? 1 : 0;
 }
+
+/* 0: every case passed; 1: one failed; 2: no memory for the test */
+static int run_all(void) {
+    int r;
+    sRunMem = (Run *)calloc(1, sizeof(Run));
+    if (sRunMem == NULL) {
+        printf("tagpdp: no memory for the test (%u bytes)\n", (unsigned)sizeof(Run));
+        return 2;
+    }
+    r = test_main();
+    free(sRunMem);
+    sRunMem = NULL;
+    return r;
+}
+
+#ifdef PORT_VITA
+int Vita_TagPdpTest(void) {
+    printf("tagpdp: the Tag Team transport's loopback test (TagPdp %u bytes an endpoint)\n", (unsigned)sizeof(TagPdp));
+    return run_all();
+}
+#else
+int main(void) {
+    return run_all();
+}
+#endif
