@@ -706,6 +706,7 @@ static void tbo_prefetch(void) {
 static unsigned char sSessKeep[TBO_ART_COUNT];
 static unsigned sBackFrame, sBackMissing, sBackMissFrames, sBackLastMiss;
 static int sSessPinned; /* (session_warm=1, during a session: the kept pictures are not given back) */
+static unsigned char sSessKeepText[TBO_TEXT_SLOTS]; /* (and the screens' lines drawn then: the hub's labels) */
 static unsigned tbo_picture(uint32_t id) {
     TboTex *t = id == TBO_MAIN_TAG_EMBLEM ? &sEmblem : &sPic[id];
     uint32_t w = 0, h = 0;
@@ -1166,6 +1167,13 @@ static unsigned tbo_texture(uint32_t id, int *mip) {
     if (id >= TBO_TEXT_BASE && id < TBO_TEXT_BASE + TBO_TEXT_SLOTS) {
         unsigned tex = tbo_line(id);
         *mip = tex != 0 && sText[id - TBO_TEXT_BASE].mip;
+        if (tex == 0 && sBackFrame != 0 && gGsFrame - sBackFrame < 120 && sSessKeepText[id - TBO_TEXT_BASE]) {
+            sBackMissing++;
+            if (sBackLastMiss != gGsFrame) {
+                sBackLastMiss = gGsFrame;
+                sBackMissFrames++;
+            }
+        }
         return gated ? 0 : tex;
     }
     if (gated && id != TBO_MAIN_TAG_OFF && id != TBO_MAIN_TAG_ON && id != TBO_MAIN_TAG_EMBLEM) {
@@ -1214,7 +1222,8 @@ static void tbo_drop(TboTex *t, unsigned n) {
     unsigned i;
     for (i = 0; i < n; i++) {
         if (t[i].tex != 0 && gGsFrame - t[i].frame > KEEP_FRAMES && !tbo_resident(&t[i]) &&
-            !(sSessPinned && &t[i] >= sPic && &t[i] < sPic + TBO_ART_COUNT && sSessKeep[&t[i] - sPic])) {
+            !(sSessPinned && &t[i] >= sPic && &t[i] < sPic + TBO_ART_COUNT && sSessKeep[&t[i] - sPic]) &&
+            !(sSessPinned && &t[i] >= sText && &t[i] < sText + TBO_TEXT_SLOTS && sSessKeepText[&t[i] - sText])) {
             Vita_VglTexFree(t[i].tex);
             pthread_mutex_lock(&sMaker);
             t[i].tex = 0;
@@ -1339,13 +1348,17 @@ void Vita_TboFrameEnd(void) {
    budget. 0: as before. */
 int gVitaSessionWarm = 1;
 void Vita_TboSessionKeep(void) {
-    unsigned id, n = 0;
+    unsigned id, n = 0, nText = 0;
     for (id = 0; id < TBO_ART_COUNT; id++) {
         sSessKeep[id] = sPic[id].tex != 0 && gGsFrame - sPic[id].frame < 8;
         n += sSessKeep[id];
     }
+    for (id = 0; id < TBO_TEXT_SLOTS; id++) {
+        sSessKeepText[id] = sText[id].tex != 0 && gGsFrame - sText[id].frame < 8;
+        nText += sSessKeepText[id];
+    }
     sSessPinned = gVitaSessionWarm != 0;
-    Vita_Log("tbo: %u pictures of the screens shown when the session began%s\n", n,
+    Vita_Log("tbo: %u pictures and %u lines of the screens shown when the session began%s\n", n, nText,
              sSessPinned ? ": kept as textures through it (session_warm=1)" : "");
 }
 void Vita_TboSessionBack(void) {
