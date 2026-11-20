@@ -393,6 +393,12 @@ void Port_VBlank(void) {
         extern void Port_NetBeginTick(unsigned tick);
         Port_NetBeginTick(gPortVBlanks);
     }
+    {   /* gs/net.c: the eight-place lobby's work (net_lobby.c Lobby_Pump: Create Match / Join's commands, its
+           socket), as the PC's Port_VBlank below. Without it a lobby made from the menus stayed at "Opening the
+           port..." (console run online_menu_review3, 2026-11-20) */
+        extern void Port_LobbyAuto(void);
+        Port_LobbyAuto();
+    }
 #endif
     {
         extern void Vita_VBlank(unsigned vblanks); /* port/vita/vita_main.c: status screen, timing */
