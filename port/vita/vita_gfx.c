@@ -551,6 +551,14 @@ char *Vita_GsGetenv(const char *name) {
     if (name[4] == 'M' && strcmp(name, "BT3_MENU_FONT") == 0) {
         return "";
     }
+#ifdef BT4_VITA_NETLINK
+    if (strncmp(name, "BT3_NET_", 8) == 0) {
+        /* gs/net.c (through gs_internal.h's getenv) reads its session from the environment: BT3_NET_HOST, _JOIN,
+           _SESSION, _NAME, _SPEED, _SCRIPT, ... as bt3.txt or session.txt set them (vita_netglue.c). Without this
+           every one read as unset and a session never started (console run online_m3_vs_pc_host, 2026-11-20) */
+        return getenv(name);
+    }
+#endif
     return strcmp(name, "BT3_GS") == 0 ? "gpu" : NULL;
 }
 

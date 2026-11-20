@@ -386,6 +386,14 @@ void Port_VBlank(void) {
     vita_pad_table_write(); /* (BT3_PAD_TABLE, as the PC's below: the pads of the blank that ends here) */
     gPortVBlanks++;
     gPortLiveBlanks++;
+#ifdef BT4_VITA_NETLINK
+    {   /* gs/net.c's blank, as the PC's Port_VBlank below: its blank count, the lockstep wait for the other player's
+           input, the checks. Without it a session's start-up "ended" at blank 0 and the two copies never met
+           (console run online_m3_vs_pc_host, 2026-11-20) */
+        extern void Port_NetBeginTick(unsigned tick);
+        Port_NetBeginTick(gPortVBlanks);
+    }
+#endif
     {
         extern void Vita_VBlank(unsigned vblanks); /* port/vita/vita_main.c: status screen, timing */
         Vita_VBlank(gPortVBlanks);
