@@ -130,11 +130,33 @@ static int adx_blanks(const char *path) {
         }
     }
     fp = fopen(path, "rb");
+#ifdef PORT_VITA
+    /* (Vita) the streams are archive members ("afs:p:f") or files inside the disc image, which fopen cannot open:
+       their header is read where vita_file.c says the bytes are. Before this every such stream counted as 0 blanks
+       (stopped at once) when the length is counted by blanks (an online match, m0) */
+    if (fp == NULL) {
+        SceUID fd;
+        uint32_t base, size;
+        int own, n;
+        if (!Vita_FileSpan(path, &fd, &base, &size, &own)) {
+            return 0;
+        }
+        n = size < sizeof(h) ? (int)size : (int)sizeof(h);
+        n = sceIoPread(fd, h, (SceSize)n, (SceOff)base);
+        if (own) {
+            sceIoClose(fd);
+        }
+        got = n > 0 ? (size_t)n : 0;
+    } else
+#else
     if (fp == NULL) {
         return 0;
     }
-    got = fread(h, 1, sizeof(h), fp);
-    fclose(fp);
+#endif
+    {
+        got = fread(h, 1, sizeof(h), fp);
+        fclose(fp);
+    }
     if (got < sizeof(h) || ((uint32_t)h[0] << 8 | h[1]) != 0x8000) {
         return 0;
     }
@@ -161,7 +183,15 @@ static int disc_blanks(const char *path) {
     int fid, i;
 
     {const char *bt4=strstr(path,"pzs4us");int part;
-     if(bt4&&sscanf(bt4,"pzs4us%d/%d.bin",&part,&fid)==2&&part>=0&&part<4&&fid>=0&&(unsigned)fid<kBt4AdxCount[part])return kBt4AdxTime[part][fid];}
+     if(bt4&&sscanf(bt4,"pzs4us%d/%d.bin",&part,&fid)==2&&part>=0&&part<4&&fid>=0&&(unsigned)fid<kBt4AdxCount[part])return kBt4AdxTime[part][fid];
+#ifdef PORT_VITA
+     /* (Vita) an archive member is named "afs:<partition>:<file>" (vita_file.c Port_FilePath), the PC's
+        pzs4us<partition>/<file>.bin: the same table. Without it the Vita counted its own disc's lengths and the PC the
+        table's: the win talk of a fight waited 66 blanks on one and 209 on the other (console run online_sess_s3_b,
+        the desync at the 4th fight's end, 2026-11-20) */
+     if(sscanf(path,"afs:%d:%d",&part,&fid)==2&&part>=0&&part<4&&fid>=0&&(unsigned)fid<kBt4AdxCount[part])return kBt4AdxTime[part][fid];
+#endif
+    }
 
     if (at != NULL && sscanf(at + 8, "%d.bin", &fid) == 1 && strchr(at + 8, '/') == NULL) {
         return fid >= 0 && fid < ADXLEN_COUNT ? kAdxLen[fid] : 0;
