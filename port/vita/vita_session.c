@@ -649,6 +649,10 @@ void Port_SessionPoll(void) {
         sT0 = sceKernelGetProcessTimeWide();
         quiet();
         Gs_StateKeep();
+        {
+            extern void Vita_TboSessionKeep(void); /* vita_tbo.c: the screens' pictures to make again at the return */
+            Vita_TboSessionKeep();
+        }
         r = snap_save(&sOwn, &sBoot);
         if (r < 0) {
             Vita_Log("session: no memory for the menus' snapshot: the session does not start\n");
@@ -676,6 +680,10 @@ void Port_SessionPoll(void) {
             Gs_StateBack();
             Port_AdxResync();
             snap_free(&sOwn);
+            {
+                extern void Vita_TboSessionBack(void); /* vita_tbo.c (session_warm): those pictures read again now */
+                Vita_TboSessionBack();
+            }
             {
                 unsigned user, cheap;
                 free_mem(&user, &cheap);
