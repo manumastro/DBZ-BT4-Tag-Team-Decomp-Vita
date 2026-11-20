@@ -379,6 +379,11 @@ static void vita_pad_table_write(void);
 void Port_VBlank(void) {
 #ifdef BT4_VITA_NETLINK
     {
+        extern void Port_SessionPoll(void); /* port/vita/vita_session.c (bt3.txt session_inproc): the state at the first
+                                               blank is kept; a session inside the running game begins or ends here */
+        Port_SessionPoll();
+    }
+    {
         extern void Vita_NetVBlank(void); /* port/vita/vita_netglue.c: an online session's start-up runs ahead */
         Vita_NetVBlank();
     }

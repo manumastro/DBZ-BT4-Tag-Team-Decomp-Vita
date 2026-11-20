@@ -344,6 +344,9 @@ def port_sources():
                 (S / "gs/update_crypto.c", "net"), (S / "gs/update_monocypher.c", "net")]
     if NETLINK:  # online M2a: upstream's 1 vs 1 session, chat, TURN, STUN, lobbies, identity, room client, unchanged
         out += [(S / n, "netcpp" if n.endswith(".cpp") else "net") for n in NETLINK_FILES] + [(V / "vita_netglue.c", "net")]
+        # sessions inside the running game (bt3.txt session_inproc): the game's state kept and put back, as gs/state.c on
+        # the PC; its list of the game's variables is written into the program after the link (tools/vita_state_list.py)
+        out += [(V / "vita_session.c", "hard"), (V / "vita_session_a.S", "asm")]
         # Tag Team between Vitas (T1, first step): the room owner's authority (shared/tag_kernel.c) and its wire
         out += [(S / "tag_team_wire.c", "hard"), (V / "vita_tag_authority.c", "hard")]
         # its transport over datagrams (vita_tagpdp.c) and that transport's loopback test (bt3.txt tagpdp_test)
@@ -581,6 +584,12 @@ def link():
             break
     errs = [l for l in r.stderr.splitlines() if "multiple definition" in l or "undefined reference" in l or "rror" in l]
     print(f"{len(need)} stubs; link {'OK' if r.returncode == 0 else 'FAILED'}")
+    if r.returncode == 0 and NETLINK:  # the list of the game's variables, into the program (vita_session.c)
+        s = subprocess.run([sys.executable, str(ROOT / "port/vita/tools/vita_state_list.py"), str(OUT / "bt3.map"), str(OUT / "bt3.elf")],
+                           capture_output=True, text=True)
+        print((s.stdout + s.stderr).strip())
+        if s.returncode != 0:
+            return False
     for l in errs[:15]:
         print("  " + l[-200:])
     return r.returncode == 0

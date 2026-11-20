@@ -53,9 +53,22 @@ static int sPoolKb = 1024;
 int gVitaNetRelaunch;      /* bt3.txt online_relaunch: a session from bt3.txt lines goes through the restart (vita_netglue.c) */
 int gVitaNetNeutralWanted; /* bt3.txt online_neutral: a session plays with the PC's neutral Vita Settings (vita_netglue.c) */
 int gVitaNetSpeedOn;       /* bt3.txt online_speed: a session's speed above 100 % paced (vita_netglue.c) */
+/* bt3.txt session_inproc: 0 sessions restart the application (vita_netglue.c), 1 sessions inside the running game,
+   3 measure only (vita_session.c, network builds); session_test / session_leave / session_again: its test without a
+   network (blank to ask at, blanks to stay, blanks to the next) */
+int gVitaSessionInproc;
+int gVitaSessionTest[3];
 void Vita_NetSetting(const char *name, const char *value) {
     if (strcmp(name, "online") == 0) {
         gVitaOnline = atoi(value) != 0;
+    } else if (strcmp(name, "session_inproc") == 0) {
+        gVitaSessionInproc = atoi(value);
+    } else if (strcmp(name, "session_test") == 0) {
+        gVitaSessionTest[0] = atoi(value);
+    } else if (strcmp(name, "session_leave") == 0) {
+        gVitaSessionTest[1] = atoi(value);
+    } else if (strcmp(name, "session_again") == 0) {
+        gVitaSessionTest[2] = atoi(value);
     } else if (strcmp(name, "online_relaunch") == 0) { /* (a test of the session start the menus use: session.txt + restart) */
         gVitaNetRelaunch = atoi(value);
     } else if (strcmp(name, "online_neutral") == 0) { /* a session: the PC's neutral Vita Settings (vita_gfx.c) */

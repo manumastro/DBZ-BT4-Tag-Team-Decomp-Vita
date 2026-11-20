@@ -2741,7 +2741,8 @@ static void read_settings(void) {
         } else if (strncmp(line, "adhoc", 5) == 0) { /* Ad Hoc (port/vita/vita_adhoc.c): adhoc_test, adhoc_delay, ... */
             extern void Vita_AdhocSetting(const char *name, const char *value);
             Vita_AdhocSetting(line, eq);
-        } else if (strncmp(line, "online", 6) == 0) { /* the network (port/vita/vita_net.c): online, online_server, online_test, ... */
+        } else if (strncmp(line, "online", 6) == 0 || strncmp(line, "session_", 8) == 0) { /* the network (port/vita/vita_net.c): online,
+                                                                     online_server, online_test, ...; session_inproc (vita_session.c) */
             extern void Vita_NetSetting(const char *name, const char *value);
             Vita_NetSetting(line, eq);
         } else if (strcmp(line, "replay") == 0) {

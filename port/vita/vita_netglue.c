@@ -245,12 +245,7 @@ FILE *Port_FileOpenHost(const char *rel, char *path, size_t n) {
 }
 
 /* ---- gs/state.c's answers where it cannot save the game's state (its own fallback, lines 998-1008: what the PC's
-   32-bit builds get): no rollback, no in-process session. The Vita's session start is M2a's next step. ---- */
+   32-bit builds get): no rollback. The session inside the running game (Port_SessionCan, Port_SessionRequest,
+   Port_SessionReturn, Port_SessionAsked, Port_SessionPoll) is port/vita/vita_session.c's (bt3.txt session_inproc). ---- */
 int Port_RollSave(void) { return 0; }
 void Port_RollBack(int k) { (void)k; }
-int Port_SessionCan(void) { return 0; }
-void Port_SessionRequest(int role, const char *address, int port) {
-    Vita_Log("net: a session was asked (role %d, %s:%d): the Vita's session start is not built yet\n", role, address != NULL ? address : "?", port);
-}
-void Port_SessionReturn(void) {}
-int Port_SessionAsked(void) { return 0; }

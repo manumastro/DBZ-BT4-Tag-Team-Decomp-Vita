@@ -956,6 +956,7 @@ int ADXF_ReadNw(void *h, int nsct, void *buf) {
         f->job.len = have;
         f->job.done = rdnw_done;
         f->job.user = f;
+        f->job.game = 1;
         f->rdGot = 0;
         f->rdT0 = sceKernelGetProcessTimeWide();
         f->stat = STAT_READING;

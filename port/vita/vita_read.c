@@ -17,6 +17,8 @@ int gVitaAsyncRead = -1; /* bt3.txt asyncread=0 / 1 (vita_main.c), -1 not given 
 static SceUID sRdMutex = -1, sRdSema = -1;
 static int sRdOn = -1;
 static VitaReadJob *sRdHead, *sRdTail;
+static VitaReadJob *volatile sRdCur; /* the job being read */
+static volatile int sRdSync;          /* Vita_ReadSync */
 unsigned gVitaRdJobs, gVitaRdBytes; /* (for the log) */
 extern int gVitaHitch; /* (bt3.txt hitchlog, vita_hitch.c) */
 extern void Vita_HitchEv(unsigned kind, unsigned arg, unsigned arg2, unsigned long long t0, unsigned long long dur);
@@ -38,6 +40,7 @@ static int rd_thread(SceSize args, void *argp) {
             }
             j->next = NULL;
             __atomic_store_n(&j->state, 2, __ATOMIC_RELEASE);
+            sRdCur = j;
         }
         sceKernelUnlockMutex(sRdMutex, 1);
         if (j == NULL) {
@@ -54,6 +57,7 @@ static int rd_thread(SceSize args, void *argp) {
         gVitaRdBytes += got > 0 ? (unsigned)got : 0u;
         again = !__atomic_load_n(&j->cancel, __ATOMIC_ACQUIRE) && j->done != NULL ? j->done(j, got) : 0;
         sceKernelLockMutex(sRdMutex, 1, NULL);
+        sRdCur = NULL;
         if (again && !__atomic_load_n(&j->cancel, __ATOMIC_ACQUIRE)) {
             __atomic_store_n(&j->state, 1, __ATOMIC_RELEASE);
             if (sRdTail != NULL) {
@@ -73,6 +77,9 @@ static int rd_thread(SceSize args, void *argp) {
 }
 
 int Vita_ReadOn(void) {
+    if (sRdSync) {
+        return 0;
+    }
     if (sRdOn < 0) {
         SceUID th;
         sRdOn = 0;
@@ -143,3 +150,29 @@ void Vita_ReadCancel(VitaReadJob *j) {
     sceKernelUnlockMutex(sRdMutex, 1);
 }
 
+
+void Vita_ReadSync(int on) {
+    sRdSync = on;
+}
+
+void Vita_ReadDrain(void) {
+    unsigned long long t0 = sceKernelGetProcessTimeWide();
+    while (sRdOn > 0) {
+        VitaReadJob *j;
+        int busy;
+        sceKernelLockMutex(sRdMutex, 1, NULL);
+        busy = sRdCur != NULL && sRdCur->game;
+        for (j = sRdHead; j != NULL && !busy; j = j->next) {
+            busy = j->game;
+        }
+        sceKernelUnlockMutex(sRdMutex, 1);
+        if (!busy) {
+            break;
+        }
+        if (sceKernelGetProcessTimeWide() - t0 > 3000000) {
+            Vita_Log("vita: reads into the game's memory still going after 3 s\n");
+            break;
+        }
+        sceKernelDelayThread(500);
+    }
+}
