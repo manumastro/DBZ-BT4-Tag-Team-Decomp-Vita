@@ -63,7 +63,7 @@ typedef struct Region { uint8_t *at; uint32_t n; } Region;
 static Region *sReg;
 static int sRegions = -1, sListed;
 static uint32_t sGlobalBytes;
-static uint8_t *sStackTop;
+static uint8_t *sStackTop, *sStackBase; /* the game thread's stack: its top and its lowest address */
 
 /* ---- the blocks outside the heap (vita_mem.c Port_LowAlloc / Port_GameBigAlloc) ---- */
 typedef struct VitaBlock {
@@ -189,6 +189,7 @@ static void regions_init(void) {
         info.size = sizeof(info);
         if (sceKernelGetThreadInfo(0, &info) >= 0) {
             sStackTop = (uint8_t *)info.stack + info.stackSize;
+            sStackBase = (uint8_t *)info.stack;
         }
     }
     Vita_Log("session: %d ranges of the game's variables (%u KB), heap %p + %u KB, game stack top %p\n", sRegions - 1,
@@ -387,16 +388,40 @@ static int __attribute__((noinline)) snap_save(Snap *s, Snap *base) {
 }
 
 static Snap *sLoading;
-static uint8_t *sLoaderStack;
+
 #define LOADER_STACK 0x10000
 
+/* Copies the snapshot's memory back and continues at its save. Runs on its own stack at the bottom of the game
+   thread's (the system stops a thread whose stack pointer is outside its own stack when it calls the kernel: a
+   stack from the C heap crashed in free(), console run online_sess_s2); and calls nothing of the kernel. */
 static void loader(void) {
     Snap *s = sLoading;
-    VitaBlock *b, *next;
     int k;
     uint32_t j;
-    /* the blocks: those the snapshot holds are the game's again; those it does not are let go (or kept for another
-       snapshot that holds them) */
+    for (k = 0; k < s->parts; k++) {
+        const SPart *p = &s->part[k];
+        for (j = 0; j * CH < p->n; j++) {
+            uint32_t n = p->n - j * CH < CH ? p->n - j * CH : CH;
+            const uint8_t *q = s->pg[p->first + j];
+            if (q == SAME) {
+                q = base_piece(s, k, j);
+            }
+            if (q == NULL) {
+                memset(p->at + j * CH, 0, n);
+            } else {
+                memcpy(p->at + j * CH, q, n);
+            }
+        }
+    }
+    memcpy(s->stackAt, s->stackCopy, s->stackN);
+    Vita_CtxJump(s->ctx);
+}
+
+static void snap_load(Snap *s) {
+    VitaBlock *b, *next;
+    int k;
+    /* the blocks (here, on the game's own stack: free() may call the kernel): those the snapshot holds are the
+       game's again; those it does not are let go, or kept for another snapshot that holds them */
     block_lock();
     for (b = sBlocks; b != NULL; b = next) {
         int in = 0;
@@ -425,31 +450,8 @@ static void loader(void) {
         }
     }
     block_unlock();
-    for (k = 0; k < s->parts; k++) {
-        const SPart *p = &s->part[k];
-        for (j = 0; j * CH < p->n; j++) {
-            uint32_t n = p->n - j * CH < CH ? p->n - j * CH : CH;
-            const uint8_t *q = s->pg[p->first + j];
-            if (q == SAME) {
-                q = base_piece(s, k, j);
-            }
-            if (q == NULL) {
-                memset(p->at + j * CH, 0, n);
-            } else {
-                memcpy(p->at + j * CH, q, n);
-            }
-        }
-    }
-    memcpy(s->stackAt, s->stackCopy, s->stackN);
-    Vita_CtxJump(s->ctx);
-}
-
-static void snap_load(Snap *s) {
-    if (sLoaderStack == NULL) {
-        sLoaderStack = memalign(16, LOADER_STACK);
-    }
     sLoading = s;
-    Vita_CallOnStack(loader, sLoaderStack + LOADER_STACK - 64); /* (does not come back: the save returns 1) */
+    Vita_CallOnStack(loader, sStackBase + 0x4000 + LOADER_STACK); /* (does not come back: the save returns 1) */
 }
 
 /* ---- around an exchange ---- */
