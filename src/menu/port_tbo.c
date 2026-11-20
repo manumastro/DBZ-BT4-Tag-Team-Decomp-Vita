@@ -792,6 +792,28 @@ static void Tb_AddrJoin(void) {
     if (!Tb_Vanilla(0) || !Tb_AddrSplit(where, &port)) {
         return;
     }
+#ifdef PORT_VITA
+    if (sTb->tagJoin) { /* Tag Team > Join Room > BY ADDRESS: a room between Vitas (vita_tag.c) */
+        static char room[ADDR_LEN + 8];
+        extern int Port_TagJoinAddress(const char *address);
+
+        if (strchr(sTb->addr, ':') == NULL) {
+            port = Port_Setting("tagnet_port", 26200);
+        }
+        snprintf(room, sizeof(room), "%s:%d", where, (int)port);
+        Snd_PlaySe(1, 1);
+        if (!Port_TagJoinAddress(room)) {
+            Tb_Note((char *)Port_TagError());
+            Port_TagClose();
+            return;
+        }
+        sTb->tagRoomCur = 0;
+        sTb->tagMoving = -1;
+        sTb->tagChatTyping = 0;
+        Tb_SetMode(TB_TAG_ROOM);
+        return;
+    }
+#endif
     Snd_PlaySe(1, 1);
     Port_LobbyCancel();
     Port_NetNameSet(Port_NetNameGet());
@@ -1613,6 +1635,9 @@ static s32 Tb_TagShellUpdate(s32 live){
 }
 
 static void Tb_TagOnlineBack(s32 row){
+#ifdef PORT_VITA
+    Vita_AdhocMenuEnd(0); /* (a room advertised on an Ad Hoc group: its beacons and the group end with it) */
+#endif
     sTb->tagSetup=sTagHomeEntry!=0;
     sTb->tagCur=sTagHomeEntry?row:0;
     sTb->tagQuick=0;
@@ -1634,9 +1659,38 @@ static void Tb_TagNetworkMove(void){
     sTb->tagCur=order[cursor];
 }
 
+#ifdef PORT_VITA
+/* Tag Team > Create Room with adhoc_menu=1 (Port_TagEndpoint "vita-adhoc"): the group made through the system's
+   dialog and the room advertised on it (its beacon's port is tagnet_port, so Tag's Join lists it), then the room is
+   opened as the PC's Create Room does. 1: the dialog is up or has just failed (the caller stops there) */
+static s32 sTbTagAdhoc; /* 1 the dialog is up, 2 the group is there: open the room now */
+static s32 Tb_VitaTagAdhocCreate(void){
+    s32 st;
+    if(!Vita_AdhocMenuOn()||strcmp(Port_TagEndpoint(),"vita-adhoc"))return 0;
+    if(sTbTagAdhoc==2){sTbTagAdhoc=0;return 0;}
+    if(sTbTagAdhoc==0){
+        if(!Tb_Vanilla(0))return 1;
+        Snd_PlaySe(1,1);
+        if(!Vita_AdhocMenuBegin(1,Port_NetNameGet(),Port_Setting("tagnet_port",26200))){Tb_Note("AD HOC COULD NOT BE STARTED");return 1;}
+        sTbTagAdhoc=1;return 1;
+    }
+    st=Vita_AdhocMenuState();
+    if(st==1)return 1;
+    if(st==2){sTbTagAdhoc=2;return 1;}
+    sTbTagAdhoc=0;Vita_AdhocMenuEnd(0);Tb_Note("NO AD HOC GROUP: NOTHING WAS CREATED");
+    return 1;
+}
+#endif
 static void Tb_TagUpdate(s32 live){
     Pad *pad=&gPad[0];s32 dir;
     if(Tb_TagOffline()){Tb_TagOfflineUpdate(live);return;}
+#ifdef PORT_VITA
+    if(sTbTagAdhoc){ /* the group's dialog is up (Create Room on Ad Hoc): nothing else; then the room opens */
+        if(!live)return;
+        if(sTbTagAdhoc==1){Tb_VitaTagAdhocCreate();if(sTbTagAdhoc!=2)return;}
+        sTb->tagCur=TAG_NET_CREATE;pad->gamePressed|=PADG_CROSS; /* (as the press that asked for it) */
+    }
+#endif
     if(!sTb->tagSetup){
         Ps_Prompt(0,"Confirm");Ps_Prompt(2,"Back");if(!live)return;
         Ps_Move(&sTb->tagCur,3);
@@ -1667,6 +1721,9 @@ static void Tb_TagUpdate(s32 live){
     if(sTagHomeEntry&&!Tb_NicknameCanPlay())return;
     if(sTb->tagCur==TAG_NET_QUICK){sTb->quickFromTag=1;sTb->queue=2;Tb_QuickStart();return;}
     if(sTb->tagCur==TAG_NET_JOIN){sTb->tagJoin=1;sTb->code[0]=0;sTb->codeLen=sTb->keyCol=sTb->keyRow=0;Tb_SetMode(TB_JOIN);return;}
+#ifdef PORT_VITA
+    if(Tb_VitaTagAdhocCreate())return; /* (Ad Hoc: the group's dialog first) */
+#endif
     {unsigned long long content=0;s32 offline=getenv("BT4_RENDER_TEST")&&!getenv("BT4_TAG_ONLINE_TEST");
         if(!offline&&(!Tb_Vanilla(0)||Port_TagDataFingerprint(&content)!=1))return;
         Port_TagCPUOptions(sTb->tagCPU,sTb->tagDifficulty);
@@ -1823,7 +1880,11 @@ static void Tb_HubUpdate(s32 live) {
     if (!live) {
         return;
     }
+#ifdef PORT_VITA
+    if (0) { /* (no Discord button on the Vita: PortTbo_Run) */
+#else
     if (PortTbo_CommunityTake() || (pad->gamePressed & PADG_SQUARE)) {
+#endif
         Snd_PlaySe(1, 1);
         PortTbo_OpenCommunity();
         return;
@@ -2008,7 +2069,16 @@ static const TbKeyBtn sTbJoinBtnAdhoc[5] = {{"DELETE", 0, 2, TB_KEY_DELETE, 0}, 
                                             {"BY ADDRESS", 0, 4, TB_KEY_ADDR, 1}, {"AD HOC", 5, 8, TB_KEY_ADHOC, 1}};
 #define TB_JOIN_BTNS (Vita_AdhocMenuOn() ? sTbJoinBtnAdhoc : sTbJoinBtn)
 #define TB_JOIN_BTN_N (Vita_AdhocMenuOn() ? 5 : 4)
+/* Tag Team > Join Room on the Vita: a room between Vitas is joined by its address or on an Ad Hoc group (rooms codes
+   are the PC service's): the same buttons as the 1 vs 1 Join's under the code's keys, when the build has the
+   network (Port_TagEndpoint, vita_tag.c) */
+#define TB_VITA_TAGNET (Port_TagEndpoint()[0] != 0)
+#define TB_TAGJOIN_BTNS (TB_VITA_TAGNET ? TB_JOIN_BTNS : sTagJoinBtn)
+#define TB_TAGJOIN_BTN_N (TB_VITA_TAGNET ? TB_JOIN_BTN_N : 3)
 #else
+#define TB_VITA_TAGNET 0
+#define TB_TAGJOIN_BTNS sTagJoinBtn
+#define TB_TAGJOIN_BTN_N 3
 #define TB_JOIN_BTNS sTbJoinBtn
 #define TB_JOIN_BTN_N 4
 #endif
@@ -2180,7 +2250,7 @@ static void Tb_JoinUpdate(s32 live) {
             }
         }
     }
-    c = Tb_PadUpdate(KEY_ROWS,sTbKeys,sTb->tagJoin?sTagJoinBtn:TB_JOIN_BTNS,sTb->tagJoin?3:TB_JOIN_BTN_N);
+    c = Tb_PadUpdate(KEY_ROWS,sTbKeys,sTb->tagJoin?TB_TAGJOIN_BTNS:TB_JOIN_BTNS,sTb->tagJoin?TB_TAGJOIN_BTN_N:TB_JOIN_BTN_N);
     if (c > 0) {
         Tb_CodeAdd(c);
         if (sTb->codeLen == CODE_LEN) { /* full: the cursor goes to JOIN */
@@ -3054,7 +3124,7 @@ static void Tb_DrawJoin(void) {
 
         Tb_TagButton(c == sTb->codeLen ? TBO_KIT_SEL : TBO_KIT_BAR, x, 68.0f, x + 44.0f, 104.0f, 0x80);
     }
-    Tb_TagPanel(14.0f+shift,112.0f,352.0f+shift,sTb->tagJoin?324.0f:348.0f);
+    Tb_TagPanel(14.0f+shift,112.0f,352.0f+shift,sTb->tagJoin&&!TB_VITA_TAGNET?324.0f:348.0f);
 }
 
 static void Tb_DrawJoinText(void) {
@@ -3070,7 +3140,7 @@ static void Tb_DrawJoinText(void) {
         Ps_TextRaw(x, Ps_TextTop(86.0f, 1.0f), one, 1.0f, 36.0f, c < sTb->codeLen ? 3 : 0); /* (what is typed: a value) */
     }
     Ps_Align(0);
-    Tb_Keypad(24.0f+shift, 138.0f, KEY_ROWS, sTbKeys, sTb->tagJoin?sTagJoinBtn:TB_JOIN_BTNS, sTb->tagJoin ? 3 : TB_JOIN_BTN_N, 34.0f);
+    Tb_Keypad(24.0f+shift, 138.0f, KEY_ROWS, sTbKeys, sTb->tagJoin?TB_TAGJOIN_BTNS:TB_JOIN_BTNS, sTb->tagJoin ? TB_TAGJOIN_BTN_N : TB_JOIN_BTN_N, 34.0f);
 }
 
 #ifdef PORT_VITA
@@ -3122,6 +3192,16 @@ static void Tb_VitaAdhocUpdate(s32 live) {
     s32 st = Vita_AdhocMenuState();
 
     sTbAdhocN = st == 2 ? Vita_AdhocRooms(sTbAdhocRooms, ADHOC_ROWS) : 0;
+    {   /* a Tag Team room's beacon carries tagnet_port: Tag's Join lists those, the 1 vs 1 Join the lobbies */
+        s32 i, n = 0, tagPort = Port_Setting("tagnet_port", 26200);
+
+        for (i = 0; i < sTbAdhocN; i++) {
+            if ((sTbAdhocRooms[i].port == tagPort) == (sTb->tagJoin != 0)) {
+                sTbAdhocRooms[n++] = sTbAdhocRooms[i];
+            }
+        }
+        sTbAdhocN = n;
+    }
     if (sTbAdhocN > 0) {
         Ps_Prompt(0, "Join");
     }
@@ -3140,6 +3220,24 @@ static void Tb_VitaAdhocUpdate(s32 live) {
         VitaAdhocRoom *r = &sTbAdhocRooms[sTbAdhocCur];
 
         Snd_PlaySe(1, 1);
+        if (sTb->tagJoin) { /* a Tag Team room: joined by its MAC on the group (vita_tag.c) */
+            extern int Port_TagJoinAddress(const char *address);
+            static char mac[18];
+
+            Ps_Copy(mac, r->mac, 18);
+            Vita_AdhocMenuEnd(1);
+            if (!Port_TagJoinAddress(mac)) {
+                Tb_Note((char *)Port_TagError());
+                Port_TagClose();
+                Tb_SetMode(TB_JOIN);
+                return;
+            }
+            sTb->tagRoomCur = 0;
+            sTb->tagMoving = -1;
+            sTb->tagChatTyping = 0;
+            Tb_SetMode(TB_TAG_ROOM);
+            return;
+        }
         Ps_Copy(where, r->addr, 16);
         Vita_AdhocMenuEnd(1); /* (the list's beacons stop; the group stays for the lobby) */
         Port_LobbyCancel();
@@ -3199,6 +3297,14 @@ static void Tb_DrawAddrText(void) {
     } else {
         Ps_Text(38.0f, Ps_TextTop(82.0f, 0.78f), line, 0.78f, 290.0f, 3);
     }
+#ifdef PORT_VITA
+    if (sTb->tagJoin) {
+        static char tagPort[48];
+
+        sprintf(tagPort, "NO :PORT TYPED: PORT %d", (int)Port_Setting("tagnet_port", 26200));
+        Ps_Text(26.0f, Ps_TextTop(104.0f, 0.4f), tagPort, 0.4f, 300.0f, 0);
+    } else
+#endif
     Ps_Text(26.0f, Ps_TextTop(104.0f, 0.4f), "NO :PORT TYPED: PORT 7000", 0.4f, 300.0f, 0);
     Tb_Keypad(24.0f, 122.0f, ADDR_ROWS, sTbAddrKeys, sTbAddrBtn, 3, 31.0f);
 }
@@ -5462,7 +5568,7 @@ static void Tb_Speak(void) {
         Tb_BracketFocus(focus);
         break;
     case TB_JOIN:
-        Tb_KeyFocus(focus, KEY_ROWS, sTbKeys, sTb->tagJoin?sTagJoinBtn:TB_JOIN_BTNS, 3);
+        Tb_KeyFocus(focus, KEY_ROWS, sTbKeys, sTb->tagJoin?TB_TAGJOIN_BTNS:TB_JOIN_BTNS, 3);
         Ps_Copy(now, sTb->code, 40);
         break;
     case TB_NAME:
@@ -5588,7 +5694,13 @@ static u16 *Tb_BoxLine(void) {
     static u16 buf[2][TB_BOX_LINE];
     static char said[TB_BOX_LINE];
     static s32 cur = -1;
+#ifdef PORT_VITA
+    /* The Vita: a note (nickname checks, a code that did not work ...) in the hosts' box, in the game's message text,
+       while it lasts: the PC's small line over the box's top edge cannot be read at 960x544 */
+    char *say = (char *)PortOnline_Text(sTb->say > 0 ? sTb->sayLine : sTb->note > 0 ? sTb->noteLine : Tb_Help());
+#else
     char *say = (char *)PortOnline_Text(sTb->say > 0 ? sTb->sayLine : Tb_Help());
+#endif
     u16 *out;
     s32 room;
     s32 n;
@@ -5893,7 +6005,11 @@ static void Tb_DrawText(void) {
         Tb_DrawName();
         Tb_PageIn(0);
     }
+#ifdef PORT_VITA
+    if (0) { /* (the note is in the hosts' box on the Vita: Tb_BoxLine) */
+#else
     if (sTb->note > 0) {
+#endif
         s32 a = sTb->note > 16 ? 0x80 : sTb->note * 8;
 
         Ps_Align(1);
@@ -6243,8 +6359,14 @@ s32 PortTbo_Run(void) {
         IconWin_Draw();
         Tb_Draw();
         Tb_DrawText();
+#ifdef PORT_VITA
+        /* The Vita: no Discord button (a PC link the Vita cannot open; its icon is not packaged): the hub's buttons as
+           every other page's */
+        Ps_PromptsDraw();
+#else
         if (sTb->mode == TB_HUB) Tb_DrawCommunityButton(live);
         else Ps_PromptsDraw();
+#endif
         if(sTagHomeEntry&&getenv("BT4_RENDER_TEST")&&getenv("BT4_TAG_MENU_CAPTURE")&&sTb->frames==85){
             extern void Port_TagUiCapture(s32);Port_TagUiCapture(91);
             fprintf(stderr,"tag menu: section=%d row=%d\n",sTb->tagSection,sTb->tagCur);
