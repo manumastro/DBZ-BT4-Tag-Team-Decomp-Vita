@@ -135,6 +135,10 @@ int TagPdp_Poll(TagPdp *p);
    -1 when there is none; -2 when buf is smaller than the message (the message stays) */
 int TagPdp_Read(TagPdp *p, int *peer, int *channel, void *buf, int size);
 
+/* forgets everything about one member (its windows, sequence numbers, its waiting messages): for a slot given to a
+   new member, whose numbering starts again */
+void TagPdp_ResetPeer(TagPdp *p, int peer);
+
 /* control messages to a peer not yet acknowledged */
 int TagPdp_QueueDepth(const TagPdp *p, int peer);
 

@@ -54,6 +54,7 @@ static int sM0, sPs2Float; /* bt3.txt m0, ps2float (vita_m0.c, vita_ps2float.c) 
 static unsigned long long sStart, sBattleStart, sLastDraw;
 static int sOnlineMenu; /* bt3.txt online_menu (Vita_OnlineMenu, below) */
 static int sTagPdpTest; /* bt3.txt tagpdp_test: Tag Team's transport, its loopback test at start (development) */
+static int sTagNetTest; /* bt3.txt tagnet_test: the Tag Team room between Vitas, its in-process test at start (development) */
 static int sTagMenu = 1; /* bt3.txt tagteam: 0 no Tag Team entry in the main menu, 1 BT4decomp's own screens, 2 the earlier
                             text setup (Vita_TagMenu, below) */
 unsigned gVitaVuMax[2], gVitaVuCut; /* gs_vu1.c: the interpreter's most in a list, runs left out */
@@ -2721,7 +2722,8 @@ static void read_settings(void) {
         } else if (strcmp(line, "tagscreen") == 0) { /* with startmode=80 (the port's screen mode): 1 the menus start on
                                                         BT4decomp's own Tag Team screens, as its main menu entry opens them */
             extern int gPortScreen;
-            gPortScreen = atoi(eq) ? 2 : 0; /* (include/menu/port_screen.h PORT_SCREEN_TAG) */
+            gPortScreen = atoi(eq) == 3 ? 1 : atoi(eq) ? 2 : 0; /* (include/menu/port_screen.h PORT_SCREEN_TAG; 3: PORT_SCREEN_TBO,
+                                                                    the online hub, with online_menu=1: the menus review) */
         } else if (strcmp(line, "hangdump") == 0) {
             gVitaHangDump = atoi(eq);
         } else if (strcmp(line, "zones") == 0) { /* 1: the zones timed by the system's clock when libperf is not there */
@@ -2734,6 +2736,8 @@ static void read_settings(void) {
             sOnlineMenu = atoi(eq) != 0;
         } else if (strcmp(line, "tagpdp_test") == 0) { /* Tag Team's transport, its loopback test at start (1; 2 then quit) */
             sTagPdpTest = atoi(eq);
+        } else if (strcmp(line, "tagnet_test") == 0) { /* the Tag Team room between Vitas, its test at start (1; 2 then quit) */
+            sTagNetTest = atoi(eq);
         } else if (strncmp(line, "adhoc", 5) == 0) { /* Ad Hoc (port/vita/vita_adhoc.c): adhoc_test, adhoc_delay, ... */
             extern void Vita_AdhocSetting(const char *name, const char *value);
             Vita_AdhocSetting(line, eq);
@@ -3654,6 +3658,22 @@ int __wrap_main(int argc, char **argv) {
 #endif
         if (sTagPdpTest == 2) {
             logf_("vita: exitafter: the Tag Team transport's test ended the run (tagpdp_test=2)\n");
+            quit();
+        }
+    }
+    if (sTagNetTest) { /* bt3.txt tagnet_test (development, BT4_VITA_NETLINK=1): port/vita/tools/tagnet_test.c on the Vita,
+                          the room's owner and joiners in one process over an in-memory link; 2: the run ends after it */
+#ifdef BT4_VITA_NETLINK
+        extern int Vita_TagNetTest(void);
+        int r;
+        start_step("the Tag Team room's test");
+        r = Vita_TagNetTest();
+        logf_("vita: tagnet_test: %s\n", r == 0 ? "passed" : r == 1 ? "FAILED" : "not all run (no memory)");
+#else
+        logf_("vita: tagnet_test: this build has no Tag Team room (build.py BT4_VITA_NETLINK=1)\n");
+#endif
+        if (sTagNetTest == 2) {
+            logf_("vita: exitafter: the Tag Team room's test ended the run (tagnet_test=2)\n");
             quit();
         }
     }

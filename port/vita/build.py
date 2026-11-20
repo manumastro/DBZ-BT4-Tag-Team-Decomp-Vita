@@ -348,6 +348,8 @@ def port_sources():
         out += [(S / "tag_team_wire.c", "hard"), (V / "vita_tag_authority.c", "hard")]
         # its transport over datagrams (vita_tagpdp.c) and that transport's loopback test (bt3.txt tagpdp_test)
         out += [(V / "vita_tagpdp.c", "hard"), (V / "tools/tagpdp_test.c", "hard")]
+        # the room between Vitas over it (vita_tag_net.c: the Vita's TagPeer) and its test (bt3.txt tagnet_test)
+        out += [(V / "vita_tag_net.c", "hard"), (V / "tools/tagnet_test.c", "hard")]
     if PS2F:
         out += [(V / "vita_pftest.c", "ee"), (V / "vita_pftest.c", "pfcheck")]
     return out

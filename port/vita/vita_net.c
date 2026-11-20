@@ -104,6 +104,7 @@ int Vita_NetBoot(void) {
     return 0;
 }
 void Vita_NetStop(void) {}
+int Vita_NetUp(void) { return 0; }
 #else
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -650,6 +651,9 @@ static int self_test(void *unused) {
 
 /* vita_main.c, after the settings and the memory's mapping, before the game's thread. 1: online_test=2, the run ends
    (vita_main.c writes the line the runners wait for, "vita: exitafter:", and quits) */
+/* SceNet brought up on demand (the Tag Team rooms between Vitas, vita_tag.c); 1 when it is up */
+int Vita_NetUp(void) { return net_start(); }
+
 int Vita_NetBoot(void) {
     if (!gVitaOnline && !gVitaOnlineTest) {
         return 0; /* (off: nothing loaded, nothing allocated) */

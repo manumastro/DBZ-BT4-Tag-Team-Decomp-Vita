@@ -253,6 +253,45 @@ on the same LAN, By Address (no server), with nobody holding the pads.
   foreign session ignored, 70,000 messages across the sequence wrap), with windows of 32 and 64. Linked in the
   `BT4_VITA_NETLINK=1` builds, with the same test (7 cases, fewer messages) behind bt3.txt `tagpdp_test=1/2` (set
   `online_t1_tagpdp`): **passed on the console** (2026-11-20, 7 of 7, TagPdp 154,800 bytes on the Vita). Nothing else calls the transport yet (next: `vita_tag_net.c`).
+- **The Tag Team room between Vitas (T1 step 3, 2026-11-20; its test passed on the console: 5 of 5, `tagnet_test=2`, set `online_tagnet_test`):** `port/vita/vita_tag_net.c`
+  is the Vita's counterpart of the PC's `tag_team_p2p.cpp` (its TagPeer): the owner (member 1) runs the room's
+  authority (`shared/tag_kernel.c`), applies every member's requests (its own at once), sends each its snapshots,
+  ticks the fight's frames at 34.2 a second (the last three sent unreliably each tick, 256 kept for replay; the PC
+  keeps 512), answers replay requests (16 at a time), pings every 0.5 s; a joiner sends its requests, takes the states
+  and frames in order (a 128-frame reorder window, replay asked every 100 ms while a gap waits). The same 512-byte Tag
+  packets as the PC, over TagPdp's control / unreliable channels. What the PC's signaling service does is done by a
+  handshake of our own (raw datagrams with their own magic): HELLO (name, the game data's fingerprint, the options
+  version: the PC's capability exchange) -> the owner checks the phase (lobby only), the fingerprint (the PC leaves that
+  to the service), the capability and the room (4 Vitas at most: TagPdp's members) and answers WELCOME (member number,
+  TagPdp slot, session id, room code) or REJECT (the PC's admission texts); then the owner builds the TTW_JOIN the PC's
+  `admit()` builds. Leaving: a member silent 10 s is gone (`Kernel_Leave`: in a fight its seat plays on, neutral); BYE
+  datagrams make it immediate. One round of the PC's `run()` loop per `Vtn_Step`, no thread or Vita call inside: the
+  link (send / receive a datagram, the clock) is given, so it runs on the host. `port/vita/tools/tagnet_test.c`: the
+  owner and up to three joiners, each with a small "game" doing what the menus and the battle do (choose, load, arm,
+  start, pads ahead by the ping's lead, take frames with the game's catch-up, end, rematch), over an in-memory link
+  with loss, duplicates and jitter: 6 cases pass on the host (2 Vitas clean / 5 % loss / games at 29 a second;
+  refusals of other game data and of a join after the start; 4 Vitas with 5 % loss; a member gone silent mid-fight):
+  every member takes the same frames, byte for byte, through 900 frames and a rematch. Memory: 525 KB a room
+  (`sizeof(Vtn)`, malloc'd while a room is open). On the Vita (`BT4_VITA_NETLINK=1`): bt3.txt `tagnet_test=1/2` runs
+  the test (4 cases, 300 frames) at start (set `online_tagnet_test`).
+- `vita_tag.c` now carries the PC's peer-mode client (`tag_team_net.c`'s request, poll, pads with the lead and the
+  late-feedback margin, catch-up backlog, shared options, the expanded draft, chat, hashes) in `BT4_VITA_NETLINK`
+  builds, over `vita_tag_net.c` on its own thread (2 ms rounds, a mutex: the PC's "BT4 P2P room" thread). Connect
+  strings: `vita-udp` hosts on UDP port `tagnet_port` (26200), `vita-udp:IPv4:port` joins; `vita-adhoc` /
+  `vita-adhoc:MAC` the same over the Ad Hoc group's PDP socket (`vita_adhoc.c`; needs the group up). `Port_TagEndpoint()`
+  gives `vita-adhoc` when the hub's Ad Hoc rows are on, else `vita-udp`; `Port_TagJoinAddress(address)` joins. The
+  menus' rows are still to add (Tag Team > Online is hidden on the Vita). `Port_TagDataFingerprint` is the PC's (the
+  build identity with the expanded-rules mark), so joins are no longer blocked by a 0. The local room is unchanged.
+- Decisions on the known risks: (1) **owner 34.2 steps/s vs the Vita's 2 vs 2 at ~29-30 pictures/s**: kept as the PC
+  (the room's pace is the game's 114 %; a Vita-only room ticking slower would change the game's speed); the Vitas keep
+  up with the game's own catch-up (`Port_TagCatchup`: from a backlog of 6 frames it skips pictures, 4 of 5, down to
+  2), which the test's 29-per-second games reach and recover from; `tagnet_rate` (ticks per 1000 s, default 34200)
+  is there to measure other paces, not to play. (2) **The owner's pad lead**: the PC's owner sends its pads for the
+  frame due next (lead 0: its game draws at 60/s); a Vita owner at 30/s missed the tick 111 times in 900 in the test,
+  with a lead of one frame 1 in 900 (joiners unchanged): `tagnet_lead`, default 1 (0 = the PC's). (3) **4 Vitas at
+  most** a room (TagPdp's members: 155 KB each with 4; 10 would take ~390 KB): a 5 vs 5 room plays with CPU seats; a
+  fifth Vita gets "This Tag Team room is full." (4) **Fingerprint**: the owner compares the joiner's with its own
+  before admitting (REJECT: "the same game version and game data").
 
 ## What a player has (PC)
 

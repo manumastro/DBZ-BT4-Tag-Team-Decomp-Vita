@@ -104,8 +104,10 @@ int Port_SpecialMoveCameras(int change) {
     }
     return enabled;
 }
+#ifndef BT4_VITA_NETLINK /* (a build with the network: vita_tag.c's, the rooms between Vitas) */
 int Port_TagBattleRenderActive(void) { return 0; }
 int Port_TagNetwork(void) { return 0; }
+#endif
 void Port_TagMenuSet(int a, int b) { (void)a; (void)b; }
 void Port_UiSaving(int state) { (void)state; }
 void Ui_LanguageChosen(const char *locale) { (void)locale; }
@@ -365,7 +367,9 @@ unsigned Port_StageArt(int stage,int kind) { return 0; }
 /* (port/src/gs/tag_team_net.c): the local room is port/vita/vita_tag.c */
 
 /* (port/src/gs/tag_team_sync_client.inc) */
+#ifndef BT4_VITA_NETLINK
 void Port_TagHashActor(int actor,unsigned x,unsigned y,unsigned z,unsigned hp,unsigned ki,unsigned action,unsigned target,unsigned team,unsigned chara,unsigned costume) {}
+#endif
 
 
 /* (port/src/gs/ui.cpp) */

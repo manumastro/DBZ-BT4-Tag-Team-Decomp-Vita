@@ -354,6 +354,26 @@ int TagPdp_Read(TagPdp *p, int *peer, int *channel, void *buf, int size) {
     return n;
 }
 
+void TagPdp_ResetPeer(TagPdp *p, int peer) {
+    TagPdpPeer *q;
+    int i, n;
+    if (!p || peer < 0 || peer >= TAGPDP_MAX_PEERS || peer == p->self)
+        return;
+    q = &p->peer[peer];
+    memset(q, 0, sizeof *q);
+    q->rx_hi = 0xffff;
+    p->stats.rtt_ms[peer] = 0;
+    /* the messages of that member still waiting for TagPdp_Read go too (the inbox keeps its order) */
+    n = p->inbox_count;
+    for (i = 0; i < n; i++) {
+        TagPdpMsg m = p->inbox[p->inbox_head];
+        p->inbox_head = (p->inbox_head + 1) % TAGPDP_INBOX;
+        p->inbox_count--;
+        if (m.peer != peer)
+            inbox_push(p, m.peer, m.channel, m.data, m.len);
+    }
+}
+
 int TagPdp_QueueDepth(const TagPdp *p, int peer) {
     if (!p || peer < 0 || peer >= TAGPDP_MAX_PEERS || peer == p->self)
         return 0;
