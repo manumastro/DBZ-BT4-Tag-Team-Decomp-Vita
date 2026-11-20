@@ -558,6 +558,12 @@ char *Vita_GsGetenv(const char *name) {
            every one read as unset and a session never started (console run online_m3_vs_pc_host, 2026-11-20) */
         return getenv(name);
     }
+    if (strncmp(name, "BT3_LOBBY", 9) == 0 || strcmp(name, "BT3_QUICK_AREA") == 0 || strcmp(name, "BT3_RELAY_ONLY") == 0) {
+        /* gs/net.c's lobby test hooks (Port_LobbyAuto: BT3_LOBBY=quick:<queue>, direct:, spectate:, join:CODE;
+           BT3_LOBBY_AT): read as unset before, so BT3_LOBBY=quick:S did nothing (console run online_s4_quick,
+           2026-11-20; net_lobby.c's lobby / lobbyjoin hooks use the C library's getenv and worked) */
+        return getenv(name);
+    }
 #endif
     return strcmp(name, "BT3_GS") == 0 ? "gpu" : NULL;
 }
