@@ -4178,6 +4178,21 @@ void Port_LobbyAuto(void) {
         }
         return;
     }
+#ifdef PORT_VITA
+    {   /* (the test hook's progress in the port's log: the game thread's stderr is not the program's file there) */
+        static int said;
+        static unsigned calls;
+        extern void Vita_Log(const char *fmt, ...);
+        if (calls++ % 1800 == 0 && getenv("BT3_LOBBY_TRACE") != NULL) {
+            Vita_Log("lobby: hook call %u, BT3_LOBBY=%s, begun %d, session %d\n", calls, what != NULL ? what : "(none)",
+                     begun, Port_NetSession());
+        }
+        if (what != NULL && said < 3 && (said == 0 || (said == 1 && begun == 1) || (said == 2 && Port_NetSession()))) {
+            said++;
+            Vita_Log("lobby: BT3_LOBBY=%s, begun %d, session %d\n", what, begun, Port_NetSession());
+        }
+    }
+#endif
     if (what == NULL || begun == 2 || Port_NetSession() || strncmp(what, "lobby", 5) == 0) {
         return; /* (BT3_LOBBY=lobby...: net_lobby.c) */
     }
@@ -4187,6 +4202,12 @@ void Port_LobbyAuto(void) {
             return; /* (BT3_LOBBY_AT=<n>: the lobby begins at the program's n-th blank, as a player would from the menus) */
         }
         begun = 1;
+#ifdef PORT_VITA
+        {
+            extern void Vita_Log(const char *fmt, ...);
+            Vita_Log("lobby: BT3_LOBBY=%s begins at blank %u\n", what, blanks);
+        }
+#endif
         if (getenv("BT3_NET_NAME") != NULL) {
             Port_NetNameSet(getenv("BT3_NET_NAME")); /* (the name for the matchmaking service too) */
         }
@@ -4228,6 +4249,15 @@ void Port_LobbyAuto(void) {
         state = now;
         coded = Port_LobbyCode()[0] != '\0';
         fprintf(stderr, "bt3: lobby: state %d, code '%s'%s%s\n", now, Port_LobbyCode(), now == -3 ? ", " : "", now == -3 ? Port_LobbyError() : "");
+#ifdef PORT_VITA
+        { /* (the game thread's stderr is not the program's file on the Vita: the port's log instead) */
+            extern void Vita_Log(const char *fmt, ...);
+            unsigned long long fp = 0;
+            int id = Port_DataFingerprint(&fp);
+            Vita_Log("lobby: BT3_LOBBY=%s state %d, code '%s'%s%s; game data identity %d (%016llx)\n", what, now,
+                     Port_LobbyCode(), now == -3 ? ", " : "", now == -3 ? Port_LobbyError() : "", id, fp);
+        }
+#endif
     }
     if (now == 5) {
         begun = 2; /* (a lobby's: net_lobby.c goes on) */

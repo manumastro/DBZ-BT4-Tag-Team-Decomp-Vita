@@ -7269,3 +7269,50 @@ static void run_chain(uint32_t tadr, int tte) {
 #ifdef PORT_VITA
 #undef run_chain
 #endif
+
+#if defined(PORT_VITA) && defined(BT4_VITA_NETLINK)
+/* (Vita, online sessions inside the running game: port/vita/vita_session.c) The emulated GS as the game left it, as
+   the PC's Gs_StateKeep / Gs_StateBack (upstream gs_core.c): a snapshot of the game's state does not hold GS memory,
+   and the menus put back after a session would find the fight's textures there (a menu uploads its own only when it
+   is loaded). Kept when a session begins, brought back when it ends; the pages' upload generations all moved on by
+   one amount no page has had, so that nothing the renderer decoded in between is taken for them. */
+static struct { uint32_t *vram; GsState gs; uint32_t gen[512], sig[512]; int valid; } sKept;
+static uint32_t sMoved;
+
+void Gs_StateKeep(void) {
+    extern void GsVu1_StateKeep(int restore); /* gs_vu1.c: the vertex unit's memory and programs */
+    Port_GsSync(); /* (GS memory and registers are the render thread's while it reads a list) */
+    if (sKept.vram == NULL) {
+        sKept.vram = malloc(sizeof(sVram));
+        if (sKept.vram == NULL) {
+            return;
+        }
+    }
+    memcpy(sKept.vram, sVram, sizeof(sVram));
+    sKept.gs = gGs;
+    memcpy(sKept.gen, gGsPageGen, sizeof(sKept.gen));
+    memcpy(sKept.sig, gGsPageSig, sizeof(sKept.sig));
+    sKept.valid = 1;
+    GsVu1_StateKeep(0);
+}
+
+void Gs_StateBack(void) {
+    extern void GsVu1_StateKeep(int restore);
+    int i;
+    Port_GsSync();
+    if (!sKept.valid) {
+        return;
+    }
+    memcpy(sVram, sKept.vram, sizeof(sVram));
+    gGs = sKept.gs;
+    sMoved += 0x01000000u;
+    for (i = 0; i < 512; i++) {
+        gGsPageGen[i] = sKept.gen[i] != 0 ? sKept.gen[i] + sMoved : 0;
+        gGsPageSig[i] = sKept.sig[i] + sMoved;
+    }
+    GsVu1_StateKeep(1);
+    free(sKept.vram); /* (4 MB back to the C heap between sessions) */
+    sKept.vram = NULL;
+    sKept.valid = 0;
+}
+#endif

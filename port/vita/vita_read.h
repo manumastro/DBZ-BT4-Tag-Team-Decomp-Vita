@@ -19,6 +19,7 @@ struct VitaReadJob {
     volatile int state; /* 0 idle (or finished), 1 queued, 2 being read */
     volatile int cancel;
     VitaReadJob *next;
+    int game; /* a read into the game's memory (vita_file.c): Vita_ReadDrain waits for these */
 };
 
 /* 1: the reading thread is there (bt3.txt asyncread, the first call starts it) */
@@ -27,6 +28,10 @@ int Vita_ReadOn(void);
 int Vita_ReadStart(VitaReadJob *j);
 /* returns once the job is neither queued nor being read */
 void Vita_ReadCancel(VitaReadJob *j);
+/* (online sessions inside the running game, vita_session.c) returns once no read into the game's memory is queued
+   or being read; Vita_ReadSync(1): the game's reads on its own thread (Vita_ReadOn answers 0) until Vita_ReadSync(0) */
+void Vita_ReadDrain(void);
+void Vita_ReadSync(int on);
 static inline int Vita_ReadIdle(const VitaReadJob *j) { return __atomic_load_n(&j->state, __ATOMIC_ACQUIRE) == 0; }
 
 /* where the bytes of a file are: a path, or an archive member's name from Port_FilePath ("afs:p:f"); *own: fd is

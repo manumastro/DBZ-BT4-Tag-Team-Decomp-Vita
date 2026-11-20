@@ -84,7 +84,16 @@ static int sPad2 = -1; /* the setting */
 int gVitaPad2Fake; /* (development build, the test runs' split-screen fights: bt3.txt demosplit=1) a second controller
                       that nobody holds, when there is none */
 
+/* An online session with bt3.txt online_neutral=1 (vita_netglue.c Vita_SessionLoad): the Vita Settings that change
+   what a player's pad does are the PC's neutral ones for the session (no clash assist, no stick dead zone or curve,
+   no second controller), as both players' games must play by the same rules; the player's choices are kept, not
+   saved over. 0: the old way (the player's settings in a session too). */
+int gVitaNetNeutral;
+
 int Vita_Pad2Setting(void) {
+    if (gVitaNetNeutral) {
+        return 0;
+    }
     if (sPad2 < 0) {
         sPad2 = Port_Setting("pad2", 1) != 0;
     }
@@ -175,6 +184,9 @@ void Port_ClashSquareSet(int on) {
 static int sClashAssist = -1;
 
 int Vita_ClashAssist(void) {
+    if (gVitaNetNeutral) {
+        return 0;
+    }
     if (sClashAssist < 0) {
         sClashAssist = Port_Setting("clash_assist", 0) != 0;
     }
@@ -256,6 +268,9 @@ static void clash_pad(int socket, unsigned *btn, unsigned char rawX, unsigned ch
 static int sStickDz = -1, sStickCurve = -1;
 
 int Vita_StickDeadzone(void) {
+    if (gVitaNetNeutral) {
+        return 0;
+    }
     if (sStickDz < 0) {
         int d = Port_Setting("stick_deadzone", 0);
         sStickDz = d < 0 ? 0 : d > 40 ? 40 : d / 10 * 10;
@@ -265,6 +280,9 @@ int Vita_StickDeadzone(void) {
 }
 
 int Vita_StickCurve(void) {
+    if (gVitaNetNeutral) {
+        return 0;
+    }
     Vita_StickDeadzone();
     return sStickCurve;
 }
@@ -557,6 +575,20 @@ char *Vita_GsGetenv(const char *name) {
     if (name[4] == 'M' && strcmp(name, "BT3_MENU_FONT") == 0) {
         return "";
     }
+#ifdef BT4_VITA_NETLINK
+    if (strncmp(name, "BT3_NET_", 8) == 0) {
+        /* gs/net.c (through gs_internal.h's getenv) reads its session from the environment: BT3_NET_HOST, _JOIN,
+           _SESSION, _NAME, _SPEED, _SCRIPT, ... as bt3.txt or session.txt set them (vita_netglue.c). Without this
+           every one read as unset and a session never started (console run online_m3_vs_pc_host, 2026-11-20) */
+        return getenv(name);
+    }
+    if (strncmp(name, "BT3_LOBBY", 9) == 0 || strcmp(name, "BT3_QUICK_AREA") == 0 || strcmp(name, "BT3_RELAY_ONLY") == 0) {
+        /* gs/net.c's lobby test hooks (Port_LobbyAuto: BT3_LOBBY=quick:<queue>, direct:, spectate:, join:CODE;
+           BT3_LOBBY_AT): read as unset before, so BT3_LOBBY=quick:S did nothing (console run online_s4_quick,
+           2026-11-20; net_lobby.c's lobby / lobbyjoin hooks use the C library's getenv and worked) */
+        return getenv(name);
+    }
+#endif
     return strcmp(name, "BT3_GS") == 0 ? "gpu" : NULL;
 }
 

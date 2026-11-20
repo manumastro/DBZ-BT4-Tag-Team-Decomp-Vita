@@ -31,6 +31,18 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
   windows, buttons and logo are now made for the Vita's screen (sharp edges instead of soft ones), every word is
   written at the exact size it is shown (no more blurry or grainy letters), the words have the PC's proportions again
   (they no longer fill the bars), and the Tag Team screens keep about 4 MB less memory busy, 6 MB less during fights.
+- **Multiplayer, the start** (nothing a player sees yet): BT4decomp's online code brought to its latest public release
+  (0.1.39.6 R1.6: Ranked abandonment and results, sturdier sign-in); the Vita's network start-up and the PC's
+  float arithmetic (built, not run on the console); **Ad Hoc** (Vita to Vita without internet) started: the system's
+  group dialog and a first check between Vitas (`adhoc_test`, not run on the console yet); BT4decomp's online menus
+  and its 1 vs 1 network code built for the Vita (a separate development build, `online_menu`; matches cannot start yet).
+- **Multiplayer, next steps** (development build, all off by default, not run on the console yet): a session starts
+  by restarting the app with a session file, as the PC restarts its program; the online messages ("Connecting to your
+  rival...", a desync) drawn in the port screens' own window and letters (`online_line`); **Ad Hoc rooms** in the PC's
+  menus: Create Match > Connection "Ad Hoc" and Join > "AD HOC", a list of the rooms nearby, the PC's lobby and match
+  carried over Ad Hoc (`adhoc_menu`, needs two Vitas); in a session the Vita Settings that change the pad are neutral
+  (`online_neutral`) and a room's speed above 100 % is kept (`online_speed`); the waiting message over the held
+  picture (`online_hold`) and the players' names under the health bars (`online_names`).
 
 ## v1.4.1 (2026-11-18)
 

@@ -51,7 +51,11 @@ unsigned int sceUserMainThreadStackSize = 0x00100000;
 char gVitaDisc[256] = HOME "/disc";
 static FILE *sLog;
 static int sHeapCdram, sFloatChoice = -1; /* -1: ask */
+static int sM0, sPs2Float; /* bt3.txt m0, ps2float (vita_m0.c, vita_ps2float.c) */
 static unsigned long long sStart, sBattleStart, sLastDraw;
+static int sOnlineMenu; /* bt3.txt online_menu (Vita_OnlineMenu, below) */
+static int sTagPdpTest; /* bt3.txt tagpdp_test: Tag Team's transport, its loopback test at start (development) */
+static int sTagNetTest; /* bt3.txt tagnet_test: the Tag Team room between Vitas, its in-process test at start (development) */
 static int sTagMenu = 1; /* bt3.txt tagteam: 0 no Tag Team entry in the main menu, 1 BT4decomp's own screens, 2 the earlier
                             text setup (Vita_TagMenu, below) */
 unsigned gVitaVuMax[2], gVitaVuCut; /* gs_vu1.c: the interpreter's most in a list, runs left out */
@@ -801,7 +805,12 @@ void Vita_VBlank(unsigned vblanks) {
         if ((int)(vc - nextVc) > 2) { /* (more than two blanks late: the grid moves along with the game) */
             nextVc = vc - 2;
         }
+#ifdef BT4_VITA_NETLINK
+        extern volatile int gVitaNetWarp; /* (vita_netglue.c: an online session's start-up runs ahead, no wait) */
+        if ((int)(vc - nextVc) < 0 && !gVitaNetWarp) {
+#else
         if ((int)(vc - nextVc) < 0) {
+#endif
             extern volatile unsigned char gProfGame;
             gProfGame = 1;
             {   /* (never more than the two blanks of a frame and a little: a grid out of reach starts anew) */
@@ -834,7 +843,24 @@ void Vita_VBlank(unsigned vblanks) {
             __sync_synchronize();
             gVitaGridVb = nextVc;
         }
+#ifdef BT4_VITA_NETLINK
+        {   /* an online session faster than 100 % (vita_netglue.c Vita_NetPaceMilli, bt3.txt online_speed): the grid
+               advances by 1000/speed of a screen blank a game blank, so some game blanks do not wait */
+            extern int Vita_NetPaceMilli(void);
+            static unsigned acc;
+            int sp = Vita_NetPaceMilli();
+            if (sp > 1000) {
+                acc += 1000000u / (unsigned)sp;
+                nextVc += acc / 1000u;
+                acc %= 1000u;
+            } else {
+                nextVc++;
+                acc = 0;
+            }
+        }
+#else
         nextVc++;
+#endif
         sStallEndT = now_us();
         sStallEndVc = Vita_Vcount();
         Vita_Pace((int)late); /* (vita_gfx.c: is the next frame drawn?) */
@@ -2722,6 +2748,12 @@ static void read_settings(void) {
         } else if (strcmp(line, "adxasync") == 0) { /* a sound stream's first piece read by the reading thread, the stream begun there: 0 off (the game's thread reads it), 1 on, 2 in the soak's B battles (snd_adx.c) */
             extern int gVitaAdxAsync;
             gVitaAdxAsync = atoi(eq);
+        } else if (strcmp(line, "m0") == 0) { /* online play, M0: a start like a session's, for comparing the simulation
+                                                 with the PC's (vita_m0.c: asyncread=0, an empty save, the PC's keys) */
+            sM0 = atoi(eq);
+        } else if (strcmp(line, "ps2float") == 0) { /* the PS2's float arithmetic: 0 the float unit's, 1 the PS2's (the PC's);
+                                                       only in the BT4_PS2FLOAT=1 build (port/vita/ps2float.py, vita_ps2float.c) */
+            sPs2Float = atoi(eq);
         } else if (strcmp(line, "asyncread") == 0) { /* 0: reads on the caller's thread (vita_read.c) */
             extern int gVitaAsyncRead;
             gVitaAsyncRead = atoi(eq) != 0;
@@ -2734,7 +2766,8 @@ static void read_settings(void) {
         } else if (strcmp(line, "tagscreen") == 0) { /* with startmode=80 (the port's screen mode): 1 the menus start on
                                                         BT4decomp's own Tag Team screens, as its main menu entry opens them */
             extern int gPortScreen;
-            gPortScreen = atoi(eq) ? 2 : 0; /* (include/menu/port_screen.h PORT_SCREEN_TAG) */
+            gPortScreen = atoi(eq) == 3 ? 1 : atoi(eq) ? 2 : 0; /* (include/menu/port_screen.h PORT_SCREEN_TAG; 3: PORT_SCREEN_TBO,
+                                                                    the online hub, with online_menu=1: the menus review) */
         } else if (strcmp(line, "hangdump") == 0) {
             gVitaHangDump = atoi(eq);
         } else if (strcmp(line, "zones") == 0) { /* 1: the zones timed by the system's clock when libperf is not there */
@@ -2743,6 +2776,19 @@ static void read_settings(void) {
         } else if (strcmp(line, "tagteam") == 0) { /* 0: no Tag Team entry in the main menu; 1 BT4decomp's own Tag Team
                                                       screens (the default); 2 the Vita's earlier text setup (Vita_TagMenu) */
             sTagMenu = atoi(eq) < 0 || atoi(eq) > 2 ? 1 : atoi(eq);
+        } else if (strcmp(line, "online_menu") == 0) { /* (before the other online* lines: Vita_OnlineMenu) */
+            sOnlineMenu = atoi(eq) != 0;
+        } else if (strcmp(line, "tagpdp_test") == 0) { /* Tag Team's transport, its loopback test at start (1; 2 then quit) */
+            sTagPdpTest = atoi(eq);
+        } else if (strcmp(line, "tagnet_test") == 0) { /* the Tag Team room between Vitas, its test at start (1; 2 then quit) */
+            sTagNetTest = atoi(eq);
+        } else if (strncmp(line, "adhoc", 5) == 0) { /* Ad Hoc (port/vita/vita_adhoc.c): adhoc_test, adhoc_delay, ... */
+            extern void Vita_AdhocSetting(const char *name, const char *value);
+            Vita_AdhocSetting(line, eq);
+        } else if (strncmp(line, "online", 6) == 0 || strncmp(line, "session_", 8) == 0) { /* the network (port/vita/vita_net.c): online,
+                                                                     online_server, online_test, ...; session_inproc (vita_session.c) */
+            extern void Vita_NetSetting(const char *name, const char *value);
+            Vita_NetSetting(line, eq);
         } else if (strcmp(line, "replay") == 0) {
             setenv("BT3_REPLAY", eq, 1);
         } else if (strncmp(line, "BT3_", 4) == 0 || strncmp(line, "BT4_", 4) == 0) {
@@ -2753,6 +2799,31 @@ static void read_settings(void) {
         logf_("vita: setting %s=%s\n", line, eq);
     }
     fclose(fp);
+#ifdef BT4_VITA_NETLINK
+    {   /* an online session's start (port/vita/vita_netglue.c: the variables net.c's relaunch left for this start) */
+        extern int Vita_SessionLoad(void);
+        Vita_SessionLoad();
+    }
+#endif
+    {   /* online play, M0 (vita_m0.c) and the PS2 float model (vita_ps2float.c), after every line is read */
+        extern void Vita_M0Start(int on);
+        extern void PortPF_Init(int on);
+        Vita_M0Start(sM0);
+        PortPF_Init(sPs2Float);
+#ifdef BT4_PS2FLOAT_BUILD
+        {
+            extern int Vita_PfSelfTest(void (*log)(const char *fmt, ...));
+            logf_("vita: ps2float=%d: the game's float instructions that can differ from the PS2's go through the model's"
+                  " entry points (the BT4_PS2FLOAT build); %s\n", sPs2Float, sPs2Float == 0 ? "the float unit's own results" :
+                  sPs2Float == 3 ? "the PS2's results, by the C model alone" : "the PS2's results");
+            Vita_PfSelfTest(Vita_Log);
+        }
+#else
+        if (sPs2Float) {
+            logf_("vita: ps2float ignored: this build has no PS2 float model (build with BT4_PS2FLOAT=1)\n");
+        }
+#endif
+    }
     if (getenv("BT3_SOAK") != NULL && !sweepSet) {
         /* the soak goes from battle to battle itself: the sweep's start again after 32 s would put it back to its first
            battle every time (a sweep= line still has its say) */
@@ -3118,6 +3189,15 @@ int Vita_UnlockTakeChanged(void) {
    and the CPUs' difficulty, then the room is opened as the PC's offline test does (port_tbo.c Tb_TagUpdate) and the
    game's own character select follows. docs/vita/tagteam.md */
 int Vita_TagMenu(void) { return sTagMenu; }
+/* bt3.txt online_menu=1: BT4decomp's online hub in the main menu and behind it (online M2a); only in a build that links
+   its network files (BT4_VITA_NETLINK=1), 0 otherwise */
+int Vita_OnlineMenu(void) {
+#ifdef BT4_VITA_NETLINK
+    return sOnlineMenu;
+#else
+    return 0;
+#endif
+}
 
 int Vita_TagSetup(void) {
     extern void Port_TagCPUOptions(int fill, int difficulty), Port_TagModeOptions(int free_for_all, int quick);
@@ -3227,6 +3307,9 @@ static void start_screen(void) {
     }
     if (sMode == 1) {
         setenv("BT3_DEMO", "1", 1);
+        if (sM0 && getenv("BT3_DEMO_PICK") == NULL) { /* (m0=1: the attract demo's own pairing, as the PC's BT3_DEMO) */
+            setenv("BT3_DEMO_PICK", "-1", 1);
+        }
         if (getenv("BT3_DEMO_PICK") == NULL && kDemoPick >= 0) { /* (one pairing, the heavy one, while it is worked on) */
             char b[8];
             snprintf(b, sizeof(b), "%d", kDemoPick);
@@ -3632,6 +3715,50 @@ int __wrap_main(int argc, char **argv) {
     Vita_MapMemory(sHeapCdram);
     logf_("vita: %s floats, game heap at 0x%08X, disc folder %s, %s\n", gPortFastFloat ? "hardware" : "exact", (unsigned)gVitaHeapBase, gVitaDisc,
           getenv("BT3_REPLAY") != NULL ? getenv("BT3_REPLAY") : "attract-demo fight");
+    {   /* the network, only with bt3.txt online=1 or online_test (port/vita/vita_net.c): its start-up and self-test */
+        extern int Vita_NetBoot(void);
+        start_step("the network");
+        if (Vita_NetBoot()) { /* online_test=2: the run ends after the self-test, as an exitafter run does */
+            logf_("vita: exitafter: the network self-test ended the run (online_test=2)\n");
+            quit();
+        }
+    }
+    if (sTagPdpTest) { /* bt3.txt tagpdp_test (development, BT4_VITA_NETLINK=1): port/vita/tools/tagpdp_test.c on the
+                          Vita, endpoints in one process over an in-memory lossy link; 2: the run ends after it */
+#ifdef BT4_VITA_NETLINK
+        extern int Vita_TagPdpTest(void);
+        int r;
+        start_step("the Tag Team transport's test");
+        r = Vita_TagPdpTest();
+        logf_("vita: tagpdp_test: %s\n", r == 0 ? "passed" : r == 1 ? "FAILED" : "not run (no memory)");
+#else
+        logf_("vita: tagpdp_test: this build has no Tag Team transport (build.py BT4_VITA_NETLINK=1)\n");
+#endif
+        if (sTagPdpTest == 2) {
+            logf_("vita: exitafter: the Tag Team transport's test ended the run (tagpdp_test=2)\n");
+            quit();
+        }
+    }
+    if (sTagNetTest) { /* bt3.txt tagnet_test (development, BT4_VITA_NETLINK=1): port/vita/tools/tagnet_test.c on the Vita,
+                          the room's owner and joiners in one process over an in-memory link; 2: the run ends after it */
+#ifdef BT4_VITA_NETLINK
+        extern int Vita_TagNetTest(void);
+        int r;
+        start_step("the Tag Team room's test");
+        r = Vita_TagNetTest();
+        logf_("vita: tagnet_test: %s\n", r == 0 ? "passed" : r == 1 ? "FAILED" : "not all run (no memory)");
+#else
+        logf_("vita: tagnet_test: this build has no Tag Team room (build.py BT4_VITA_NETLINK=1)\n");
+#endif
+        if (sTagNetTest == 2) {
+            logf_("vita: exitafter: the Tag Team room's test ended the run (tagnet_test=2)\n");
+            quit();
+        }
+    }
+    {   /* Ad Hoc's first check, only with bt3.txt adhoc_test (port/vita/vita_adhoc.c): on its own thread, later */
+        extern void Vita_AdhocBoot(void);
+        Vita_AdhocBoot();
+    }
     sStart = now_us();
     {
         extern int Vita_PerfInit(void);

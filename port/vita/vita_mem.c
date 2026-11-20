@@ -62,9 +62,26 @@ void *Port_Malloc(uint32_t size) {
     return (void *)(uintptr_t)p;
 }
 
+/* Where the game heap is (port/vita/vita_session.c: part of the game's state) */
+void Vita_HeapRegion(uint8_t **base, uint32_t *size) {
+    *base = (uint8_t *)(uintptr_t)gVitaHeapBase;
+    *size = HEAP_SIZE;
+}
+
+#ifdef BT4_VITA_NETLINK
+/* (online sessions inside the running game, vita_session.c: the blocks the game takes outside its heap are kept in
+   a list, part of every snapshot of the game's state, and one a snapshot holds is not given back) */
+extern void *Vita_BlockAlloc(uint32_t size, int kind);
+extern int Vita_BlockFree(void *p);
+#endif
+
 /* Memory the port hands to the game by address (file handles, the "second processor's" memory): zeroed. */
 void *Port_LowAlloc(size_t size) {
+#ifdef BT4_VITA_NETLINK
+    void *p = Vita_BlockAlloc((uint32_t)size, 1);
+#else
     void *p = calloc(1, size);
+#endif
 
     if (p == NULL) {
         Vita_Fatal("out of memory (%u bytes)", (unsigned)size);
@@ -73,6 +90,11 @@ void *Port_LowAlloc(size_t size) {
 }
 
 void Port_LowFree(void *addr) {
+#ifdef BT4_VITA_NETLINK
+    if (Vita_BlockFree(addr)) {
+        return;
+    }
+#endif
     free(addr);
 }
 
@@ -250,6 +272,13 @@ void Vita_LoadGameData(const char *disc) {
    first about every block it frees, gives it back here; an address inside the game heap is the heap's at once. */
 #define BIG_MAGIC 0xB16B7A4Cu
 unsigned Port_GameBigAlloc(int size) {
+#ifdef BT4_VITA_NETLINK
+    void *b = Vita_BlockAlloc((uint32_t)(size > 0 ? size : 0), 2);
+    if (b == NULL) {
+        Vita_Fatal("out of memory: %d bytes outside the game heap", size);
+    }
+    return (unsigned)(uintptr_t)b;
+#else
     uint8_t *p = memalign(64, (size_t)(size > 0 ? size : 0) + 64);
     if (p == NULL) {
         Vita_Fatal("out of memory: %d bytes outside the game heap", size);
@@ -266,16 +295,27 @@ unsigned Port_GameBigAlloc(int size) {
         }
     }
     return (unsigned)(uintptr_t)(p + 64);
+#endif
 }
 int Port_GameBigFree(unsigned addr) {
     uint32_t *h;
     if (addr == 0 || (addr >= gVitaHeapBase && addr < gVitaHeapBase + HEAP_SIZE) || addr < 64) {
         return 0;
     }
+#ifndef BT4_VITA_NETLINK
     h = (uint32_t *)(uintptr_t)(addr - 64);
     if (h[0] != BIG_MAGIC || h[1] != ((uint32_t)(uintptr_t)h ^ BIG_MAGIC)) {
         return 0;
     }
+#else
+    (void)h;
+    {
+        extern int Vita_BlockIs(const void *p);
+        if (!Vita_BlockIs((const void *)(uintptr_t)addr)) {
+            return 0;
+        }
+    }
+#endif
     {   /* The lists already handed over may still read the block: Tag Team reloads a fighter's model files in the
            fight (btl_obj.c: BtlRes_TagCommitReload frees the old ones), and the list reader, one list behind, then
            followed a model's DMA CALL into the next file loaded at the same place (a list of the 2 vs 2 demo fight,
@@ -290,9 +330,13 @@ int Port_GameBigFree(unsigned addr) {
                      (unsigned)(sceKernelGetProcessTimeWide() / 1000));
         }
     }
+#ifdef BT4_VITA_NETLINK
+    return Vita_BlockFree((void *)(uintptr_t)addr);
+#else
     h[0] = 0;
     free(h);
     return 1;
+#endif
 }
 unsigned gVitaBigFreeSync; /* for the log: blocks outside the game heap given back after the lists had been read */
 

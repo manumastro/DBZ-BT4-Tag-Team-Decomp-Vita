@@ -737,8 +737,12 @@ static int maker_ask(int line, uint32_t id, TboTex *t) {
     return ok;
 }
 
+static unsigned sUploadFreeUntil; /* (Vita_TboSessionBack) pictures up to this one upload without the budget */
 static int upload_ok(unsigned bytes) {
     static unsigned frame, taken;
+    if (gGsFrame <= sUploadFreeUntil) {
+        return 1;
+    }
     if (frame != gGsFrame) {
         frame = gGsFrame;
         taken = 0;
@@ -820,6 +824,11 @@ static void tbo_prefetch(void) {
     }
 }
 
+/* (session_warm) the pictures after a session's end: draws of a kept picture that found no texture, counted for the log */
+static unsigned char sSessKeep[TBO_ART_COUNT];
+static unsigned sBackFrame, sBackMissing, sBackMissFrames, sBackLastMiss;
+static int sSessPinned; /* (session_warm=1, during a session: the kept pictures are not given back) */
+static unsigned char sSessKeepText[TBO_TEXT_SLOTS]; /* (and the screens' lines drawn then: the hub's labels) */
 static unsigned tbo_picture(uint32_t id) {
     TboTex *t = id == TBO_MAIN_TAG_EMBLEM ? &sEmblem : &sPic[id];
     uint32_t w = 0, h = 0;
@@ -1471,6 +1480,13 @@ static unsigned tbo_texture(uint32_t id, int *mip) {
     if (id >= TBO_TEXT_BASE && id < TBO_TEXT_BASE + TBO_TEXT_SLOTS) {
         unsigned tex = tbo_line(id);
         *mip = tex != 0 && sText[id - TBO_TEXT_BASE].mip;
+        if (tex == 0 && sBackFrame != 0 && gGsFrame - sBackFrame < 120 && sSessKeepText[id - TBO_TEXT_BASE]) {
+            sBackMissing++;
+            if (sBackLastMiss != gGsFrame) {
+                sBackLastMiss = gGsFrame;
+                sBackMissFrames++;
+            }
+        }
         return gated ? 0 : tex;
     }
     if (gated && id != TBO_MAIN_TAG_OFF && id != TBO_MAIN_TAG_ON && id != TBO_MAIN_TAG_EMBLEM && id != TBO_VITA_GUIDE_OFF &&
@@ -1526,6 +1542,13 @@ static unsigned tbo_texture(uint32_t id, int *mip) {
     if (id == TBO_MAIN_TAG_EMBLEM || (id < TBO_ART_COUNT && id != TBO_RADAR)) {
         unsigned tex = tbo_picture(id);
         *mip = tex != 0 && (id == TBO_MAIN_TAG_EMBLEM ? sEmblem.mip : sPic[id].mip);
+        if (tex == 0 && sBackFrame != 0 && gGsFrame - sBackFrame < 120 && id < TBO_ART_COUNT && sSessKeep[id]) {
+            sBackMissing++;
+            if (sBackLastMiss != gGsFrame) {
+                sBackLastMiss = gGsFrame;
+                sBackMissFrames++;
+            }
+        }
         return tex;
     }
     return 0; /* (the online hub's and the European disc's art, the ranked Dragon Balls: not offline) */
@@ -1541,7 +1564,9 @@ unsigned Vita_TboTextureMip(uint32_t id, int *mip) {
 static void tbo_drop(TboTex *t, unsigned n) {
     unsigned i;
     for (i = 0; i < n; i++) {
-        if (t[i].tex != 0 && gGsFrame - t[i].frame > KEEP_FRAMES && !tbo_resident(&t[i])) {
+        if (t[i].tex != 0 && gGsFrame - t[i].frame > KEEP_FRAMES && !tbo_resident(&t[i]) &&
+            !(sSessPinned && &t[i] >= sPic && &t[i] < sPic + TBO_ART_COUNT && sSessKeep[&t[i] - sPic]) &&
+            !(sSessPinned && &t[i] >= sText && &t[i] < sText + TBO_TEXT_SLOTS && sSessKeepText[&t[i] - sText])) {
             Vita_VglTexFree(t[i].tex);
             pthread_mutex_lock(&sMaker);
             t[i].tex = 0;
@@ -1561,6 +1586,11 @@ static void tbo_drop(TboTex *t, unsigned n) {
 volatile int gVitaTboPhase; /* (the watchdog, vita_vgl.c Vita_HangWhere: the step below the drawing thread is at; 0 none) */
 void Vita_TboFrameEnd(void) {
     unsigned held;
+    if (sBackFrame != 0 && gGsFrame - sBackFrame == 120) {
+        Vita_Log("tbo: the 120 pictures after the session's end: %u of them drew without a picture kept for them (%u draws)\n",
+                 sBackMissFrames, sBackMissing);
+        sBackFrame = 0;
+    }
     if ((gGsFrame & 63) == 0) {
         gVitaTboPhase = 1;
         Vita_TagMovieIdle(); /* the film's texture not drawn for a while */
@@ -1689,4 +1719,88 @@ void Vita_TboFrameEnd(void) {
         Vita_Log("tbo: textures not drawn for %u pictures given back: %u held, %u KB\n", KEEP_FRAMES, gVitaTboN[3], gVitaTboN[4] / 1024);
     }
     gVitaTboPhase = 0;
+}
+
+/* (online sessions inside the running game, vita_session.c; bt3.txt session_warm, default 1) The screens' pictures
+   shown when a session began (the online hub's background, radar and host, the lobby's) are not drawn during the match
+   and are given back after KEEP_FRAMES; at the return the menus came back with them gone, and the first picture was
+   drawn without them while the maker read them again (online_review v3/05, console run online_sess_s2). Kept: which
+   ones were drawn in the last pictures before the session; back: the maker reads them again at once, the game's thread
+   reads them itself (the maker's job if it had begun one: waited for, at most 1.5 s; the screen keeps the match's last picture meanwhile) and the next pictures upload them whatever the
+   budget. 0: as before. */
+int gVitaSessionWarm = 1;
+void Vita_TboSessionKeep(void) {
+    unsigned id, n = 0, nText = 0;
+    for (id = 0; id < TBO_ART_COUNT; id++) {
+        sSessKeep[id] = sPic[id].tex != 0 && gGsFrame - sPic[id].frame < 8;
+        n += sSessKeep[id];
+    }
+    for (id = 0; id < TBO_TEXT_SLOTS; id++) {
+        sSessKeepText[id] = sText[id].tex != 0 && gGsFrame - sText[id].frame < 8;
+        nText += sSessKeepText[id];
+    }
+    sSessPinned = gVitaSessionWarm != 0;
+    Vita_Log("tbo: %u pictures and %u lines of the screens shown when the session began%s\n", n, nText,
+             sSessPinned ? ": kept as textures through it (session_warm=1)" : "");
+}
+void Vita_TboSessionBack(void) {
+    unsigned id, asked = 0, left = 0, waited = 0;
+    unsigned long long t0 = sceKernelGetProcessTimeWide();
+    sSessPinned = 0;
+    sBackFrame = gGsFrame != 0 ? gGsFrame : 1; /* (the count of pictures drawn without them, both ways) */
+    sBackMissing = sBackMissFrames = 0;
+    if (!gVitaSessionWarm || !tbo_on()) {
+        return;
+    }
+    for (id = 0; id < TBO_ART_COUNT; id++) {
+        TboTex *t = &sPic[id];
+        int state;
+        if (!sSessKeep[id] || t->tex != 0 || t->missing) {
+            continue;
+        }
+        pthread_mutex_lock(&sMaker);
+        state = t->state;
+        if (state == 0 || state == 3) {
+            t->state = 1; /* (read here, on the game's thread: the maker's queue and its pauses take longer; console run
+                             online_lobby_screens: 460 ms, the background still not ready) */
+        }
+        pthread_mutex_unlock(&sMaker);
+        if (state == 0 || state == 3) {
+            uint32_t w = 0, h = 0, *px;
+            int missing = 0;
+            char path[160];
+            px = tbo_decode(id, &w, &h, path, sizeof(path), &missing);
+            pthread_mutex_lock(&sMaker);
+            free(t->px);
+            t->px = px;
+            t->w = w;
+            t->h = h;
+            t->missing |= (unsigned char)missing;
+            t->state = px != NULL ? 2 : 3;
+            t->readyFrame = gGsFrame;
+            pthread_mutex_unlock(&sMaker);
+            asked++;
+        }
+    }
+    do {
+        left = 0;
+        for (id = 0; id < TBO_ART_COUNT; id++) {
+            if (sSessKeep[id] && sPic[id].tex == 0 && !sPic[id].missing) {
+                int state;
+                pthread_mutex_lock(&sMaker);
+                state = sPic[id].state;
+                pthread_mutex_unlock(&sMaker);
+                left += state == 1;
+            }
+        }
+        if (left != 0) {
+            sceKernelDelayThread(2000);
+            waited += 2;
+        }
+    } while (left != 0 && waited < 1500); /* (only a job the maker had already begun) */
+    sUploadFreeUntil = gGsFrame + 3;
+    sBackFrame = gGsFrame != 0 ? gGsFrame : 1;
+    sBackMissing = sBackMissFrames = 0;
+    Vita_Log("tbo: the session's end: %u pictures of the screens read again in %u ms (%u not ready)\n", asked,
+             (unsigned)((sceKernelGetProcessTimeWide() - t0) / 1000), left);
 }

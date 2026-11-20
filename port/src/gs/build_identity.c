@@ -60,6 +60,13 @@ int Port_BuildIdentity(unsigned long long *out){
         fprintf(stderr,"bt4 online compatibility: family=%s protocol=%08x language=%s base-files=%u bytes=%u elapsed-ms=%.2f revision-marker=ignored status=%s\n",
             BT4_ONLINE_COMPAT_NAME,0x54540009u,language?"en":"es",(unsigned)(i+(!sCompatible)),bytes,
             1000.0*(double)(SDL_GetPerformanceCounter()-began)/(double)SDL_GetPerformanceFrequency(),sCompatible?"compatible":sReason);
+#ifdef PORT_VITA
+        {   /* (a thread's stderr other than the main one's is not the program's file on the Vita: the port's log) */
+            extern void Vita_Log(const char *fmt, ...);
+            Vita_Log("net: game data identity (online compatibility): language %s, %u bytes read, %s\n",
+                     language?"en":"es",bytes,sCompatible?"compatible":sReason);
+        }
+#endif
     }
     if(!sCompatible)return -1;
     if(out)*out=BT4_ONLINE_COMPAT_ID;

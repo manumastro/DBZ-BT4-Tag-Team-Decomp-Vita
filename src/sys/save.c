@@ -195,12 +195,16 @@ void Save_AddMoney(s32 amount) {
 }
 
 #ifdef PORT_VITA
+extern int gVitaSimExact; /* port/vita/vita_m0.c: bt3.txt m0=1, the game as the PC computes it */
+
 void Save_PortDefaultKeys(s32 *key) {
     static const s32 kNormal[SAVE_KEY_COUNT] = {2, 1, 0, 3, 5, 4, 6, 7};
+    static const s32 kConsole[SAVE_KEY_COUNT] = {2, 1, 0, 3, 4, 5, 6, 7};
     s32 i;
 
     for (i = 0; i < SAVE_KEY_COUNT; i++) {
-        key[i] = kNormal[i];
+        /* (m0=1: the console's set, the PC's default: the same pad record gives the same actions on both) */
+        key[i] = gVitaSimExact ? kConsole[i] : kNormal[i];
     }
 }
 
@@ -219,6 +223,10 @@ s32 Save_PortKeysConsoleDefault(const s32 *key) {
 const s32 *Save_PortKeys(s32 pad, s32 *tmp) {
     s32 seen = 0, i;
 
+    if (gVitaSimExact) { /* (m0=1: no custom set either) */
+        Save_PortDefaultKeys(tmp);
+        return tmp;
+    }
     if (pad >= 0 && pad < SAVE_PAD_COUNT && gSaveData != NULL && (gSaveData->flags & SAVE_FLAG_PAD_B(pad))) {
         /* a save made by an early version of this port with Custom chosen but the console's own set in it (nothing reassigned): the
            handheld's Normal (Ki Charge on L) */

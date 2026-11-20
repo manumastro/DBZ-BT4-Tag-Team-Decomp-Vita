@@ -188,6 +188,54 @@ static int http_post_native(const char *url, const char *json, const char *const
     if (ses != NULL) { WinHttpCloseHandle(ses); }
     return ok;
 }
+#elif defined(PORT_VITA)
+/* (Vita) the curl library linked into the program (network builds; port/vita/vita_net.c logs each request and gives
+   it the CA list): no shared library to load and no tmpfile. Without this branch the legacy room service
+   (BT3_MATCH_URL: a quick match through agent-tools/match_testserver.py on the LAN) was never asked: the Linux way
+   loads libcurl.so, which the Vita does not have. */
+#include <curl/curl.h>
+typedef struct { char *out; size_t size, n; } VitaMatchBuf;
+static size_t vita_match_write(char *p, size_t s, size_t k, void *u) {
+    VitaMatchBuf *b = u;
+    size_t m = s * k, room = b->size - 1 - b->n, c = m < room ? m : room;
+    memcpy(b->out + b->n, p, c);
+    b->n += c;
+    return m;
+}
+static int http_post_native(const char *url, const char *json, const char *const *headers, char *out, size_t size) {
+    CURL *h = curl_easy_init();
+    struct curl_slist *list = NULL;
+    VitaMatchBuf b = {out, size, 0};
+    CURLcode rc;
+    if (h == NULL || size < 2) {
+        if (h != NULL) {
+            curl_easy_cleanup(h);
+        }
+        return 0;
+    }
+    curl_easy_setopt(h, CURLOPT_URL, url);
+    if (json != NULL) {
+        curl_easy_setopt(h, CURLOPT_POSTFIELDS, json);
+    } else {
+        curl_easy_setopt(h, CURLOPT_USERAGENT, "BT4decomp");
+        curl_easy_setopt(h, CURLOPT_FOLLOWLOCATION, 1L);
+    }
+    for (; headers != NULL && *headers != NULL; headers++) {
+        list = curl_slist_append(list, *headers);
+    }
+    if (list != NULL) {
+        curl_easy_setopt(h, CURLOPT_HTTPHEADER, list);
+    }
+    curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, vita_match_write);
+    curl_easy_setopt(h, CURLOPT_WRITEDATA, &b);
+    curl_easy_setopt(h, CURLOPT_TIMEOUT, 12L);
+    curl_easy_setopt(h, CURLOPT_NOSIGNAL, 1L);
+    rc = curl_easy_perform(h);
+    curl_easy_cleanup(h);
+    curl_slist_free_all(list);
+    out[b.n] = '\0';
+    return rc == CURLE_OK && b.n > 0;
+}
 #else
 /* Linux: the system's curl library, if it is there (it nearly always is), loaded when first needed. */
 static int http_post_native(const char *url, const char *json, const char *const *headers, char *out, size_t size) {

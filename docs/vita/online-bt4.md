@@ -1,6 +1,11 @@
 # Online play in BT4decomp, and what porting it to the Vita would take
 
-An analysis (2026-11-13), nothing built yet. It reads the online code of BT4decomp (NauTaro's BT4 adaptation of
+An analysis (2026-11-13), then the first milestone's tools (2026-11-18: the section "M0" below, branch
+`wip/online-m0`). The fuller study of 2026-11-17 (the PC client step by step, the Vita's equivalents, the plan M0-M6,
+the questions for NauTaro) is in the agent's notes (psvita-agent `notes/online/vita-online-study.md`); where this
+document and that one differ, the study is the newer (its section 9 lists what is out of date here: the tree is now
+upstream's `a8c140d`, 0.1.39.6 R1 1.3, client `0.1.39.6-R1.4`, family `BT4-B14-Rev2-sim8` `0xa93bcad79ac47a51`;
+offline Tag Team is in the build). It reads the online code of BT4decomp (NauTaro's BT4 adaptation of
 z3xox's Tenkaichi3Decomp PC port) as merged into this tree, and says what a Vita port needs for two goals: **Vita
 against Vita** (ad-hoc, local network, internet) and **Vita against PC** (against BT4decomp's PC release). The BT3
 PC port's online play, which BT4decomp builds on, is in [online.md](online.md); this document says what BT4decomp
@@ -22,6 +27,290 @@ does differently.
   the render tests. The plan for an offline Tag Team on the Vita: [tagteam.md](tagteam.md).
 - Code size of the online part: `net*.c` about 11,200 lines (C), signaling about 1,400 (C++), Tag Team about 2,800,
   voice about 1,000.
+- 2026-11-18 (branch `wip/online-m1`): the network's bring-up is built (next section). The game's online entries are
+  still `vita_bt4.c`'s stand-ins. The plan from here, the determinism study and the questions for NauTaro:
+  `psvita-agent/notes/online/vita-online-study.md` (sections 4, 7 and 8).
+
+## The network on the Vita (milestone M1, 2026-11-18)
+
+Built on `wip/online-m1` (from `tagteam` `5ebd70d`), development build; **not run on the console yet**. Nothing of it
+runs unless `bt3.txt` asks for it (`online=1` or `online_test=1/2`, [development.md](development.md)); off, no module is
+loaded, nothing is allocated, no thread is started and the log has no `net:` line.
+
+What is in the program (only with `BT4_VITA_ONLINE=1`, the development build's default; the release build leaves all of
+it out, `build.py`):
+
+| Part | Where | What |
+|---|---|---|
+| Start-up, shut-down, settings, self-test | `port/vita/vita_net.c` | `sceSysmoduleLoadModule(NET)`, `sceNetInit` with a pool from the C heap (`online_pool`, 1 MB by default, its lowest free amount logged through `sceNetGetStatisticsInfo`), `sceNetCtlInit`, the console's address and Wi-Fi signal logged; `curl_global_init`; the CA list; `Vita_NetStop` undoes it all |
+| HTTPS, WebSocket, TLS | the build image's libcurl 8.17.0 (WS/WSS) on OpenSSL 1.1.1t, zstd, zlib | as the PC's Linux and macOS builds: the POSIX path of `curl_ws_io.h` and `voice_transport_curl.inc`, unchanged |
+| CA list | `lib/cacert.pem` in the package (the build image's `/etc/ssl/certs/ca-certificates.crt`, 180 KB, as `port/tools/package_native.py` does for the PC) | the firmware's own certificates are not used. `online_ca=<pem>` adds one (the test server's): both are joined into `ux0:data/bt4/net/lib/cacert.pem` and the SDL base folder points there |
+| A log line per request | `vita_net.c`, `-Wl,--wrap=curl_easy_init,curl_easy_perform,curl_multi_add_handle` | `net: POST https://host/v5/auth/start -> 200 in N ms (TLS ready at N ms), curl 0`; `net: opening ... (a connection held open: WebSocket)`. The query string, the bodies and the tokens are never logged. The `curl_easy_init` wrapper also sets every handle's CA list (curl's built-in path does not exist on the Vita; upstream's `http()` sets none) |
+| JSON | nlohmann json (`port/third_party/voice/json.hpp`), compiled in `supabase_signal.cpp` | the client's own |
+| SDL calls | `port/vita/sdlshim/SDL3/SDL.h` (declarations, small inline ones), `port/vita/vita_sdl.c` | threads (kernel threads, 256 KB stacks, cores 2-3, below the game's priority), recursive locks, semaphores, conditions, a per-thread value table, once-only start-up, files and folders (`SDL_GetPrefPath` = `ux0:data/bt4/`), random numbers of their own (never the game's), counters, string helpers, `flock` as a no-op (one program runs at a time); `SDL_LoadObject` and `SDL_CreateProcess` answer "none" (the PC's run-time libraries and its old `curl` process path are left out) |
+| BT4decomp's signaling client | `port/src/gs/supabase_signal.cpp` + `cloudflare_signal.inc` + `update_sign.c`, `update_crypto.c`, `update_monocypher.c` (its route checks) | unchanged but for two `PORT_VITA` blocks in `cloudflare_signal.inc`: the host is `bt3.txt`'s `online_server` at run time (none: `no-server.invalid`, so a test build never reaches the default service), and the v5 backend only (no Supabase migration). Its identity goes to `ux0:data/bt4/network/<server>/` (`BT4_SIGNAL_SESSION_DIR`). `gs/net_update.c`'s online gate is answered by `vita_net.c` (no GitHub policy fetch). `BT4_SIGNAL_HTTPS_ONLY=1`, `BT4_SIGNAL_DIAGNOSTICS=1` work as `bt3.txt` lines |
+| `Port_RollCan()` | `vita_bt4.c` | 0: no rollback on the Vita (delay-based lockstep, the study's section 5) |
+
+### The self-test
+
+`online_test=1` (then the game) or `2` (then the run ends with a `vita: exitafter:` line, which the console runners wait
+for), on the start-up screen and in the log, on a thread of the kind the network's own run on:
+
+1. DNS: `getaddrinfo(online_test_dns)` (default `stun.l.google.com`, the PC's first STUN server).
+2. UDP: the console's LAN address found as `gs/net.c`'s `lan_address` does (connect + getsockname), then ten
+   datagrams to `online_udp` (default the server's host, port 26011) on a non-blocking socket polled as `net.c`
+   polls, each echoed by the test server: count back and round trips.
+3. HTTPS: two GETs of `<online_server>/m1/get` on one handle (the second without a new handshake): status, name /
+   TCP / TLS / total times, the C heap's growth.
+4. WebSocket: upstream's `curl_ws_io.h` (`Bt4CurlWs_Open`, `_Connect`, `curl_ws_send` / `curl_ws_recv`) to
+   `<online_server>/m1/echo`, five texts echoed.
+5. Signaling: upstream's client asked `get` (consumer 0) and `nickname_get` (consumer 4): `/v5/auth/start`, the socket
+   `/v5/socket`, `{"op":"authenticate"}`, `bt4.ready`, two replies; its status and times.
+6. With `online_test_public=<url>`: an HTTPS GET of that address with the package's CA list only (no `online_ca`):
+   whether firmware 3.65's clock and our list verify a public chain (`https://www.cloudflare.com/cdn-cgi/trace`: the
+   kind of chain BT4decomp's `workers.dev` service has, without touching that service).
+
+After each step, `net: memory ...`: the C heap in use and its growth since before the network (its peak too), and
+SceNet's pool free now and at its lowest. Then `net: self-test done in N ms: N passed, N failed`.
+
+The test server: `psvita-agent/agent-tools/online_testserver.py` (standard library Python; on the developer's Windows
+PC with Windows' own Python, since a server inside WSL 2 sits behind its NAT). `--gen-cert` once (a test CA and a
+certificate for the PC's LAN address, with any `openssl` program, Git for Windows' included), then run it: HTTPS and
+WebSocket on 8443, UDP echo on 26011. It answers `/m1/get`, `/m1/echo`, `/v5/health`, `/v5/auth/start`,
+`/v5/auth/refresh`, `/v5/api` and `/v5/socket` the way BT4decomp's v5 Worker does for a user without a room
+(`authenticate` -> `bt4.ready`, `{serial, consumer, op}` -> `reply`, `ping` -> `pong`), and prints every request. It
+was checked from WSL (Python client: the echo, `auth/start`, the socket's `bt4.ready` and a reply, the UDP echo, an
+`/v5/api` call) and from Windows (`curl.exe` over the LAN address). BT4decomp's own `cloudflare/` Worker could be run
+with `wrangler dev` instead (it needs Node and its `AUTH_SECRET`, `ADMIN_SECRET`, `TURN_GATEWAY_SECRET`); the Python
+server is enough for M1. The console's settings: `psvita-agent/sets/bt4/online_m1_*.txt` (`online_m1_test`: the whole
+test; `_https_only`: the signaling's HTTPS fallback; `_public`: the public chain, no server; `_ingame` / `_off`: the
+u0 demo fight with the network up and without), each with what its log must show.
+
+### What it costs
+
+Measured off the console (the development build, `arm-vita-eabi-size` of `bt3.unstripped.elf`, against `tagteam`
+`5ebd70d` built the same way):
+
+| | `tagteam` | with the network part | added |
+|---|---|---|---|
+| program code (`text`) | 5,523,646 | 7,941,944 | +2,418,298 bytes (2.31 MB: OpenSSL's libcrypto and libssl, libcurl, zstd, the client and its JSON) |
+| initialised data | 245,704 | 261,420 | +15.7 KB |
+| zeroed data (`bss`; the game's 80 MB C heap is not in it) | 82,865,616 | 82,948,312 | +80.8 KB |
+| `eboot.bin` | 3,525,112 | 5,366,009 | +1.76 MB |
+| `.vpk` | 8,207,595 | 10,143,830 | +1.85 MB (with the 180 KB CA list) |
+
+The code is loaded whether `online` is on or not: about 2.4 MB of the program's memory in a development build. The
+release build has none of it (`BT4_VITA_ONLINE=0`; built 2026-11-18: 425 objects, `eboot.bin` 3,520,478 bytes, no CA
+list); a release with online play would carry it.
+
+At run time, only with `online=1` or a self-test: SceNet's pool (1 MB from the C library's heap, which the game's heap
+shares: 80 MB, 56.7 MB at most used in the 25-stage soak, 74.4 MB in a 5 vs 5), and curl's and OpenSSL's own
+allocations (a TLS connection's buffers, the CA list parsed into memory: the 180 KB file becomes a few hundred KB of
+OpenSSL's structures, once per handle that loads it). Not measured yet: the self-test's `net: memory` lines give both
+on the console. The threads: one per open WebSocket (`VoiceWs`) and one for the signaling client, 256 KB of stack each,
+only while open.
+
+### What builds, what does not
+
+`python3 port/vita/build.py netcheck` (in the image: `BT3_VITA_DEV=1 port/vita/tools/docker_build.sh netcheck`) compiles
+BT4decomp's other network files for the Vita into `port/build/obj_vita_dev/netcheck/`, without linking them, and lists
+what each needs that nothing defines and what it would define twice. 2026-11-18, all ten compile:
+
+| File | Compiles | Missing to link (besides the C library) | Defined already (`vita_bt4.c`'s stand-ins, to drop when it goes in) |
+|---|---|---|---|
+| `net.c` (1 vs 1 session, with `net_timing.h`) | yes | `Gs_HoldFrame`, `Gs_NetworkWait` (the PC renderer's hold while waiting), `MenuTranslation_PortText`, `Port_UiBanner`, `Port_UiNotice` (the PC's UI), `PortVoice_DuelKey` / `_NewKey` / `_Leave` (voice), `Update_BlocksOnline`, `Update_OnlineNote` (`net_update.c`), `execv` (`relaunch`: no `execv` on the Vita; a session start by `sceAppMgrLoadExec`, the study's 3.5) | 58: the `Port_Net*`, `Port_Lobby*` set, `Port_OnlineBlocked` |
+| `net_chat.c` | yes | nothing | none |
+| `net_relay.c` (TURN) | yes | nothing | none |
+| `net_match.c` (STUN, the old Worker) | yes | `Sign_HasKey`, `Sign_Request`, `Sign_SelfTest` (`net_sign.c`, the old Worker's HMAC: leave that path out) | none |
+| `net_lobby.c` | yes | nothing once `net.c` and `net_match.c` are in | 7 `Port_Lobby*` |
+| `build_identity.c` | yes | `Port_FileOpenHost` (the three base files through `vita_file.c` / `vita_iso.c`) | `Port_DevRulesEncode` |
+| `plat_fprint.c` | yes | nothing | the four `Port_DataFingerprint*` |
+| `match_supabase.cpp` (room discovery) | yes | `PortVoice_P2PSession`, `Port_UiDragonBallFound`, `pthread_cancel` | 11: nickname, presence, `Port_Ranked*` |
+| `tag_team_net.c` | yes | `TagPeer_*` (WebRTC, `tag_team_p2p.cpp`: libdatachannel, not on the Vita), `TagDirect_*` (`tag_team_direct.cpp`), `PortVoice_*`, `Gs_NetworkWait`, `Port_UiBanner` | 135 `Port_Tag*` (`vita_tag.c`, the offline room) |
+| `state.c` | yes | `Port_HeapRegion`, `Port_UiNotice` (its rollback is compiled only for x86-64 and Apple: the Vita gets the fallback) | `Port_RollCan`, `Port_StateLog`, `Port_StateTouch`, `gPortResim` |
+
+So M2 (1 vs 1 by address) needs: the PC UI's few calls answered on the Vita (`Port_UiBanner`, `Port_UiNotice`,
+`Gs_HoldFrame`, `Gs_NetworkWait`), voice's answered "none", `relaunch` replaced, `net_sign.c`'s three left out of
+`net_match.c`'s old path, `Port_FileOpenHost`, and `vita_bt4.c`'s stand-ins of these files removed as each goes in.
+None of it is the simulation: that is M0's (the float model, `wip/online-m0`).
+
+## Ad Hoc: Vita to Vita without internet (2026-11-19, branch `wip/online`)
+
+Our addition to BT4decomp's online play; everything else stays the PC's. Ad Hoc is a transport, not a game mode: the
+menus are the PC's hub (Create Match gets a Connection value "Ad Hoc", Join an "AD HOC" list of nearby rooms beside
+"BY ADDRESS"), and a match runs upstream's own protocol (`gs/net.c`: hello, timing, pad records, digests) over Ad Hoc
+datagrams instead of internet UDP. The plan, milestones A0-A2 and the reasons: psvita-agent
+`notes/online/vita-multiplayer-plan.md`.
+
+- The calls (`port/vita/vita_adhoc.c`): the PSP ad hoc layer the Vita keeps, as Rinnegatamante's vitaQuake uses it on
+  HENkaku: `SCE_SYSMODULE_PSPNET_ADHOC`, `sceNetAdhocInit`, `sceNetAdhocctlInit` (ID `BT4VITA01`, reserved type), the
+  system's own dialog for the group (`sceNetCheckDialog`, mode `PSP_ADHOC_CONN`; no PSN), then `sceNetAdhocPdp*`
+  sockets addressed by MAC and port (payload up to 1444 bytes: the 1 vs 1 input packet and Tag Team's 512-byte
+  packets fit). No programmatic group join exists in the SDK's stubs: the dialog it is. A Vita is either in Ad Hoc or
+  on its access point, never both.
+- A0 (`adhoc_test=1`, built, not run): start-up, the dialog, a socket, beacons and pings, a summary per Vita heard
+  (round trips). With one console it shows the start-up, the dialog and the group; peers need a second Vita.
+- A1 (next): `gs/net.c` unchanged on Ad Hoc: its one send (`net_send`) and one receive (`recvfrom`) on a pseudo socket
+  (a `--wrap` of the socket calls for that one socket), the peer's MAC carried as a pseudo `sockaddr_in` (4 + 2 bytes);
+  the room found from the beacons; the session as an address match.
+- Vita against Vita does not wait for M0: two Vitas compute the same floats; the session-like start of `m0=1`
+  (synchronous reads, neutral Vita Settings, the PC's key table) is what they need.
+
+## M2a: upstream's 1 vs 1 network code linked, the online hub (2026-11-19, branch `wip/online`)
+
+`BT4_VITA_NETLINK=1 BT3_VITA_DEV=1 port/vita/tools/docker_build.sh` (objects and package in `*_nl` folders) links
+BT4decomp's `net.c`, `net_chat.c`, `net_relay.c`, `net_match.c`, `net_lobby.c`, `build_identity.c`, `plat_fprint.c` and
+`match_supabase.cpp`, unchanged. `vita_bt4.c`'s 81 stand-ins of them are renamed away in that build
+(`port/vita/vita_netlink_rename.h`, from `build.py netcheck`); `port/vita/vita_netglue.c` answers what they call from
+PC-only files: the renderer's hold (`Gs_HoldFrame`, `Gs_NetworkWait`: nothing), the F1 window's banner and notices (a
+log line for now; the Vita-made look comes with the menus), voice (none), the update gate (`UPDATE_REQUIRED` from the
+server: "install the latest release"), the old Worker's signature (unused path), `execv` and `state.c`'s session and
+rollback (none: no session can start yet), `pthread_cancel` (none), and `Port_FileOpenHost` for the identity's three
+base files (the disc folder, or the disc image through `vita_iso.c`'s wrapped file calls).
+
+`bt3.txt online_menu=1` shows the PC's hub: the main menu's "Tenkaichi Budokai Online" after Tag Team, and
+`PortTbo_Run` (`src/menu/port_screen.c`, `menu_a.c`, `PORT_VITA` blocks). With `online=1` and `online_server=` the hub's
+nickname and room calls go to the server named there (never BT4decomp's own in these builds).
+
+Built since (not run on the console): the session start (`relaunch`'s `execv` writes `ux0:data/bt4/net/session.txt`
+and restarts the app with `sceAppMgrLoadExec`; `Vita_SessionLoad` reads it at the next start); `Port_VBlank`'s online
+tick (the start-up warp unpaced); the banner and the notices drawn with the port screens' kit (`port/vita/vita_netline.c`,
+`online_line`); the Vita Settings that change the pad neutral in a session (`online_neutral`); a room's speed above
+100 % paced (`online_speed`). Still to do: the waiting banner while the game's thread waits (the Vita draws nothing
+then; the PC draws its last picture again: `Gs_HoldFrame`); the players'
+names under the health bars (the PC's `ui.cpp` draws them); then a 1 vs 1 by address (Vita vs Vita on the same build
+first: not blocked by M0).
+
+### A1: Ad Hoc as a transport of the PC's lobby and match (built, not run: needs two Vitas)
+
+`bt3.txt adhoc_menu=1` (with `online_menu=1`, build `BT4_VITA_NETLINK=1`): Create Match > Connection gets "Ad Hoc"
+after "Room Code" and "By Address"; Join gets "AD HOC" beside "BY ADDRESS". Create Room on "Ad Hoc" opens the system's
+group dialog (create), then hosts the PC's lobby By Address on the chosen port and advertises its name and port on the
+group (beacons, PDP port 26013, twice a second). AD HOC opens the dialog (join), then lists the rooms heard (the hub's
+rows: name, port); cross joins one By Address. From there everything is the PC's: the lobby, its page, the launch,
+the match. `gs/net.c` is unchanged: build.py compiles it with `port/vita/vita_adhocnet.h`, which sends its socket calls
+to `vita_adhoc.c` (`VitaNet_*`); outside Ad Hoc each is the C library's; in Ad Hoc, net.c's datagram socket is a PDP
+socket on the group (an address `10.m3.m4.m5` is the Vita whose MAC ends in m3:m4:m5; a joiner's own port 26014). The
+session's restart carries `BT3_NET_ADHOC` ("1" the host, the host's MAC a joiner) and `BT3_NET_ADHOC_PORT` in
+`session.txt`. Open: whether the group outlives that restart (A0b, `adhoc_test=3`); if not, the session must join the
+group again at its start (the system dialog needs the game's frames: before net.c's first socket, or the session
+started in the same process).
+
+### M3a: 1 vs 1 by address against the PC on the LAN (2026-11-20; built, not run on the console)
+
+The first real match: the Vita against the PC client of the matching public release (tag `v0.1.39.6-R1.6`, `a4350e6`),
+on the same LAN, By Address (no server), with nobody holding the pads.
+
+- Vita build: `BT4_VITA_NETLINK=1 BT4_PS2FLOAT=1 BT3_VITA_DEV=1` (`port/build/vita_dev_pf_nl`): the net.c family and the
+  PS2 float model together (the model is what makes the Vita's fight equal the PC's: M0). Links.
+- A session from bt3.txt's own lines (`vita_netglue.c` `Vita_SessionLoad`): `BT3_NET_SESSION=1` with `BT3_NET_HOST=<port>`
+  or `BT3_NET_JOIN=<ip:port>` starts a session at once, as the PC does from its environment (no `session.txt`, no
+  restart). Its saves are never the player's (`BT3_SAVES` -> the session folder `ux0:data/bt4/net/saves`, emptied by
+  `m0=1`, which these sets also use: reads on the game's thread, sound by blanks, the PC's keys, the state log).
+  Every session (this one or one from `session.txt`) now brings the network up itself (`online=1` not needed; an Ad
+  Hoc session excepted).
+- Pads: net.c's own `BT3_NET_SCRIPT=<table>` (36 bytes a blank, BT3_PAD_TABLE's format; each copy plays its own player's
+  column). `port/vita/tools/net_script.py <out> --seed N` writes a repeatable table: nothing for 600 blanks, then
+  presses of cross, square, R1, L1 and held directions; never start, select, circle or triangle (going back from a
+  select ends the session). The same file on both sides.
+- PC side: `agent-tools/bt4_pcref.sh net <name> host <port>|join <ip:port> <table> [VAR=value]` (psvita-agent) with
+  `BT4_PCREF=~/psvita/bt4-pcnet` (a worktree of the reference clone at `a4350e6`, built by `bt4_pcref.sh build`):
+  headless (`BT3_GS=none`), `docker run --network host` (WSL is in mirrored mode: the PC's own address 192.168.1.233),
+  the environment net.c's relaunch sets (`BT3_NET_SESSION`, `BT3_SOUND_TICKS`, `BT3_NOMOVIE`, `BT3_NET_VOICE`, an empty
+  save folder), the state log in `bt4-vita/port/build/m0ref/<name>.txt`.
+- Who hosts: the Vita (set `online_m3_vs_pc_host`, UDP 26100), the PC joining: the PC only sends first, so Windows needs
+  no inbound rule. The reverse (`online_m3_vs_pc_join`) needs an inbound UDP rule on the PC (Hyper-V firewall in
+  mirrored mode): only with the developer's OK.
+- Checks: net.c itself compares the two games every 32 blanks (a desync ends the match with "no longer agree");
+  `m0_compare.py` on the two state logs, blank for blank, from the first fight line; both logs say
+  `net: both at the character select (blank N)` with the same N.
+- **M3a PASSED on the console (2026-11-20, `368b9f7`, try 4)**: the Vita (BTFV00008, `vita_dev_pf_nl`, ps2float=1)
+  hosted, the PC client R1.6 joined over the LAN (round trip 2-4 ms, input delay 2 blanks, speed 100 %): both at the
+  character select at blank 1754, the pad table picked the fighters, a single battle ran for 6 minutes (hp 50000/50000
+  -> 28970/25330), net.c's own check every 32 blanks never differed, and the two state logs are the same in all
+  21,242 fight blanks both have (`m0_compare.py`); the Vita drew the fight at 29.9 pictures/s, speed 100 %; the match
+  ended when the Vita's run ended (`exitafter`). Three Vita fixes were needed on the way (each found by a console
+  try): `Vita_GsGetenv` answered net.c's `BT3_NET_*` as unset (try 1: no session at all); the Vita's `Port_VBlank`
+  never called `Port_NetBeginTick` (try 2: the start-up "ended" at blank 0, the two never met); `scePad2GetState`
+  said player 2's pad was missing (try 3: "No controller connected", the games parted at the fight's first blank).
+  Runs in `wt-online/port/build/runs/online_m3_vs_pc_host{,_try2,_try3}` (the PC's logs copied there).
+- **The menus' session start passed too** (2026-11-20, set `online_m3_relaunch`, bt3.txt `online_relaunch=1`): the
+  same match, but the bt3.txt session goes the way the online menus start one (net.c `relaunch` -> the Vita's `execv`
+  writes `ux0:data/bt4/net/session.txt` -> `sceAppMgrLoadExec` restart -> `Vita_SessionLoad` reads and removes the
+  file): the log shows the restart and the session from the file; the PC joined, 21,242 fight blanks identical, no
+  desync; the file was gone afterwards. The menus' own screens (Create Match / Join By Address with `online_menu=1`)
+  still need a run by hand or with button presses: everything after their "Create Room" / "Join" is this path.
+- The harness checked PC against PC (2026-11-20, two R1.6 copies on this PC, host 26100 + join 127.0.0.1:26100, the
+  table of seed 1): connected, both at the character select at blank 1754, the table's presses picked the fighters and
+  stage, a fight ran (hp 50000/50000 -> 26160/24420) and a second one began; 37,969 fight blanks, the two state logs the
+  same in every one, no desync. (Headless runs faster than 60 blanks a second; the Vita paces the match at 60.)
+- The PDP transport for Tag Team (T1 step 2): `port/vita/vita_tagpdp.c` (reliable ordered control channel with
+  seq/ack/ack bits + a cumulative ack, resend every 150 ms, 32 outstanding, reorder window 32; unreliable channel as
+  is; session id filter; members 0-3; 154,808 bytes an endpoint in fixed arrays, was ~350 KB with windows of 64/128:
+  the receive loop now stops while the inbox is full, so what is not read waits in the socket's buffer) over a
+  send/recv/clock ops table, so it runs on the host: `gcc -O2 -Wall -Wextra -I port/vita port/vita/vita_tagpdp.c
+  port/vita/tools/tagpdp_test.c` passes 8 cases (2 and 3 members, 0/10/30 % loss with duplication and reordering, a
+  foreign session ignored, 70,000 messages across the sequence wrap), with windows of 32 and 64. Linked in the
+  `BT4_VITA_NETLINK=1` builds, with the same test (7 cases, fewer messages) behind bt3.txt `tagpdp_test=1/2` (set
+  `online_t1_tagpdp`): **passed on the console** (2026-11-20, 7 of 7, TagPdp 154,800 bytes on the Vita). Nothing else calls the transport yet (next: `vita_tag_net.c`).
+- **The Tag Team room between Vitas (T1 step 3, 2026-11-20; its test passed on the console: 5 of 5, `tagnet_test=2`, set `online_tagnet_test`):** `port/vita/vita_tag_net.c`
+  is the Vita's counterpart of the PC's `tag_team_p2p.cpp` (its TagPeer): the owner (member 1) runs the room's
+  authority (`shared/tag_kernel.c`), applies every member's requests (its own at once), sends each its snapshots,
+  ticks the fight's frames at 34.2 a second (the last three sent unreliably each tick, 256 kept for replay; the PC
+  keeps 512), answers replay requests (16 at a time), pings every 0.5 s; a joiner sends its requests, takes the states
+  and frames in order (a 128-frame reorder window, replay asked every 100 ms while a gap waits). The same 512-byte Tag
+  packets as the PC, over TagPdp's control / unreliable channels. What the PC's signaling service does is done by a
+  handshake of our own (raw datagrams with their own magic): HELLO (name, the game data's fingerprint, the options
+  version: the PC's capability exchange) -> the owner checks the phase (lobby only), the fingerprint (the PC leaves that
+  to the service), the capability and the room (4 Vitas at most: TagPdp's members) and answers WELCOME (member number,
+  TagPdp slot, session id, room code) or REJECT (the PC's admission texts); then the owner builds the TTW_JOIN the PC's
+  `admit()` builds. Leaving: a member silent 10 s is gone (`Kernel_Leave`: in a fight its seat plays on, neutral); BYE
+  datagrams make it immediate. One round of the PC's `run()` loop per `Vtn_Step`, no thread or Vita call inside: the
+  link (send / receive a datagram, the clock) is given, so it runs on the host. `port/vita/tools/tagnet_test.c`: the
+  owner and up to three joiners, each with a small "game" doing what the menus and the battle do (choose, load, arm,
+  start, pads ahead by the ping's lead, take frames with the game's catch-up, end, rematch), over an in-memory link
+  with loss, duplicates and jitter: 6 cases pass on the host (2 Vitas clean / 5 % loss / games at 29 a second;
+  refusals of other game data and of a join after the start; 4 Vitas with 5 % loss; a member gone silent mid-fight):
+  every member takes the same frames, byte for byte, through 900 frames and a rematch. Memory: 525 KB a room
+  (`sizeof(Vtn)`, malloc'd while a room is open). On the Vita (`BT4_VITA_NETLINK=1`): bt3.txt `tagnet_test=1/2` runs
+  the test (4 cases, 300 frames) at start (set `online_tagnet_test`).
+- `vita_tag.c` now carries the PC's peer-mode client (`tag_team_net.c`'s request, poll, pads with the lead and the
+  late-feedback margin, catch-up backlog, shared options, the expanded draft, chat, hashes) in `BT4_VITA_NETLINK`
+  builds, over `vita_tag_net.c` on its own thread (2 ms rounds, a mutex: the PC's "BT4 P2P room" thread). Connect
+  strings: `vita-udp` hosts on UDP port `tagnet_port` (26200), `vita-udp:IPv4:port` joins; `vita-adhoc` /
+  `vita-adhoc:MAC` the same over the Ad Hoc group's PDP socket (`vita_adhoc.c`; needs the group up). `Port_TagEndpoint()`
+  gives `vita-adhoc` when the hub's Ad Hoc rows are on, else `vita-udp`; `Port_TagJoinAddress(address)` joins. The
+  menus' rows are still to add (Tag Team > Online is hidden on the Vita). `Port_TagDataFingerprint` is the PC's (the
+  build identity with the expanded-rules mark), so joins are no longer blocked by a 0. The local room is unchanged.
+- The online menus review on the console (2026-11-20, set `online_menu_review`, `tagscreen=3`): the hub shows and
+  reads well, but Create Match / Join are gated by the service nickname check (as on the PC): without the service, or
+  against `online_testserver.py`, it ends "Could not verify your nickname", so the By Address screens were not
+  reached yet. Tag Team > Online Battles and its code keypad do show (the PC pages). Pictures and notes outside git:
+  `port/build/online_review/index.txt`.
+- Second round (2026-11-20, sets `online_menu_review2..4`, pictures `port/build/online_review/v2/`): the nickname
+  gate was the test server's (the console keeps its v5 refresh token; after a server restart it got 401 and the game
+  never makes a new account): `online_testserver.py` now adopts an unknown refresh token and keeps its tokens in
+  `state.json`; Create Match then opens. Found and fixed: the Vita's `Port_VBlank` never ran `Port_LobbyAuto`, so a
+  lobby from the menus stayed at "Opening the port..." with Cancel dead (`plat_stub.c`, network builds). **Open:**
+  the lobby then refuses ("Lobbies need the game's state list (the .mem file...)"): `net_lobby.c` needs
+  `Port_SessionCan()` (state.c's in-process session, PC 64-bit only); the Vita starts sessions by a restart. So
+  Create Match / Join by address need either an in-process session on the Vita or a lobby that survives the restart.
+  Vita look changes (PORT_VITA, `port_tbo.c`): notes (nickname checks, bad codes) said in the hosts' box instead of
+  the PC's small amber line over the box's edge; no "Join our Discord Server!" button (the hub's prompts as every
+  page's). Tag Team > Join Room in network builds: the 1 vs 1 Join's BY ADDRESS / AD HOC buttons under the code keys;
+  By Address -> `Port_TagJoinAddress` (port `tagnet_port` when none is typed); the Ad Hoc list from Tag shows rooms
+  whose beacon port is `tagnet_port`; Tag Create Room with `adhoc_menu=1` makes the group (system dialog) and
+  advertises the room first. Built; the Tag rows not seen on the console yet.
+- Decisions on the known risks: (1) **owner 34.2 steps/s vs the Vita's 2 vs 2 at ~29-30 pictures/s**: kept as the PC
+  (the room's pace is the game's 114 %; a Vita-only room ticking slower would change the game's speed); the Vitas keep
+  up with the game's own catch-up (`Port_TagCatchup`: from a backlog of 6 frames it skips pictures, 4 of 5, down to
+  2), which the test's 29-per-second games reach and recover from; `tagnet_rate` (ticks per 1000 s, default 34200)
+  is there to measure other paces, not to play. (2) **The owner's pad lead**: the PC's owner sends its pads for the
+  frame due next (lead 0: its game draws at 60/s); a Vita owner at 30/s missed the tick 111 times in 900 in the test,
+  with a lead of one frame 1 in 900 (joiners unchanged): `tagnet_lead`, default 1 (0 = the PC's). (3) **4 Vitas at
+  most** a room (TagPdp's members: 155 KB each with 4; 10 would take ~390 KB): a 5 vs 5 room plays with CPU seats; a
+  fifth Vita gets "This Tag Team room is full." (4) **Fingerprint**: the owner compares the joiner's with its own
+  before admitting (REJECT: "the same game version and game data").
 
 ## What a player has (PC)
 
@@ -165,10 +454,14 @@ Tag Team is a different model (`shared/tag_kernel.c`, `port/src/tag_team.c`, `po
 - The PC build runs all of the game's code on the port's soft-float (`port/tools/undefined.py`: `-msoft-float
   -mno-sse`, `softfloat_ps2.c`), the PS2's results on any processor, as the BT3 port did. Online play relies on it:
   1 vs 1's exact digest, and Tag Team's identical simulation on every machine.
-- The Vita runs the game's floats on the hardware with the PS2's rules (`port/vita/vita_float.c`: round toward zero,
-  denormals as zero, the adder's cut done on the bits, `__port_fdiv`; "It gives the same bits as the exact model"),
-  `-ffp-contract=off`, and the same PS2 maths library (`port/third_party/newlib_libm`). The development build's
-  self-test compares it with the PC's sums on a sample. A sample is not a proof.
+- The Vita runs the game's floats on the float unit, round toward zero, denormals as zero (`Vita_FloatMode`),
+  `-ffp-contract=off`, with the same PS2 maths library (`port/third_party/newlib_libm`) built for the float unit.
+  **This is not the PC's arithmetic** (corrected 2026-11-17, psvita-agent `notes/online/vita-online-study.md`
+  section 4): `vita_float.c`'s helpers (the adder's cut, the nearest division) are called by nothing in the game
+  (`nm`), and the start-up self-test checks only them. Additions and subtractions miss the adder's cut, divisions
+  round toward zero where the PC's round to nearest, a negative float converted to unsigned saturates where the PC's
+  wraps, doubles run toward zero. The build variant of the M0 section below (`BT4_PS2FLOAT=1`, `ps2float=1`) gives
+  the game's code the PC's arithmetic.
 - Tag Team's tolerance on positions is evidence that BT4decomp has seen small float differences between PCs (the
   comment in `tag_team_online.inc`); only positions are tolerated, and a persistent difference ends the room.
 - Vita-only changes inside the game's code (`#ifdef PORT_VITA` in `src/`) must not change the simulation or the
@@ -180,6 +473,218 @@ Tag Team is a different model (`shared/tag_kernel.c`, `port/src/tag_team.c`, `po
 - The 1 vs 1 session depends on tick-driven sound (`BT3_SOUND_TICKS`, `snd_adx.c`, `by_ticks`), so that voice waits
   in the battle sequence do not depend on the audio device. `snd_adx.c` is already compiled on the Vita; it turns
   this on when `Port_NetSession()` or `Port_TagNetwork()` is 1.
+
+## M0: the same simulation as the PC, offline
+
+The first milestone of the plan (study section 7): the Vita's game must compute the PC's fight blank for blank before
+any network work matters. Branch `wip/online-m0` (2026-11-18) has the tools; nothing of it has run on a console yet.
+
+### How the PC gets the PS2's arithmetic
+
+- Every game source, the PS2's maths library (`port/third_party/newlib_libm`) and the port's game-side files are
+  compiled with `-msoft-float -mno-sse -mno-mmx -ffp-contract=off` (`port/tools/undefined.py`, `CC`; clang on the 64-bit
+  builds, and on arm64 Macs IR through `llc -mattr=-fp-armv8,-neon`). The compiler emits no float instruction: every
+  float operation is a call (`__addsf3`, `__subsf3`, `__mulsf3`, `__divsf3`, `__fixsfsi`, `__fixunssfsi`, `__floatsisf`,
+  `__floatunsisf`, the comparisons) into `port/src/softfloat_ps2.c`, the PCSX2 model by default (no build script sets
+  `PORT_FLOAT_MODEL`): the adder's cut of the smaller operand then truncation, truncating multiply, division rounded
+  to nearest, overflow and x / 0 the largest number, float to unsigned the PS2 compiler's sequence (a negative value
+  wraps).
+- Doubles (rare: the port's `headless.c`, the vector library's `vu0_b.c`): `port/src/plat_libm.c`, the host's IEEE
+  arithmetic, round to nearest, with denormals.
+- The vector library's references (`src/port/vu0_a.c`, `vu0_b.c`) take the vector unit's add, multiply and divide from
+  `softfloat_ps2.c` (`RefVu0_*Bits`: no cut, truncating).
+
+### How the Vita gets it now: the `BT4_PS2FLOAT` build and `ps2float`
+
+Building the game with `-mfloat-abi=soft` is not the Vita's way: it changes the calling convention at every boundary
+with the hard-float code (the vector library, the C library, the port's own files, function pointers), with no
+error where a boundary is missed. So the closest thing that builds for ARM is done after the compiler:
+
+- `BT4_PS2FLOAT=1 BT3_VITA_DEV=1 port/vita/tools/docker_build.sh` builds a variant (objects `port/build/obj_vita_dev_pf`,
+  package `port/build/vita_dev_pf`, `BT4-Vita-dev-pf.vpk`). The game's objects are compiled to assembly as usual (the
+  same flags and register allocation, plus `-mrestrict-it`, so that no float instruction sits in an IT block), and
+  `port/vita/ps2float.py` replaces each float instruction whose result can differ from the PC's with a `b.w` to a
+  piece of code at the end of its section (the same 4 bytes: nothing the compiler laid out moves). The piece saves
+  r0-r5, ip and lr, passes the operands' bits to the model's entry point (`port/vita/vita_ps2float_a.S`, which keeps
+  the flags, every float register and the float unit's status), puts the result in the destination and jumps back.
+- Replaced (the variant of 2026-11-18: 8,057 instructions in 312 objects, the check's own 14 among them): `vadd.f32` 1,911, `vsub.f32` 1,983,
+  `vdiv.f32` 1,320, `vmla.f32` 1,712, `vmls.f32` 249, `vnmls.f32` 144, `vnmla.f32` 5 (the product by the float unit,
+  the sum by the model), `vcvt.u32.f32` 352, `vcvt.f32.u32` 201; doubles (`vadd`/`vmul`/`vdiv`/`vmla`/`vnmls.f64`,
+  `vcvt` between float and double: 180) run with the float unit at round to nearest without flush to zero, the PC's
+  doubles.
+- Left alone: `vmul.f32` (truncating on both: the PC's `__mulsf3` and the float unit at round toward zero; the variant
+  `BT4_PS2FLOAT=mul` replaces the multiplies too, as a check of that), conversions to and from signed integers
+  (truncating on both), comparisons, negation, absolute value; the vector library's references (`pc_vu0_a.o`,
+  `pc_vu0_b.o`) and `port_vufast.c` get their doubles replaced only, since their float operations are the vector
+  unit's (no cut, truncating: the float unit's own); `port_fast.c`'s stand-ins for game functions are treated as game
+  code.
+- `bt3.txt` `ps2float=0` (default): the pieces do the float unit's own operation (the same results as the default
+  build: this measures the detour's cost); `ps2float=1`: the PS2's results. The model is `port/vita/vita_ps2float.c`
+  (the PC's add and multiply cores, `softfloat_ps2_inl.h`, and its division and unsigned conversions written out, built
+  with `-mgeneral-regs-only`); the entry points take short ways where they give its bits
+  (`port/vita/vita_ps2float_a.S`): an add or subtract is the adder's cut done on the bits and then the float unit's
+  add (round toward zero, the game thread's mode); a division the float unit's at round to nearest; the C model for
+  operands with the largest exponent, a zero or denormal divisor, a quotient that overflowed or is tiny.
+  `ps2float=3`: the C model always (a check of the short ways). The default build is unchanged and ignores `ps2float`
+  (one log line says so).
+- Checked, without a console:
+  - the build runs `port/vita/tools/pfcheck_host.c`: the Vita's model against `port/src/softfloat_ps2.c`, both built for
+    the build machine, 4,000,000 operand pairs, six operations each: 0 differ (a difference stops the build);
+  - `port/vita/tools/ps2float_emu.py` (an ARM emulator, Unicorn, in WSL): the start-up check below with `ps2float` 0,
+    1 and 3: 0 differ; the add, subtract and divide entry points' short ways against the C model on 60,000 operand
+    pairs (special patterns, tiny, huge, close exponents, any): 0 differ; each kind of replaced instruction (14) from
+    40 random states each, in the three modes: every register but the destination, the flags and the float unit's
+    status kept, the result the float unit's (0) or the model's (1, 3);
+  - at start, the variant runs `Vita_PfSelfTest` (`port/vita/vita_pftest.c`, compiled once as game code and once as
+    the float unit's): one log line `ps2float: check (ps2float=N): 2112 operations, 0 differ`.
+- Open points: `src/battle/btl_cam.c:452` `__builtin_sqrtf` is a `vsqrt.f32` on the Vita (round toward zero) and a call
+  of `sqrtf` on the PC (which one the PC's link picks is to be checked); the PC's own conversion of a float to unsigned
+  on x86-64 and arm64 (`__fixunssfsi`, or a 64-bit conversion then truncation: the same for values below 2^32);
+  operands with the largest exponent in comparisons (the PS2 has no infinity; the Vita's compare sees one).
+
+### The cost
+
+The model is chosen at run time, so the console measures three things on the same fight: the default build, the
+variant at `ps2float=0` (the detour) and at `ps2float=1` (the model). The variant logs, every 600 blanks, the model's
+operations per blank (`ps2float=N: per blank add .. sub .. mul .. div .. f2u .. u2f ..`), the other factor.
+
+Estimate per replaced operation, from the code (Cortex-A9 at 444 MHz, not measured): the detour (`ps2float=0`) is
+about 25 instructions (8-register push and pop, four moves between the float unit and the core registers, three
+branches, the counter), some 30-50 cycles against 1-14 for the instruction itself (a division 14). `ps2float=1` adds
+the short way: about 20 more instructions for an add or subtract (the flags kept, the exponents compared, the mask),
+some 15 for a division (the float unit's mode set and put back twice): about 50-80 cycles in all, 0.11-0.18 us per
+operation; the C model (rare operands, and the unsigned conversions) about 150-300 cycles. The game thread takes
+19 ms a step in the heavy 1 vs 1 and 27-31 ms in 2 vs 2, against 29.2 ms a step at 114%. So at 10,000 replaced
+operations a step the model costs some 1.1-1.8 ms (+6-9% in 1 vs 1), at 30,000 3.3-5.4 ms. The number of operations
+a step is the unknown: the variant logs it. If it is too much: the pieces of code could do the short ways themselves
+(no call, no 8-register save: about half the detour), and the counters could go.
+
+### The state log, the inputs and a session-like start
+
+- `BT3_HASH=<file>` (as on the PC; `port/vita/vita_m0.c`, which replaces the stub of `vita_bt4.c`): one line per
+  vertical blank in the PC's format (`port/src/gs/state.c`): the blank, a memory checksum (0 on the Vita: the two
+  programs' memory differs anyway), the XXH3 of the fight's values and, during a fight, both fighters' health and
+  position bits, the battle clock, the C library generator's state (`port/src/headless.c` `Port_Trace` builds them,
+  the same file on both).
+- `port/vita/tools/m0_compare.py A B`: the fight lines of two logs lined up (from each file's first fight line, or
+  `--offset`), the first blank and value where they part, with the blanks around it.
+- The inputs: `BT3_PAD_REC` / `BT3_PAD_PLAY` (18 bytes per pad read, `port/src/plat_stub.c`, the same code on both)
+  already worked on the Vita; `BT3_PAD_TABLE=<file>` (36 bytes per blank: both pads as read during that blank) is now
+  written on the Vita too, and `BT3_PAD_TABLE_PLAY=<file>` plays such a table back by blanks (Vita only, read whole at
+  start).
+- `m0=1`: a start like an online session's, as far as the offline test needs: `asyncread=0` (a load takes the same
+  blanks every run), an empty save folder of its own (`ux0:data/bt4/m0save`, emptied at each start, only when it holds
+  the mode's mark file: never the player's saves), sound lengths by blanks (`BT3_SOUND_TICKS=1`, as a session), the
+  PC's key configuration (the console's default in `Save_PortKeys` / `Save_PortDefaultKeys`, `src/sys/save.c` under
+  `PORT_VITA`: the Vita's Normal swaps L1 and L2's actions, so the same pad record gave other actions), the attract
+  demo's own pairing with `mode=demo` (`Demo_SetupBattle`, as the PC's `BT3_DEMO=1`, not the Vita's list),
+  `BT3_HASH=ux0:data/bt4/m0hash.txt` unless another is named. The seed is the PC's fixed one (`BT3_SEED` changes it).
+
+### The `PORT_VITA` audit
+
+Every `PORT_VITA` block of the game's text (`src/`, `include/`; 2026-11-18, 70 files differ from upstream), read for
+what it can change in the simulation: timing (blanks), the random generators' draws, skipped work in update or draw,
+state. Most blocks are drawing only. The ones that matter:
+
+| Where | What the Vita does | Default | Effect | Verdict | Fix for a session |
+|---|---|---|---|---|---|
+| `src/battle/btl_input.c:521` `BtlInput_GetKeyMask`, `src/sys/save.c` `Save_PortKeys`, `Save_PortDefaultKeys` | The control type "Normal" (Ki Charge on L): actions 4 and 5 (L1, L2) swapped against the PS2's and PC's default; custom sets from the Vita's controller page | on | the same pad gives other actions | breaks | **done**: `m0=1` (`gVitaSimExact`) gives the console's set and ignores custom sets; online needs the same (or the actions sent, not the pads) |
+| `src/battle/eft_m.c:1412` `EftAura_StepFlames` | A flame that cannot respawn (pool full) is removed; the PC retries it forever | always | state, only where the PC hangs | breaks only where the PC hangs | keep; report upstream |
+| `src/battle/btl_char_move.c:1414`, `1484` | NaN / infinite / huge height or jump speed set to 0 | always | state, only for such values | risk | none while values stay finite (the model gives no infinity: the PS2's largest number) |
+| `src/battle/btl_char_member.c:467` | `demoult` keeps health at 1 or more | off | health | breaks if on | never in a session |
+| `src/battle/battle_work.c:631` | `demochara3..10` replace the extra fighters | off | roster | breaks if on | never in a session |
+| `src/sys/heap.c:282` `Heap_Alloc` | A block that does not fit comes from the C library (logged) | when the heap is full | pointers, possibly state | risk | in a session: a desync (end the match) |
+| `src/sys/gfxm_e_b.c:764` `ObjShadow_BeginRender` | The silhouette pass skipped (no ground triangles, faded, or kept from the picture before) | on | drawing; `ObjShadow_LoadProg` is skipped with it (writes the shadow view's colour, draws the parts flat) | risk (to check that nothing of the game reads what it writes) | if M0's logs part near shadows: take the PC's path under `gVitaSimExact` |
+| `src/sys/movie.c:276`, `333` | A touch on the screen skips a film | on | blanks | risk in a session with a film | off in a session |
+| `src/menu/menu_a_b.c:72`, `menu_i_c.c:197`, `212` | `startmode=` skips the start-up menus, logos and opening film | off | start-up blanks (the arrival blank) | breaks if set | 0 in a session; `Port_NetFixedStart` is a stub (0) on the Vita: it must be 1 in a session (logos, intro, copyright always shown, whatever the player's skip settings) |
+| `src/menu/menu_x_c.c` Vita Settings (clash assist, stick dead zone, 2nd pad, mods, touch spots, Unlock All, the reset of defaults) | Device settings that change the fight's input or the save | off / neutral | input, save, data | breaks if they differ between the sides | forced to the neutral values in a session (assist off, dead zone 0, 2nd pad off, no mods), Unlock All blocked |
+| `src/menu/port_screen.c:823`, `890`, `port_tbo.c:1583` | Tag Team: no online section; the online hub replaced by the local setup | on | menu flow | (offline: right) | the PC's paths when online play exists |
+| `port/src/headless.c` (`PORT_VITA`, the test fight) | The third archive opened before a test fight (the menus do it otherwise); the Vita's list of pairings | test fights | blanks before the fight; the pairing | (test only) | `m0=1` takes the PC's pairing; the archive's open is kept (blanks before the fight are not compared) |
+| `port/vita/build.py` `FAST_WRAPS`, `VUFAST_WRAPS` (`--wrap`, not `src/`) | `BtlTaskList_Update`, the stage's culling, the effects' list and 39 vector functions replaced by faster stand-ins, checked at start against the library on samples | on | simulation where they compute (`BtlTaskList_Update`, the vector ones) | risk | in the variant `port_fast.c` gets the model as game code; the vector stand-ins are the vector unit's arithmetic; if M0's logs part, a link without them is the check |
+| `include/sys/timer.h`, `dma.h`, `src/sys/dma.c`, `gfx*.c`, `vu1_packet.c`, `col_c*.c`, `view_*.c`, `stg_*.c`, `stgm_a.c`, `eft_c.c`, `eft_d.c`, `hud_c_b.c`, `tag_team_*.inc`, `btl_seq.c`, `btl_obj.c`, `bobj_a.c`, `btl_cam.c:851`, `mcflow_a.c`, `adx.c`, `file.c`, `menu_*` art and text | Drawing, markers for the renderer, logs, counters, register arrays, text and art | | none: no generator drawn or skipped, no game state written (the surfaces' culling in `eft_c.c` / `eft_d.c` skips only triangles the PC clips to nothing; the cross-fade's capture in `stg_b.c` keeps its buffers) | safe | none |
+
+Outside `src/`: the Vita's `Port_VBlank` (`port/src/plat_stub.c`) has no online tick, rollback or state save (no
+session yet: M2); `snd_adx.c`'s `disc_blanks` gives 0 for a voice file missing from its table (the length then comes
+from the local file: online voice timing needs the table complete).
+
+### The PC's reference
+
+The PC port builds and runs on the developer's Windows PC (2026-11-18): upstream `a8c140d` (the commit merged here),
+the 64-bit Linux variant (`BT3_CC=clang64`, software float, `BT3_SKELETON=1`), in WSL's Docker (image
+`bt4-pc-build:local`), with the game data extracted from the developer's Spanish B14 Rev2 image (the Vita sets' disc)
+into the clone's git-ignored `port/build/gamedata`. Headless (`BT3_GS=none BT3_DEMO=1`), a demo fight takes about 30
+seconds. psvita-agent `agent-tools/bt4_pcref.sh` (`setup`, `build`, `run <name> [VAR=value ...]`) repeats it; the logs
+are in `port/build/m0ref/` (git-ignored, with a README of each run's command line; a gzipped copy in psvita-agent
+`notes/online/m0ref/`):
+
+| Run | Environment | Blanks | Fight lines |
+|---|---|---|---|
+| `R1_demo_seed_default` | `BT3_DEMO=1` (the default seed, 0x12345678) | 3196 | 3010 (from blank 187) |
+| `R2_demo_seed_0x1234`, `R2_demo_seed_0x5678` | `BT3_SEED=...` | 3198, 3662 | 3012, 3476 |
+| `R3_demo_seed_default_soundticks` | `BT3_SOUND_TICKS=1` | 3196 | 3010 |
+| `R4_demo_seed_0x1234_soundticks` | `BT3_SEED=0x1234 BT3_SOUND_TICKS=1` | 3198 | 3012 |
+
+R1 run twice is byte for byte the same. R3's fight values are R1's in every blank; its memory checksum parts from
+blank 865 on (the sound players' state, counted in blanks): in this fight the sound's timing did not reach the
+fighters, in others it can, so the Vita's `m0=1` (sound by blanks) is compared with R3 and R4. A fight recorded on the console
+(`online_m0_rec`) is played on the PC with `bt4_pcref.sh run <name> BT3_PAD_PLAY=<the .rec> BT3_SOUND_TICKS=1` (from the
+title, the real menus, no window).
+
+### What the console runs must show
+
+The sets are in psvita-agent `sets/bt4/online_m0_*.txt` (each with a `.fetch` list: `run_batch.sh` fetches the state
+logs, `vita_agent_run.py --fetch`, both on this branch). Two batches:
+
+1. The variant (`port/build/vita_dev_pf`): `online_m0_demo_pf0`, `online_m0_demo_pf1`, `online_m0_demo_pf1b`,
+   `online_m0_seed1234_pf1`, `online_m0_cost_h_pf0`, `online_m0_cost_h_pf1`, `online_m0_cost_t_pf0`,
+   `online_m0_cost_t_pf1`.
+2. The default build of this branch (`port/build/vita_dev`): `online_m0_demo_def`, `online_m0_cost_h_def`,
+   `online_m0_cost_t_def`.
+
+What each must show:
+- the log's `ps2float: check (ps2float=0|1): 2112 operations, 0 differ` line in every run of the variant (a
+  difference there is a bug of the variant: stop);
+- `m0_demo_pf0` = `m0_demo_def` line for line (`m0_compare.py`: "the same in every fight blank"): the variant with the
+  model off changes nothing;
+- `m0_demo_pf1` = `m0_demo_pf1b`: two runs of the same start give the same fight (asyncread=0, the empty save);
+- `m0_demo_pf1` against `m0_demo_pf0`: where the model first changes the fight (expected to part: that is the point);
+- `m0_demo_pf1` against the PC's log of the same seed, disc and commit (below: `R3_demo_seed_default_soundticks.txt`,
+  since `m0=1` counts sound in blanks; `m0_seed1234_pf1` against `R4_demo_seed_0x1234_soundticks.txt`): the same, or the first value and blank where they part;
+- the cost: the game thread's ms per step (`perfsum.py --parts`) of `_def`, `_pf0`, `_pf1` in the heavy 1 vs 1 and in
+  2 vs 2, and the operations per blank of the `ps2float=1:` lines: the detour's and the model's cost;
+- a fight played by the developer (`online_m0_rec`, by hand, then `online_m0_play_pf1` and `online_m0_playtab_pf1`
+  played back): the three state logs the same; the recording also drives the PC's `BT3_PAD_PLAY` run.
+
+## Sessions inside the running game (`session_inproc`, 2026-11-20)
+
+The lobbies (Create Match, Join by address, the Ad Hoc lobby) need a session that the lobby outlives: on the PC's
+64-bit programs `gs/state.c` keeps the game's state and puts it back (the game starts again from its first blank for
+the match, and the menus come back after it). The Vita's version is `port/vita/vita_session.c` (network builds,
+bt3.txt `session_inproc=1`; 3 measures only; 0, the default, keeps the restart through `session.txt`):
+
+- what it keeps: the game's global variables (15 ranges, 2.1 MB: the game's objects and the port files the game goes
+  through, from the linker's map by `port/vita/tools/vita_state_list.py`, written into the program's `gVitaStateList`
+  after the link with the link addresses of two marks), the game heap (28.3 MB), the blocks the game took outside it
+  (`Port_LowAlloc`, `Port_GameBigAlloc`: listed by `vita_session.c`, never freed while a snapshot holds one), the game
+  thread's stack and its registers (`vita_session_a.S`);
+- how: 4 KB pieces, zero pieces not stored, the menus' snapshot stored only where it differs from the start's; put
+  back from a stack at the bottom of the game thread's own (the kernel stops a thread whose stack pointer is outside
+  its stack when it makes a system call: a C-heap stack crashed in `free()`);
+- around it: async reads into the game's memory drained (`Vita_ReadDrain`) and the game's reads on its own thread
+  during the session (`Vita_ReadSync`), the render thread idle (`Port_GsSync`), GS memory kept and put back with the
+  pages' generations moved on (`gs_core.c` `Gs_StateKeep/Back` under `PORT_VITA`), `Port_AdxResync`, the PC's way of
+  computing (`gVitaSimExact`) and `online_neutral` set for the session and undone after.
+
+Console, 2026-11-20 (build `vita_dev_pf_nl`, sets `online_sess_s1..s3`, pictures `port/build/online_review/v3`):
+the start's snapshot 188 KB in 273 ms; the menus' 9-14 MB in 220-240 ms; a session starts 334 ms (test) or
+760-780 ms (lobby) after it is asked for and comes back in 95-100 ms; free C heap 41 MB after each return, stable.
+The Vita hosted a lobby by address (`BT3_LOBBY=lobby:7000`), the PC R1.6 joined, two matches inside the running game,
+back to the lobby after each (`BT3_LOBBY_DO ... waitseq 6|back`). Fights identical to the PC's; open: the copies
+part at a fight's restart from the result menu (blank 23936 of run b: the 5th fight's start after 4 identical ones;
+blank 7776 of run c, as the owner went back to the lobby: the Vita left the result screen 18 blanks before the PC
+heard it), and after the return the Vita shows the hub, not the lobby window (the lobby lives on).
+Fixed on the way: `PortSpecMenu_Text` (the battle menus' port lines) answered NULL on the Vita: a lobby match's result
+menu crashed.
 
 ## Versions and compatibility
 
@@ -205,7 +710,7 @@ What a client must match to play a PC:
 
 | Library | Used for | Built how on PC | On the Vita |
 |---|---|---|---|
-| WinHTTP (Windows), libcurl (Linux, macOS; `curl_ws_io.h` for WebSockets) | HTTPS, the signaling WebSocket, the update check | system / packaged | to bring: curl with OpenSSL or Mbed TLS, or SceHttp + SceSsl (no WebSocket) |
+| WinHTTP (Windows), libcurl (Linux, macOS; `curl_ws_io.h` for WebSockets) | HTTPS, the signaling WebSocket, the update check | system / packaged | the build image's libcurl 8.17.0 (WS/WSS) on OpenSSL 1.1.1t, linked since M1 (above), with `lib/cacert.pem` in the package |
 | libdatachannel 0.24.6 (libjuice, usrsctp, libSRTP, OpenSSL) | Tag Team P2P, voice | loaded at run time (`voiceLibrary`); `port/release/RTC_SDK.md`, `build_rtc.py` | not known to have been built for the Vita: C++17, threads, BSD sockets, a DTLS library |
 | Opus | voice | packaged | plain C |
 | nlohmann json (header), monocypher, SDL3 | JSON; Ed25519; threads, timers, preference folder | in `port/third_party` / system | json and monocypher compile anywhere; SDL3 through the Vita's shim (`port/vita/sdlshim`) |
