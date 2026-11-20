@@ -50,11 +50,14 @@ static char sDns[128] = "stun.l.google.com";
 static char sPublic[200];
 static int sPoolKb = 1024;
 
+int gVitaNetRelaunch;      /* bt3.txt online_relaunch: a session from bt3.txt lines goes through the restart (vita_netglue.c) */
 int gVitaNetNeutralWanted; /* bt3.txt online_neutral: a session plays with the PC's neutral Vita Settings (vita_netglue.c) */
 int gVitaNetSpeedOn;       /* bt3.txt online_speed: a session's speed above 100 % paced (vita_netglue.c) */
 void Vita_NetSetting(const char *name, const char *value) {
     if (strcmp(name, "online") == 0) {
         gVitaOnline = atoi(value) != 0;
+    } else if (strcmp(name, "online_relaunch") == 0) { /* (a test of the session start the menus use: session.txt + restart) */
+        gVitaNetRelaunch = atoi(value);
     } else if (strcmp(name, "online_neutral") == 0) { /* a session: the PC's neutral Vita Settings (vita_gfx.c) */
         gVitaNetNeutralWanted = atoi(value);
     } else if (strcmp(name, "online_speed") == 0) { /* a session faster than 100 %: the Vita's pacing (vita_netglue.c) */

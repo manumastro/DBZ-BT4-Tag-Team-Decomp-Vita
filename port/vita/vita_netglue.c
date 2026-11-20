@@ -161,6 +161,17 @@ int Vita_SessionLoad(void) {
             setenv("BT3_SAVES", getenv("BT3_NET_SAVES"), 1); /* (never the player's own saves: the session's folder,
                                                                emptied by m0=1, which such a test also sets) */
         }
+        {
+            extern int gVitaNetRelaunch; /* (vita_net.c: bt3.txt online_relaunch) */
+            if (gVitaNetRelaunch) {
+                /* the way the menus start a session (net.c relaunch -> execv above): session.txt written, the app
+                   started again; the next start finds the file and goes on below it. A test of that path without
+                   the menus (set online_m3_relaunch) */
+                Vita_Log("net: online_relaunch=1: the session goes through %s and a restart, as from the menus\n", SESSION_FILE);
+                execv("app0:eboot.bin", NULL);
+                Vita_Log("net: the restart failed: the session starts in this process\n");
+            }
+        }
         Vita_Log("net: a session from bt3.txt's own lines (no %s)\n", SESSION_FILE);
         goto session;
     }

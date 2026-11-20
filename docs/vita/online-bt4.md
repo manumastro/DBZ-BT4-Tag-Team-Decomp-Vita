@@ -234,6 +234,12 @@ on the same LAN, By Address (no server), with nobody holding the pads.
   never called `Port_NetBeginTick` (try 2: the start-up "ended" at blank 0, the two never met); `scePad2GetState`
   said player 2's pad was missing (try 3: "No controller connected", the games parted at the fight's first blank).
   Runs in `wt-online/port/build/runs/online_m3_vs_pc_host{,_try2,_try3}` (the PC's logs copied there).
+- **The menus' session start passed too** (2026-11-20, set `online_m3_relaunch`, bt3.txt `online_relaunch=1`): the
+  same match, but the bt3.txt session goes the way the online menus start one (net.c `relaunch` -> the Vita's `execv`
+  writes `ux0:data/bt4/net/session.txt` -> `sceAppMgrLoadExec` restart -> `Vita_SessionLoad` reads and removes the
+  file): the log shows the restart and the session from the file; the PC joined, 21,242 fight blanks identical, no
+  desync; the file was gone afterwards. The menus' own screens (Create Match / Join By Address with `online_menu=1`)
+  still need a run by hand or with button presses: everything after their "Create Room" / "Join" is this path.
 - The harness checked PC against PC (2026-11-20, two R1.6 copies on this PC, host 26100 + join 127.0.0.1:26100, the
   table of seed 1): connected, both at the character select at blank 1754, the table's presses picked the fighters and
   stage, a fight ran (hp 50000/50000 -> 26160/24420) and a second one began; 37,969 fight blanks, the two state logs the
