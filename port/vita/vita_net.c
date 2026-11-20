@@ -57,12 +57,16 @@ int gVitaNetSpeedOn;       /* bt3.txt online_speed: a session's speed above 100 
    3 measure only (vita_session.c, network builds); session_test / session_leave / session_again: its test without a
    network (blank to ask at, blanks to stay, blanks to the next) */
 int gVitaSessionInproc;
+int gVitaNetCaStore = 1; /* bt3.txt online_castore (ca_store below) */
 int gVitaSessionTest[3];
 void Vita_NetSetting(const char *name, const char *value) {
     if (strcmp(name, "online") == 0) {
         gVitaOnline = atoi(value) != 0;
     } else if (strcmp(name, "session_inproc") == 0) {
         gVitaSessionInproc = atoi(value);
+    } else if (strcmp(name, "session_warm") == 0) { /* the screens' pictures read again at a session's end (vita_tbo.c) */
+        extern int gVitaSessionWarm;
+        gVitaSessionWarm = atoi(value);
     } else if (strcmp(name, "session_test") == 0) {
         gVitaSessionTest[0] = atoi(value);
     } else if (strcmp(name, "session_leave") == 0) {
@@ -90,6 +94,12 @@ void Vita_NetSetting(const char *name, const char *value) {
         snprintf(sServer, sizeof(sServer), "%s", value);
     } else if (strcmp(name, "online_ca") == 0) {
         snprintf(sCa, sizeof(sCa), "%s", value);
+    } else if (strcmp(name, "online_ssllock") == 0) { /* OpenSSL's locks: one recursive mutex (below) */
+        extern int gVitaNetSslLock;
+        gVitaNetSslLock = atoi(value);
+    } else if (strcmp(name, "online_castore") == 0) { /* the CA list read once into a shared store (below, ca_store) */
+        extern int gVitaNetCaStore;
+        gVitaNetCaStore = atoi(value);
     } else if (strcmp(name, "online_udp") == 0) {
         snprintf(sUdp, sizeof(sUdp), "%s", value);
     } else if (strcmp(name, "online_pool") == 0) {
@@ -264,6 +274,201 @@ CURL *__wrap_curl_easy_init(void) {
     return c;
 }
 
+/* bt3.txt online_castore (default 1): the CA list is read ONCE into a certificate store that every request shares
+   (curl's SSL_CTX callback hands it over), instead of curl reading the whole list (the package's 120 public roots +
+   online_ca) at each request. With the package's list every auth/refresh ended after ~3 s with curl 77 "Problem
+   with the SSL CA cert" (console runs online_sess_s*, 2026-11-20; with the test CA alone, 1 KB, it worked).
+   0: curl reads the file at each request, as before. The time to build the store and any OpenSSL error are logged. */
+#include <openssl/err.h>
+#include <openssl/pem.h>
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
+#include <pthread.h>
+extern int gVitaNetCaStore;
+static unsigned sSslLocksMade, sSslLocksFailed; /* (OpenSSL's locks, below: online_ssllock) */
+static int sSslLockOn;
+static X509_STORE *sStore;
+static int sStoreTried;
+static pthread_mutex_t sStoreLock = PTHREAD_MUTEX_INITIALIZER;
+
+/* The list read into memory with the C library (fopen/fread), then parsed from memory (PEM_X509_INFO_read_bio on a
+   memory BIO) and each certificate added: every step timed and its failure logged with OpenSSL's whole error queue
+   (the first try, X509_STORE_load_locations on the signaling thread, failed after 1.5 s with "BIO_new: malloc
+   failure": console run online_lobby_screens). Made at the network's start (net_start, the main thread). */
+static void ca_errors(char *out, size_t size) {
+    unsigned long e;
+    size_t n = 0;
+    out[0] = '\0';
+    while ((e = ERR_get_error()) != 0 && n + 2 < size) {
+        char one[160];
+        ERR_error_string_n(e, one, sizeof(one));
+        n += (size_t)snprintf(out + n, size - n, "%s%s", n ? " | " : "", one);
+    }
+}
+
+static void ca_store_make(void) {
+    unsigned long long t = now_us(), tRead, tParse;
+    FILE *f;
+    char *buf = NULL, why[600];
+    long len = 0;
+    BIO *bio = NULL;
+    STACK_OF(X509_INFO) *infos = NULL;
+    X509_STORE *st = NULL;
+    int i, added = 0, dup = 0, probe;
+    if (sStoreTried || !gVitaNetCaStore || sCaFile[0] == '\0') {
+        return;
+    }
+    sStoreTried = 1;
+    {
+        void *m = malloc(4096);
+        probe = m != NULL;
+        free(m);
+    }
+    ERR_clear_error();
+    f = fopen(sCaFile, "rb");
+    if (f != NULL && fseek(f, 0, SEEK_END) == 0 && (len = ftell(f)) > 0 && fseek(f, 0, SEEK_SET) == 0 &&
+        (buf = malloc((size_t)len)) != NULL && fread(buf, 1, (size_t)len, f) != (size_t)len) {
+        free(buf);
+        buf = NULL;
+    }
+    if (f != NULL) {
+        fclose(f);
+    }
+    tRead = now_us();
+    if (buf == NULL) {
+        Vita_Log("net: CA store: %s not read (%ld bytes, a 4 KB malloc %s, C heap in use %d KB)\n", sCaFile, len,
+                 probe ? "worked" : "FAILED", heap_used() >> 10);
+        return;
+    }
+    bio = BIO_new_mem_buf(buf, (int)len);
+    infos = bio != NULL ? PEM_X509_INFO_read_bio(bio, NULL, NULL, NULL) : NULL;
+    tParse = now_us();
+    st = infos != NULL ? X509_STORE_new() : NULL;
+    for (i = 0; st != NULL && i < sk_X509_INFO_num(infos); i++) {
+        X509_INFO *xi = sk_X509_INFO_value(infos, i);
+        if (xi->x509 != NULL) {
+            if (X509_STORE_add_cert(st, xi->x509) == 1) {
+                added++;
+            } else {
+                dup++;
+                ERR_clear_error();
+            }
+        }
+    }
+    ca_errors(why, sizeof(why));
+    if (st != NULL && added > 0) {
+        sStore = st;
+        Vita_Log("net: CA store from %s: %d certificates (%d refused) in %u ms (read %u, parse %u); shared by every "
+                 "request (online_castore=1); C heap in use %d KB; OpenSSL locks %u (online_ssllock=%d)\n", sCaFile, added, dup,
+                 (unsigned)((now_us() - t) / 1000), (unsigned)((tRead - t) / 1000), (unsigned)((tParse - tRead) / 1000),
+                 heap_used() >> 10, sSslLocksMade, sSslLockOn);
+    } else {
+        Vita_Log("net: CA store from %s NOT made in %u ms (%ld bytes read, %d entries parsed; a 4 KB malloc %s; C heap in "
+                 "use %d KB): %s; curl reads the file at each request\n", sCaFile, (unsigned)((now_us() - t) / 1000), len,
+                 infos != NULL ? sk_X509_INFO_num(infos) : -1, probe ? "worked" : "FAILED", heap_used() >> 10,
+                 why[0] ? why : "no OpenSSL error");
+        if (st != NULL) {
+            X509_STORE_free(st);
+        }
+    }
+    if (infos != NULL) {
+        sk_X509_INFO_pop_free(infos, X509_INFO_free);
+    }
+    BIO_free(bio);
+    free(buf);
+}
+
+static X509_STORE *ca_store(void) {
+    pthread_mutex_lock(&sStoreLock);
+    ca_store_make(); /* (made at the network's start; here only if that was skipped) */
+    pthread_mutex_unlock(&sStoreLock);
+    return sStore;
+}
+
+/* bt3.txt online_ssllock (default 1): OpenSSL's locks (CRYPTO_THREAD_lock_new and the calls on them, linked with
+   -Wl,--wrap: build.py) are one recursive mutex of the program instead of a pthread read-write lock each. Every object
+   OpenSSL makes with a reference count (each certificate of the CA list, each BIO) gets a lock of its own, and on the
+   Vita a pthread read-write lock is made of kernel objects: with the package's 120 roots they ran out ("BIO_new: malloc
+   failure", which is how OpenSSL reports a lock it could not make) and every request with that list ended in curl 77
+   (console runs online_sess_s*, online_lobby_screens, online_ca_check, 2026-11-20). OpenSSL never waits for another
+   thread while it holds a lock, so one lock for all cannot deadlock; the requests are few. 0: OpenSSL's own locks
+   (the failures counted in the log). */
+int gVitaNetSslLock = 1;
+void *__real_CRYPTO_THREAD_lock_new(void);
+int __real_CRYPTO_THREAD_read_lock(void *lock);
+int __real_CRYPTO_THREAD_write_lock(void *lock);
+int __real_CRYPTO_THREAD_unlock(void *lock);
+void __real_CRYPTO_THREAD_lock_free(void *lock);
+static pthread_mutex_t sSslLock;
+static pthread_once_t sSslLockOnce = PTHREAD_ONCE_INIT;
+static int sSslLockOn = -1; /* (taken from the setting at the first lock: it must not change while locks exist) */
+static unsigned sSslLocksMade, sSslLocksFailed;
+static char sSslToken; /* (what a lock "is" with online_ssllock=1: its address, never written) */
+static void ssl_lock_init(void) {
+    pthread_mutexattr_t a;
+    pthread_mutexattr_init(&a);
+    pthread_mutexattr_settype(&a, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&sSslLock, &a);
+    pthread_mutexattr_destroy(&a);
+    sSslLockOn = gVitaNetSslLock != 0;
+}
+void *__wrap_CRYPTO_THREAD_lock_new(void) {
+    void *l;
+    pthread_once(&sSslLockOnce, ssl_lock_init);
+    if (sSslLockOn) {
+        sSslLocksMade++;
+        return &sSslToken;
+    }
+    l = __real_CRYPTO_THREAD_lock_new();
+    if (l != NULL) {
+        sSslLocksMade++;
+    } else if (sSslLocksFailed++ == 0) {
+        Vita_Log("net: OpenSSL could not make a lock after %u (online_ssllock=0)\n", sSslLocksMade);
+    }
+    return l;
+}
+int __wrap_CRYPTO_THREAD_read_lock(void *lock) {
+    if (lock == &sSslToken) {
+        return pthread_mutex_lock(&sSslLock) == 0;
+    }
+    return __real_CRYPTO_THREAD_read_lock(lock);
+}
+int __wrap_CRYPTO_THREAD_write_lock(void *lock) {
+    if (lock == &sSslToken) {
+        return pthread_mutex_lock(&sSslLock) == 0;
+    }
+    return __real_CRYPTO_THREAD_write_lock(lock);
+}
+int __wrap_CRYPTO_THREAD_unlock(void *lock) {
+    if (lock == &sSslToken) {
+        return pthread_mutex_unlock(&sSslLock) == 0;
+    }
+    return __real_CRYPTO_THREAD_unlock(lock);
+}
+void __wrap_CRYPTO_THREAD_lock_free(void *lock) {
+    if (lock != &sSslToken && lock != NULL) {
+        __real_CRYPTO_THREAD_lock_free(lock);
+    }
+}
+
+static CURLcode ca_ctx(CURL *c, void *ctx, void *user) {
+    (void)c;
+    (void)user;
+    if (sStore != NULL && X509_STORE_up_ref(sStore) == 1) {
+        SSL_CTX_set_cert_store((SSL_CTX *)ctx, sStore); /* (the context frees its old one and drops a reference at its end) */
+    }
+    return CURLE_OK;
+}
+
+/* before a request goes out (easy perform, or a multi handle: the WebSocket): the shared store, no file to read */
+static void ca_use(CURL *c) {
+    if (ca_store() != NULL) {
+        curl_easy_setopt(c, CURLOPT_CAINFO, NULL);
+        curl_easy_setopt(c, CURLOPT_CAPATH, NULL);
+        curl_easy_setopt(c, CURLOPT_SSL_CTX_FUNCTION, ca_ctx);
+    }
+}
+
 static void url_noquery(CURL *c, char *out, size_t size) {
     char *u = NULL;
     curl_easy_getinfo(c, CURLINFO_EFFECTIVE_URL, &u);
@@ -271,8 +476,11 @@ static void url_noquery(CURL *c, char *out, size_t size) {
 }
 
 CURLcode __wrap_curl_easy_perform(CURL *c) {
-    unsigned long long t = now_us();
-    CURLcode rc = __real_curl_easy_perform(c);
+    unsigned long long t;
+    CURLcode rc;
+    ca_use(c);
+    t = now_us();
+    rc = __real_curl_easy_perform(c);
     char url[256];
     char *method = NULL;
     long code = 0;
@@ -292,6 +500,7 @@ CURLMcode __wrap_curl_multi_add_handle(CURLM *m, CURL *c) {
     char url[256];
     url_noquery(c, url, sizeof(url));
     Vita_Log("net: opening %s (a connection held open: WebSocket)\n", url[0] != '\0' ? url : "(address not known yet)");
+    ca_use(c);
     return __real_curl_multi_add_handle(m, c);
 }
 
@@ -347,6 +556,10 @@ static int net_start(void) {
     make_ca();
     r = curl_global_init(CURL_GLOBAL_DEFAULT);
     say("net: %s, CA list %s%s\n", curl_version(), sCaFile, r != 0 ? " (curl_global_init failed)" : "");
+    pthread_mutex_lock(&sStoreLock);
+    ca_store_make(); /* (online_castore: the CA list into one shared store, now, on this thread) */
+    pthread_mutex_unlock(&sStoreLock);
+    say("net: OpenSSL locks made so far %u, failed %u (online_ssllock=%d)\n", sSslLocksMade, sSslLocksFailed, sSslLockOn);
     say_memory("after start-up");
     return 1;
 }

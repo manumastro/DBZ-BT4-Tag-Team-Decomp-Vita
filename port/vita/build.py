@@ -544,6 +544,9 @@ PORT_WRAPS += ["__getreent", "pte_osTlsGetValue", "memcmp"]
 # every request curl makes logged, curl's CA list set (port/vita/vita_net.c)
 if ONLINE:
     PORT_WRAPS += ["curl_easy_init", "curl_easy_perform", "curl_multi_add_handle"]
+    # OpenSSL's locks: one recursive mutex (port/vita/vita_net.c, bt3.txt online_ssllock)
+    PORT_WRAPS += ["CRYPTO_THREAD_lock_new", "CRYPTO_THREAD_read_lock", "CRYPTO_THREAD_write_lock", "CRYPTO_THREAD_unlock",
+                   "CRYPTO_THREAD_lock_free"]
 PORT_WRAPS += """sceIoOpen sceIoClose sceIoRead sceIoPread sceIoLseek sceIoLseek32 sceIoGetstat sceIoGetstatByFd sceIoDopen sceIoDread
     sceIoDclose""".split()
 
