@@ -607,10 +607,12 @@ def vpk():
     # Tag Team screens (tag_ui_*.pss, 30 MB, packaged only with BT4_VITA_TAGMOVIE=1: the film is the .mp4 files below)
     ui, n = ROOT / "port/tbo/ui", 0
     online_only = {"radar.png", "bg.png", "discord.png", "tag_team_icon.png"}
+    if NETLINK:  # (the online hub on the Vita: its background, radar and hosts; not the PC-only community button
+        online_only = {"discord.png", "tag_team_icon.png"}  # nor the unused icon. Hosts ~363 px high, bg 960 x 540)
     # the pictures made ready for the Vita here, not at run time (tools/tbo_vita_assets.py: decoded, touched, sized for
     # the 960 x 544 screen, as the textures the renderer uploads: tbo/ui/<name>.vt), the main menu's emblem with them
     names = [f.stem for f in sorted(ui.iterdir())
-             if f.suffix == ".png" and f.name not in online_only and not f.name.startswith("hosts_")] + ["main_tag_emblem"]
+             if f.suffix == ".png" and f.name not in online_only and (NETLINK or not f.name.startswith("hosts_"))] + ["main_tag_emblem"]
     vt = ROOT / "port/build/tbo_vita"
     subprocess.run([sys.executable, str(ROOT / "port/vita/tools/tbo_vita_assets.py"), str(ui), str(vt)] + names, check=True)
     for name in names:
