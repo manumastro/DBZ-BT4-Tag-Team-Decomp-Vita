@@ -287,6 +287,20 @@ on the same LAN, By Address (no server), with nobody holding the pads.
   against `online_testserver.py`, it ends "Could not verify your nickname", so the By Address screens were not
   reached yet. Tag Team > Online Battles and its code keypad do show (the PC pages). Pictures and notes outside git:
   `port/build/online_review/index.txt`.
+- Second round (2026-11-20, sets `online_menu_review2..4`, pictures `port/build/online_review/v2/`): the nickname
+  gate was the test server's (the console keeps its v5 refresh token; after a server restart it got 401 and the game
+  never makes a new account): `online_testserver.py` now adopts an unknown refresh token and keeps its tokens in
+  `state.json`; Create Match then opens. Found and fixed: the Vita's `Port_VBlank` never ran `Port_LobbyAuto`, so a
+  lobby from the menus stayed at "Opening the port..." with Cancel dead (`plat_stub.c`, network builds). **Open:**
+  the lobby then refuses ("Lobbies need the game's state list (the .mem file...)"): `net_lobby.c` needs
+  `Port_SessionCan()` (state.c's in-process session, PC 64-bit only); the Vita starts sessions by a restart. So
+  Create Match / Join by address need either an in-process session on the Vita or a lobby that survives the restart.
+  Vita look changes (PORT_VITA, `port_tbo.c`): notes (nickname checks, bad codes) said in the hosts' box instead of
+  the PC's small amber line over the box's edge; no "Join our Discord Server!" button (the hub's prompts as every
+  page's). Tag Team > Join Room in network builds: the 1 vs 1 Join's BY ADDRESS / AD HOC buttons under the code keys;
+  By Address -> `Port_TagJoinAddress` (port `tagnet_port` when none is typed); the Ad Hoc list from Tag shows rooms
+  whose beacon port is `tagnet_port`; Tag Create Room with `adhoc_menu=1` makes the group (system dialog) and
+  advertises the room first. Built; the Tag rows not seen on the console yet.
 - Decisions on the known risks: (1) **owner 34.2 steps/s vs the Vita's 2 vs 2 at ~29-30 pictures/s**: kept as the PC
   (the room's pace is the game's 114 %; a Vita-only room ticking slower would change the game's speed); the Vitas keep
   up with the game's own catch-up (`Port_TagCatchup`: from a backlog of 6 frames it skips pictures, 4 of 5, down to
