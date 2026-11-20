@@ -151,7 +151,18 @@ int Vita_SessionLoad(void) {
     }
     f = fopen(SESSION_FILE, "r");
     if (f == NULL) {
-        return 0;
+        /* No session file, but bt3.txt itself says BT3_NET_SESSION=1 and BT3_NET_HOST=<port> or BT3_NET_JOIN=<ip:port>
+           (a test: the PC's way of starting a session from its environment, e.g. a 1 vs 1 by address against a PC
+           started the same way, agent-tools/bt4_pcref.sh net; the sets online_m3_*) */
+        if (getenv("BT3_NET_SESSION") == NULL || (getenv("BT3_NET_HOST") == NULL && getenv("BT3_NET_JOIN") == NULL)) {
+            return 0;
+        }
+        if (getenv("BT3_SAVES") == NULL || strcmp(getenv("BT3_SAVES"), PORT_VITA_HOME "/saves") == 0) {
+            setenv("BT3_SAVES", getenv("BT3_NET_SAVES"), 1); /* (never the player's own saves: the session's folder,
+                                                               emptied by m0=1, which such a test also sets) */
+        }
+        Vita_Log("net: a session from bt3.txt's own lines (no %s)\n", SESSION_FILE);
+        goto session;
     }
     while (fgets(line, sizeof(line), f) != NULL) {
         char *eq = strchr(line, '=');
@@ -168,6 +179,11 @@ int Vita_SessionLoad(void) {
     if (getenv("BT3_NET_SESSION") == NULL) {
         Vita_Log("net: back from a session (%d settings from %s)\n", n, SESSION_FILE);
         return 0;
+    }
+session:
+    if (getenv("BT3_NET_ADHOC") == NULL) {
+        extern int gVitaOnline; /* (vita_net.c: SceNet + the network's start; net.c's UDP socket needs it whatever bt3.txt's online says) */
+        gVitaOnline = 1;
     }
     gVitaAsyncRead = 0;
     gVitaSimExact = 1;

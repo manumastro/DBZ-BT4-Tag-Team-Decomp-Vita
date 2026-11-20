@@ -196,6 +196,45 @@ session's restart carries `BT3_NET_ADHOC` ("1" the host, the host's MAC a joiner
 group again at its start (the system dialog needs the game's frames: before net.c's first socket, or the session
 started in the same process).
 
+### M3a: 1 vs 1 by address against the PC on the LAN (2026-11-20; built, not run on the console)
+
+The first real match: the Vita against the PC client of the matching public release (tag `v0.1.39.6-R1.6`, `a4350e6`),
+on the same LAN, By Address (no server), with nobody holding the pads.
+
+- Vita build: `BT4_VITA_NETLINK=1 BT4_PS2FLOAT=1 BT3_VITA_DEV=1` (`port/build/vita_dev_pf_nl`): the net.c family and the
+  PS2 float model together (the model is what makes the Vita's fight equal the PC's: M0). Links.
+- A session from bt3.txt's own lines (`vita_netglue.c` `Vita_SessionLoad`): `BT3_NET_SESSION=1` with `BT3_NET_HOST=<port>`
+  or `BT3_NET_JOIN=<ip:port>` starts a session at once, as the PC does from its environment (no `session.txt`, no
+  restart). Its saves are never the player's (`BT3_SAVES` -> the session folder `ux0:data/bt4/net/saves`, emptied by
+  `m0=1`, which these sets also use: reads on the game's thread, sound by blanks, the PC's keys, the state log).
+  Every session (this one or one from `session.txt`) now brings the network up itself (`online=1` not needed; an Ad
+  Hoc session excepted).
+- Pads: net.c's own `BT3_NET_SCRIPT=<table>` (36 bytes a blank, BT3_PAD_TABLE's format; each copy plays its own player's
+  column). `port/vita/tools/net_script.py <out> --seed N` writes a repeatable table: nothing for 600 blanks, then
+  presses of cross, square, R1, L1 and held directions; never start, select, circle or triangle (going back from a
+  select ends the session). The same file on both sides.
+- PC side: `agent-tools/bt4_pcref.sh net <name> host <port>|join <ip:port> <table> [VAR=value]` (psvita-agent) with
+  `BT4_PCREF=~/psvita/bt4-pcnet` (a worktree of the reference clone at `a4350e6`, built by `bt4_pcref.sh build`):
+  headless (`BT3_GS=none`), `docker run --network host` (WSL is in mirrored mode: the PC's own address 192.168.1.233),
+  the environment net.c's relaunch sets (`BT3_NET_SESSION`, `BT3_SOUND_TICKS`, `BT3_NOMOVIE`, `BT3_NET_VOICE`, an empty
+  save folder), the state log in `bt4-vita/port/build/m0ref/<name>.txt`.
+- Who hosts: the Vita (set `online_m3_vs_pc_host`, UDP 26100), the PC joining: the PC only sends first, so Windows needs
+  no inbound rule. The reverse (`online_m3_vs_pc_join`) needs an inbound UDP rule on the PC (Hyper-V firewall in
+  mirrored mode): only with the developer's OK.
+- Checks: net.c itself compares the two games every 32 blanks (a desync ends the match with "no longer agree");
+  `m0_compare.py` on the two state logs, blank for blank, from the first fight line; both logs say
+  `net: both at the character select (blank N)` with the same N.
+- The harness checked PC against PC (2026-11-20, two R1.6 copies on this PC, host 26100 + join 127.0.0.1:26100, the
+  table of seed 1): connected, both at the character select at blank 1754, the table's presses picked the fighters and
+  stage, a fight ran (hp 50000/50000 -> 26160/24420) and a second one began; 37,969 fight blanks, the two state logs the
+  same in every one, no desync. (Headless runs faster than 60 blanks a second; the Vita paces the match at 60.)
+- The PDP transport for Tag Team (T1 step 2, not wired in yet): `port/vita/vita_tagpdp.c` (reliable ordered control
+  channel with seq/ack/ack bits + a cumulative ack, resend every 150 ms, 64 outstanding, reorder window 64; unreliable
+  channel as is; session id filter; members 0-3; ~350 KB per endpoint in fixed arrays) over a send/recv/clock ops
+  table, so it runs on the host: `gcc -O2 -Wall -Wextra -I port/vita port/vita/vita_tagpdp.c
+  port/vita/tools/tagpdp_test.c` passes 8 cases (2 and 3 members, 0/10/30 % loss with duplication and reordering,
+  a foreign session ignored, 70,000 messages across the sequence wrap). Not in build.py yet.
+
 ## What a player has (PC)
 
 | Mode | What it is | Players |
