@@ -282,6 +282,11 @@ on the same LAN, By Address (no server), with nobody holding the pads.
   gives `vita-adhoc` when the hub's Ad Hoc rows are on, else `vita-udp`; `Port_TagJoinAddress(address)` joins. The
   menus' rows are still to add (Tag Team > Online is hidden on the Vita). `Port_TagDataFingerprint` is the PC's (the
   build identity with the expanded-rules mark), so joins are no longer blocked by a 0. The local room is unchanged.
+- The online menus review on the console (2026-11-20, set `online_menu_review`, `tagscreen=3`): the hub shows and
+  reads well, but Create Match / Join are gated by the service nickname check (as on the PC): without the service, or
+  against `online_testserver.py`, it ends "Could not verify your nickname", so the By Address screens were not
+  reached yet. Tag Team > Online Battles and its code keypad do show (the PC pages). Pictures and notes outside git:
+  `port/build/online_review/index.txt`.
 - Decisions on the known risks: (1) **owner 34.2 steps/s vs the Vita's 2 vs 2 at ~29-30 pictures/s**: kept as the PC
   (the room's pace is the game's 114 %; a Vita-only room ticking slower would change the game's speed); the Vitas keep
   up with the game's own catch-up (`Port_TagCatchup`: from a backlog of 6 frames it skips pictures, 4 of 5, down to
