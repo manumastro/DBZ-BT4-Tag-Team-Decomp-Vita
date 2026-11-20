@@ -423,4 +423,56 @@ void PortQuit_Draw(int vsyncs) {}
 
 /* (port/src/spec_menu.c) */
 int PortSpecMenu_Frame(int vsyncs) { return 0; }
-unsigned short * PortSpecMenu_Text(int k) { return 0; }
+/* The port's own lines of the battle's pause and result menus (src/battle/hud_0_b.c BtlMenu_GetItemText, 0x6FF9..0x70FF):
+   upstream's spec_menu.c makes them; its spectator menu is not on the Vita, its lines are. Without them a lobby's match
+   ended in a crash on the result menu's "Back to the Lobby" (a NULL line measured: console run online_sess_s3). */
+unsigned short *PortSpecMenu_Text(int k) {
+    extern const char *PortOnline_Text(const char *text); /* vita_onlinelang.c */
+    static unsigned short text[14][96];
+    const char *s;
+    char name[96];
+    int i, n = 0;
+    if (k < 0 || k >= 14) {
+        k = 0;
+    }
+    switch (k) {
+    case 7: s = "Watching"; break;
+    case 8: s = "Back to the Lobby"; break;
+    case 9: s = "Keep Searching"; break;
+    case 10: s = "Congratulations!"; break;
+    case 11:
+#ifdef BT4_VITA_NETLINK
+        {
+            extern int Port_BattleOutcome(int *winner) __attribute__((weak));
+            extern const char *Port_NetName(int player);
+            int bits = 0;
+            if (Port_BattleOutcome != 0) {
+                Port_BattleOutcome(&bits);
+            }
+            snprintf(name, sizeof(name), "%s", Port_NetName((bits & 3) == 2 ? 1 : 0));
+            s = name;
+        }
+#else
+        s = "Winner";
+#endif
+        break;
+    case 12: s = "Return to Tournament"; break;
+    case 13: s = "Exit to Tenkaichi Budokai Online"; break;
+    default: s = "Continue"; break;
+    }
+    if (k != 11) {
+        s = PortOnline_Text(s);
+    }
+    for (i = 0; s != NULL && s[i] != 0 && n < 95; ) { /* (UTF-8 into the engine's 16-bit text, as spec_menu.c put_text) */
+        unsigned c = (unsigned char)s[i++];
+        if (c >= 0xC0 && c < 0xE0 && s[i]) {
+            c = ((c & 0x1F) << 6) | ((unsigned char)s[i++] & 0x3F);
+        } else if (c >= 0xE0 && c < 0xF0 && s[i] && s[i + 1]) {
+            c = ((c & 0x0F) << 12) | (((unsigned char)s[i] & 0x3F) << 6) | ((unsigned char)s[i + 1] & 0x3F);
+            i += 2;
+        }
+        text[k][n++] = (unsigned short)(c == '<' ? '(' : c == '>' ? ')' : c);
+    }
+    text[k][n] = 0;
+    return text[k];
+}
