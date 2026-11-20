@@ -53,7 +53,11 @@ static FILE *sLog;
 static int sHeapCdram, sFloatChoice = -1; /* -1: ask */
 static int sM0, sPs2Float; /* bt3.txt m0, ps2float (vita_m0.c, vita_ps2float.c) */
 static unsigned long long sStart, sBattleStart, sLastDraw;
+#ifdef BT4_VITA_NETLINK
+static int sOnlineMenu = 1; /* bt3.txt online_menu (Vita_OnlineMenu, below); 1 by default in the builds with the online menus */
+#else
 static int sOnlineMenu; /* bt3.txt online_menu (Vita_OnlineMenu, below) */
+#endif
 static int sTagPdpTest; /* bt3.txt tagpdp_test: Tag Team's transport, its loopback test at start (development) */
 static int sTagNetTest; /* bt3.txt tagnet_test: the Tag Team room between Vitas, its in-process test at start (development) */
 static int sTagMenu = 1; /* bt3.txt tagteam: 0 no Tag Team entry in the main menu, 1 BT4decomp's own screens, 2 the earlier
@@ -2802,7 +2806,9 @@ static void read_settings(void) {
 #ifdef BT4_VITA_NETLINK
     {   /* an online session's start (port/vita/vita_netglue.c: the variables net.c's relaunch left for this start) */
         extern int Vita_SessionLoad(void);
-        Vita_SessionLoad();
+        if (Vita_SessionLoad() && sPs2Float == 0) {
+            sPs2Float = 1; /* (a session computes with the PS2's floats, as the PC) */
+        }
     }
 #endif
     {   /* online play, M0 (vita_m0.c) and the PS2 float model (vita_ps2float.c), after every line is read */

@@ -774,8 +774,17 @@ extern "C" void Port_OnlineNicknameBegin(void){
     if(nicknameState==BT4_NICKNAME_SAVING)return;
     nicknameRequest=0;nicknameState=BT4_NICKNAME_LOADING;
 }
+#ifdef PORT_VITA
+extern "C" int Vita_NetHasServer(void);
+#endif
 extern "C" int Port_OnlineNicknameView(char name[20]){
     std::lock_guard<std::mutex> guard(rankedLock);
+#ifdef PORT_VITA
+    if(!Vita_NetHasServer()){ /* (the Vita without bt3.txt online_server: no service, matches by address only) */
+        if(name)snprintf(name,20,"%s",nickname.c_str());
+        return BT4_NICKNAME_DISABLED;
+    }
+#endif
     Uint64 now=SDL_GetTicks();
     profileRoute();profilePump(now);
     bool recheck=(nicknameState==BT4_NICKNAME_OPTIONAL||nicknameState==BT4_NICKNAME_REQUIRED||nicknameState==BT4_NICKNAME_UNAVAILABLE)&&now>=nextNicknameCheck;

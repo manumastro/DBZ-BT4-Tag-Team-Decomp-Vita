@@ -566,6 +566,18 @@ static void Tb_Note(char *line) {
 }
 
 /* A line too long for a note (the network's reasons, gs/net.c): the hosts say it in their box for ten seconds. */
+#ifdef PORT_VITA
+/* Without a server (bt3.txt online_server) the Vita has no online service: Quick Match, Ranked and Tournament say so
+   instead of waiting for it; Create Match and Join work by address (the lobby and the match are the PC's). */
+extern int Vita_NetHasServer(void);
+static void Tb_AddrOpen(void);
+static s32 Tb_VitaNoService(s32 hub) {
+    if (Vita_NetHasServer() || (hub != HUB_QUICK && hub != HUB_RANKED && hub != HUB_TOURNAMENT)) return 0;
+    Snd_PlaySe(1, 2);
+    Tb_Note("Not on the Vita yet: it needs the online service. Use Create Match or Join with an IP address.");
+    return 1;
+}
+#endif
 static void Tb_Say(const char *line) {
     Ps_Copy(sTb->sayLine, line, 256);
     sTb->say = line[0] != 0 ? 600 : 0;
@@ -1137,6 +1149,9 @@ static void Tb_AddrUpdate(s32 live) {
         Tb_AddrBack();
     } else if (pad->gamePressed & PADG_TRIANGLE) {
         Snd_PlaySe(1, 2);
+#ifdef PORT_VITA
+        if (!Vita_NetHasServer() && !sTb->tagJoin) { Tb_SetMode(TB_HUB); return; } /* (it was opened from the hub) */
+#endif
         Tb_SetMode(TB_JOIN);
     }
 }
@@ -1892,6 +1907,9 @@ static void Tb_HubUpdate(s32 live) {
     Ps_Move(&sTb->hubCur, HUB_COUNT);
     if (pad->gamePressed & PADG_CROSS) {
         if (sTb->hubCur != HUB_RANKED && sTb->hubCur != HUB_PROFILE && !Tb_NicknameCanPlay()) return;
+#ifdef PORT_VITA
+        if (Tb_VitaNoService(sTb->hubCur)) return;
+#endif
         switch (sTb->hubCur) {
         case HUB_QUICK:
             Snd_PlaySe(1, 1);
@@ -1902,6 +1920,9 @@ static void Tb_HubUpdate(s32 live) {
             break;
         case HUB_CREATE:
             Snd_PlaySe(1, 1);
+#ifdef PORT_VITA
+            if (!Vita_NetHasServer() && sTb->createAddress == 0) sTb->createAddress = 1; /* (no room codes: By Address) */
+#endif
             sTb->crCur = CR_OPEN;
             Tb_SetMode(TB_CREATE);
             break;
@@ -1920,6 +1941,9 @@ static void Tb_HubUpdate(s32 live) {
             sTb->keyCol = 0;
             sTb->keyRow = 0;
             Tb_SetMode(TB_JOIN);
+#ifdef PORT_VITA
+            if (!Vita_NetHasServer()) Tb_AddrOpen(); /* no room codes without the service: the address keypad at once */
+#endif
             break;
         case HUB_TAG:
 #ifdef BT4_TAG_TEAM_EXPANDED
@@ -2034,7 +2058,8 @@ static void Tb_CreateUpdate(s32 live) {
         switch(sTb->crCur){
         case CR_METHOD:
 #ifdef PORT_VITA
-            if(Vita_AdhocMenuOn()){sTb->createAddress=Ps_Wrap(sTb->createAddress+side,0,2);break;}
+            if(Vita_AdhocMenuOn()){sTb->createAddress=Ps_Wrap(sTb->createAddress+side,Vita_NetHasServer()?0:1,2);break;}
+            if(!Vita_NetHasServer()){sTb->createAddress=1;Tb_Note("Room codes need the online service: not on the Vita yet. Use By Address.");break;}
 #endif
             sTb->createAddress=!sTb->createAddress;break;
         case CR_BATTLE:sTb->battle=Ps_Wrap(sTb->battle+side,0,4);break;
@@ -5387,6 +5412,16 @@ static void Tb_BracketFocus(char *focus) {
 static char *Tb_Help(void) {
     switch (sTb->mode) {
     case TB_HUB:
+#ifdef PORT_VITA
+        if (!Vita_NetHasServer()) { /* (no online service on the Vita: what works, said plainly) */
+            if (sTb->hubCur == HUB_QUICK || sTb->hubCur == HUB_RANKED || sTb->hubCur == HUB_TOURNAMENT)
+                return "Not on the Vita yet: it needs the online service. Use Create Match or Join.";
+            if (sTb->hubCur == HUB_CREATE)
+                return "Host a match: other players join with your IP address and port (same Wi-Fi, or port forwarded).";
+            if (sTb->hubCur == HUB_JOIN)
+                return "Join a match: type the host's IP address and port (for example 192.168.1.20:7000).";
+        }
+#endif
         return sTbHubSay[sTb->hubCur];
     case TB_TAG:{
         static char *offlineHelp[TAG_OFF_ROWS]={
@@ -6130,6 +6165,12 @@ s32 PortTbo_Run(void) {
     sTb->hubCur = HUB_CREATE;
     sTb->hubY = Tb_HubRowY(HUB_CREATE);
     Tb_LoadChoices();
+#ifdef PORT_VITA
+    if (!sTagHomeEntry) { /* the online hub: the network brought up now (bt3.txt online=0, the default: not at start) */
+        extern int Vita_NetUp(void);
+        Vita_NetUp();
+    }
+#endif
     sTb->tagDelay=0;sTb->tagPreset=(sTb->tagLeft==2&&sTb->tagRight==2)?0:(sTb->tagLeft==5&&sTb->tagRight==5)?1:3;
     if(sTagHomeEntry) {
         extern void Port_TagMenuMovieBegin(void);

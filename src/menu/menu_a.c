@@ -77,6 +77,9 @@ static void PortMainMenu_Trace(const char *who, s32 pass, s32 alpha, f32 x, f32 
              (int)(box[2] * 100), (int)(box[3] * 100));
 }
 #endif
+#ifdef PORT_VITA
+static s32 sMmGuideRow; /* PortMainMenu_GuideLabel: the row being drawn is the Vita Guide's (12), not the online entry's (11) */
+#endif
 typedef struct OnlineLabelProp {
     u32 flags;f32 x,y,alpha,scaleX,scaleY,color;MFlashUv uv;
     f32 m[9],mul[4];s16 add[4];
@@ -99,7 +102,7 @@ static void PortMainMenu_OnlineLabel(void *arg,OnlineLabelProp *p){
     if(p->flags&2){x+=p->x;y+=p->y;}
     if(p->flags&8)alpha=(s32)(alpha*p->alpha);
 #ifdef PORT_VITA
-    if(MAINMENU_VITA_GUIDE()){
+    if(sMmGuideRow){
         PortMainMenu_Trace("guide",arg!=NULL,alpha,x,y,sx,sy);
         float box[4];unsigned id=PortMainMenu_Box(box)?Vita_GuideLetterId(arg!=NULL):0;
         if(!id){Vita_GuideMenuLabel(x,y,sx,sy,alpha,arg!=NULL);return;}
@@ -118,14 +121,27 @@ static void PortMainMenu_OnlineLabel(void *arg,OnlineLabelProp *p){
 #define MAINMENU_TBO 11
 #define MAINMENU_TAG 4
 #ifdef PORT_VITA
+/* The Vita Guide's row has an id of its own (12) so that the online entry (11, bt3.txt online_menu) can be listed
+   beside it; its plate, label sheet and texture are item 11's (MM_TEX), its icon Options' (9). */
+#define MAINMENU_GUIDE 12
+#define MM_TEX(item) ((item) == MAINMENU_GUIDE ? MAINMENU_TBO : (item))
+static void PortMainMenu_GuideLabel(void *arg, OnlineLabelProp *p) {
+    sMmGuideRow = 1;
+    PortMainMenu_OnlineLabel(arg, p);
+    sMmGuideRow = 0;
+}
+#define MM_LABEL(item) ((item) == MAINMENU_TBO ? (void *)PortMainMenu_OnlineLabel : (item) == MAINMENU_GUIDE ? (void *)PortMainMenu_GuideLabel : \
+                        (item) == MAINMENU_TAG ? (void *)PortMainMenu_TagSprite : NULL)
 /* The Vita Guide (port/vita/vita_guide.c, bt3.txt vitaguide): the Vita never lists the PC's online item (11), so its
    slot is the guide's: listed last (the plate just above the first one when the menu opens), Options' icon, its
    label in the game's own font over the row (its baked online lettering not drawn), its line in the message window,
    and choosing it opens the guide over this menu, which keeps running behind it. With tagteam=2 (the Vita's earlier
    Tag Team entry, which takes this slot) there is no guide entry. */
-#define MM_ICON(item) ((item) == MAINMENU_TBO ? (MAINMENU_VITA_GUIDE() ? 9 : 4) : (item) == MAINMENU_TAG ? 3 : (item))
+#define MM_ICON(item) ((item) == MAINMENU_GUIDE ? 9 : (item) == MAINMENU_TBO ? 4 : (item) == MAINMENU_TAG ? 3 : (item))
 #else
 #define MM_ICON(item) ((item) == MAINMENU_TBO ? 4 : (item) == MAINMENU_TAG ? 3 : (item))
+#define MM_TEX(item) (item)
+#define MM_LABEL(item) ((item) == MAINMENU_TBO ? (void *)PortMainMenu_OnlineLabel : (item) == MAINMENU_TAG ? (void *)PortMainMenu_TagSprite : NULL)
 #endif
 
 extern void Flash_ClipSetCustomDraw(MFlash *,MFlashRef *,void *,void *);
@@ -466,7 +482,7 @@ void MainMenu_Init(s32 section) {
     }
 #ifdef PORT_VITA
     if (MAINMENU_VITA_GUIDE()) {
-        gMainMenu->items[gMainMenu->itemCount++] = MAINMENU_TBO;
+        gMainMenu->items[gMainMenu->itemCount++] = MAINMENU_GUIDE;
     }
 #endif
 #ifdef PORT
@@ -581,17 +597,17 @@ void MainMenu_Draw(void) {
             item = gMainMenu->items[(gMainMenu->top + i) % gMainMenu->itemCount];
             uv.x0 = 0;
             uv.x1 = 0x200;
-            uv.y0 = (item % 8) * 0x20;
+            uv.y0 = (MM_TEX(item) % 8) * 0x20;
             uv.y1 = uv.y0 + 0x20;
             sprintf(name, "mc_menu_plate_%d", i + 1);
             Flash_FindLabel(flash, name, "mc_menu_text_off", &ref);
-            Flash_ClipSetCustomDraw(flash,&ref,item==MAINMENU_TBO?(void*)PortMainMenu_OnlineLabel:item==MAINMENU_TAG?(void*)PortMainMenu_TagSprite:NULL,NULL);
+            Flash_ClipSetCustomDraw(flash,&ref,MM_LABEL(item),NULL);
             Flash_ClipSetUv(flash, &ref, &uv);
-            Flash_ClipSetTex(flash, &ref, item / 8);
+            Flash_ClipSetTex(flash, &ref, MM_TEX(item) / 8);
             Flash_FindLabel(flash, name, "mc_menu_text_on", &ref);
-            Flash_ClipSetCustomDraw(flash,&ref,item==MAINMENU_TBO?(void*)PortMainMenu_OnlineLabel:item==MAINMENU_TAG?(void*)PortMainMenu_TagSprite:NULL,(void*)2);
+            Flash_ClipSetCustomDraw(flash,&ref,MM_LABEL(item),(void*)2);
             Flash_ClipSetUv(flash, &ref, &uv);
-            Flash_ClipSetTex(flash, &ref, item / 8);
+            Flash_ClipSetTex(flash, &ref, MM_TEX(item) / 8);
             uv.x0 = (MM_ICON(item) % 4) * 0x40;
             uv.y0 = (MM_ICON(item) / 4) * 0x40;
             uv.x1 = uv.x0 + 0x40;
@@ -618,16 +634,16 @@ void MainMenu_Draw(void) {
         item = gMainMenu->items[gMainMenu->extra];
         uv.x1 = 0x200;
         uv.x0 = 0;
-        uv.y0 = (item % 8) * 0x20;
+        uv.y0 = (MM_TEX(item) % 8) * 0x20;
         uv.y1 = uv.y0 + 0x20;
         Flash_FindLabel(flash, "mc_menu_plate_7", "mc_menu_text_off", &ref);
-        Flash_ClipSetCustomDraw(flash,&ref,item==MAINMENU_TBO?(void*)PortMainMenu_OnlineLabel:item==MAINMENU_TAG?(void*)PortMainMenu_TagSprite:NULL,NULL);
+        Flash_ClipSetCustomDraw(flash,&ref,MM_LABEL(item),NULL);
         Flash_ClipSetUv(flash, &ref, &uv);
-        Flash_ClipSetTex(flash, &ref, item / 8);
+        Flash_ClipSetTex(flash, &ref, MM_TEX(item) / 8);
         Flash_FindLabel(flash, "mc_menu_plate_7", "mc_menu_text_on", &ref);
-        Flash_ClipSetCustomDraw(flash,&ref,item==MAINMENU_TBO?(void*)PortMainMenu_OnlineLabel:item==MAINMENU_TAG?(void*)PortMainMenu_TagSprite:NULL,(void*)2);
+        Flash_ClipSetCustomDraw(flash,&ref,MM_LABEL(item),(void*)2);
         Flash_ClipSetUv(flash, &ref, &uv);
-        Flash_ClipSetTex(flash, &ref, item / 8);
+        Flash_ClipSetTex(flash, &ref, MM_TEX(item) / 8);
         uv.x0 = (MM_ICON(item) % 4) * 0x40;
         uv.y0 = (MM_ICON(item) / 4) * 0x40;
         uv.x1 = uv.x0 + 0x40;
@@ -690,7 +706,7 @@ void MainMenu_Draw(void) {
 #ifdef PORT
     if(MAINMENU_CUR(gMainMenu)==MAINMENU_TAG)PortMainMenu_TagDescription();
 #ifdef PORT_VITA
-    else if(MAINMENU_CUR(gMainMenu)==MAINMENU_TBO&&MAINMENU_VITA_GUIDE()){
+    else if(MAINMENU_CUR(gMainMenu)==MAINMENU_GUIDE){
         extern void MsgWin_PortDrawString(u16 *text);
         MsgWin_PortDrawString(Vita_GuideMenuDescription());
     }
@@ -877,13 +893,12 @@ void MainMenu_Input(s32 *result) {
             MAINMENU_CHOOSE(70);
             break;
 #ifdef PORT
-        case MAINMENU_TBO: /* "Tenkaichi Budokai Online": the port's screen mode runs its screens (menu/port_tbo.c) */
 #ifdef PORT_VITA
-            if (MAINMENU_VITA_GUIDE()) { /* the Vita Guide: over this menu, which stays */
-                Vita_GuideOpen();
-                return;
-            }
+        case MAINMENU_GUIDE: /* the Vita Guide: over this menu, which stays */
+            Vita_GuideOpen();
+            return;
 #endif
+        case MAINMENU_TBO: /* "Tenkaichi Budokai Online": the port's screen mode runs its screens (menu/port_tbo.c) */
             gPortScreen = PORT_SCREEN_TBO;
             MAINMENU_COUNT();
             MAINMENU_CHOOSE(MPROG_MODE_PORT_SCREEN);

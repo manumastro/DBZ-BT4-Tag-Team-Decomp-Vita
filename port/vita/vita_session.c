@@ -498,10 +498,23 @@ static uint32_t regions_sum(void) {
 }
 
 /* What a session needs of the Vita (Vita_SessionLoad after a restart), set at its begin and undone at its end */
-static int sWasExact, sWasNeutral;
+static int sWasExact, sWasNeutral, sWasPf;
 static void conditions(int on) {
     extern int gVitaSimExact, gVitaNetNeutral, gVitaNetNeutralWanted;
     extern void Vita_ReadSync(int on); /* vita_read.c: reads on the caller's thread (asyncread=0) while on */
+#ifdef BT4_PS2FLOAT_BUILD
+    extern int gVitaPs2Float;
+    extern void PortPF_Init(int on); /* vita_ps2float.c */
+    if (on) {
+        sWasPf = gVitaPs2Float;
+        if (sWasPf == 0) {
+            PortPF_Init(1); /* the PC computes with the PS2's floats: the session too (ps2float=0 outside it) */
+        }
+    } else if (sWasPf == 0) {
+        PortPF_Init(0);
+    }
+    Vita_Log("session: ps2float %d\n", gVitaPs2Float);
+#endif
     if (on) {
         sWasExact = gVitaSimExact;
         sWasNeutral = gVitaNetNeutral;

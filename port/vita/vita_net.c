@@ -50,13 +50,21 @@ static char sDns[128] = "stun.l.google.com";
 static char sPublic[200];
 static int sPoolKb = 1024;
 
+/* 1 when bt3.txt names a server (online_server): without one the Vita has no online service (no sign-in, nickname,
+   Quick Match, Ranked, room codes); the hub's matches by address still work (port_tbo.c, match_supabase.cpp) */
+int Vita_NetHasServer(void) { return sServer[0] != '\0'; }
+
 int gVitaNetRelaunch;      /* bt3.txt online_relaunch: a session from bt3.txt lines goes through the restart (vita_netglue.c) */
 int gVitaNetNeutralWanted; /* bt3.txt online_neutral: a session plays with the PC's neutral Vita Settings (vita_netglue.c) */
 int gVitaNetSpeedOn;       /* bt3.txt online_speed: a session's speed above 100 % paced (vita_netglue.c) */
 /* bt3.txt session_inproc: 0 sessions restart the application (vita_netglue.c), 1 sessions inside the running game,
    3 measure only (vita_session.c, network builds); session_test / session_leave / session_again: its test without a
    network (blank to ask at, blanks to stay, blanks to the next) */
+#ifdef BT4_VITA_NETLINK
+int gVitaSessionInproc = 1; /* (default 1 in the builds with the online menus: their lobbies need it) */
+#else
 int gVitaSessionInproc;
+#endif
 int gVitaNetCaStore = 1; /* bt3.txt online_castore (ca_store below) */
 int gVitaSessionTest[3];
 void Vita_NetSetting(const char *name, const char *value) {
@@ -878,7 +886,12 @@ static int self_test(void *unused) {
 /* vita_main.c, after the settings and the memory's mapping, before the game's thread. 1: online_test=2, the run ends
    (vita_main.c writes the line the runners wait for, "vita: exitafter:", and quits) */
 /* SceNet brought up on demand (the Tag Team rooms between Vitas, vita_tag.c); 1 when it is up */
-int Vita_NetUp(void) { return net_start(); }
+int Vita_NetUp(void) {
+    if (sHost[0] == '\0') {
+        parse_server(); /* (online=0: Vita_NetBoot did not read it) */
+    }
+    return net_start();
+}
 
 int Vita_NetBoot(void) {
     if (!gVitaOnline && !gVitaOnlineTest) {

@@ -176,7 +176,9 @@ extern MenuProgress *gProgress;
 
 /* ---- MainMenu (menu_a.c) ---- */
 
-#ifdef PORT
+#if defined(PORT_VITA)
+#define MAINMENU_ITEM_MAX 13 /* the Vita: "Tenkaichi Budokai Online" (11) and the Vita Guide (12, menu_a.c) listed too */
+#elif defined(PORT)
 #define MAINMENU_ITEM_MAX 12 /* PC: "Tenkaichi Budokai Online" (11) is listed too */
 #else
 #define MAINMENU_ITEM_MAX 11
