@@ -224,6 +224,16 @@ on the same LAN, By Address (no server), with nobody holding the pads.
 - Checks: net.c itself compares the two games every 32 blanks (a desync ends the match with "no longer agree");
   `m0_compare.py` on the two state logs, blank for blank, from the first fight line; both logs say
   `net: both at the character select (blank N)` with the same N.
+- **M3a PASSED on the console (2026-11-20, `368b9f7`, try 4)**: the Vita (BTFV00008, `vita_dev_pf_nl`, ps2float=1)
+  hosted, the PC client R1.6 joined over the LAN (round trip 2-4 ms, input delay 2 blanks, speed 100 %): both at the
+  character select at blank 1754, the pad table picked the fighters, a single battle ran for 6 minutes (hp 50000/50000
+  -> 28970/25330), net.c's own check every 32 blanks never differed, and the two state logs are the same in all
+  21,242 fight blanks both have (`m0_compare.py`); the Vita drew the fight at 29.9 pictures/s, speed 100 %; the match
+  ended when the Vita's run ended (`exitafter`). Three Vita fixes were needed on the way (each found by a console
+  try): `Vita_GsGetenv` answered net.c's `BT3_NET_*` as unset (try 1: no session at all); the Vita's `Port_VBlank`
+  never called `Port_NetBeginTick` (try 2: the start-up "ended" at blank 0, the two never met); `scePad2GetState`
+  said player 2's pad was missing (try 3: "No controller connected", the games parted at the fight's first blank).
+  Runs in `wt-online/port/build/runs/online_m3_vs_pc_host{,_try2,_try3}` (the PC's logs copied there).
 - The harness checked PC against PC (2026-11-20, two R1.6 copies on this PC, host 26100 + join 127.0.0.1:26100, the
   table of seed 1): connected, both at the character select at blank 1754, the table's presses picked the fighters and
   stage, a fight ran (hp 50000/50000 -> 26160/24420) and a second one began; 37,969 fight blanks, the two state logs the
@@ -236,7 +246,7 @@ on the same LAN, By Address (no server), with nobody holding the pads.
   port/vita/tools/tagpdp_test.c` passes 8 cases (2 and 3 members, 0/10/30 % loss with duplication and reordering, a
   foreign session ignored, 70,000 messages across the sequence wrap), with windows of 32 and 64. Linked in the
   `BT4_VITA_NETLINK=1` builds, with the same test (7 cases, fewer messages) behind bt3.txt `tagpdp_test=1/2` (set
-  `online_t1_tagpdp`). Nothing else calls the transport yet (next: `vita_tag_net.c`).
+  `online_t1_tagpdp`): **passed on the console** (2026-11-20, 7 of 7, TagPdp 154,800 bytes on the Vita). Nothing else calls the transport yet (next: `vita_tag_net.c`).
 
 ## What a player has (PC)
 
