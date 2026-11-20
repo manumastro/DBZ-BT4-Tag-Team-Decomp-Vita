@@ -13,7 +13,8 @@
      (the game's pictures of those two are unlabelled pills).
    - %K:<name>% the player's controls of a Vita action now (port/vita/vita_remap.c: l2 r2 l3 r3 senzu fusion unfuse
      target quit unlock), %KEYLINES% the button pairs that give L2 / R2 / L3 / R3, %TOUCHW% where L2 / R2 / L3 / R3
-     are touched now, in words (the Tag legend): never write those buttons here.
+     are touched now, in words (the Tag legend), %TOUCHLINES% the guide's lines of them: never write those
+     buttons here.
    Lines over the page's width wrap by themselves; keep them under ~40 letters so they do not. Avoid the words the
    Vita's text fixes rewrite ("the console", "(PS2)", "PlayStation 2": port/vita/vita_text.c). */
 #ifndef VITA_GUIDE_TEXT_H
@@ -44,12 +45,8 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "{ST}   Pause\n"
      "Hold %K:quit%   Quit the game"},
     {"Touch: L2, R2, L3, R3",
-     "# The back of the Vita\n"
-     "Touch the rear pad in one of four places:\n"
-     "{L2}   Top left\n"
-     "{R2}   Top right\n"
-     "{L3}   Bottom left\n"
-     "{R3}   Bottom right\n"
+     "# Where you touch them now\n"
+     "%TOUCHLINES%\n"
      "# Another way\n"
      "%KEYLINES%\n"
      "# Move them\n"
@@ -206,12 +203,8 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "{ST}   Pausa\n"
      "Mantén %K:quit%   Cerrar el juego"},
     {"Táctil: L2, R2, L3, R3",
-     "# La parte de atrás de la Vita\n"
-     "Toca el panel trasero en uno de cuatro sitios:\n"
-     "{L2}   Arriba a la izquierda\n"
-     "{R2}   Arriba a la derecha\n"
-     "{L3}   Abajo a la izquierda\n"
-     "{R3}   Abajo a la derecha\n"
+     "# Dónde los tocas ahora\n"
+     "%TOUCHLINES%\n"
      "# Otra forma\n"
      "%KEYLINES%\n"
      "# Cambiarlos de sitio\n"

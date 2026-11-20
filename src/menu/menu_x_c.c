@@ -361,6 +361,7 @@ extern int Vita_RemapOn(void);
 extern void Vita_GuideOpenButtons(void), Vita_GuideDraw(void);
 extern int Vita_GuideIsOpen(void), Vita_GuideInput(void);
 extern void Vita_RemapActionText(int a, char *out, int size, int words);
+extern unsigned Vita_RemapGet(int a);
 extern void Vita_UnlockFromOptions(void); /* port/vita/vita_main.c: Unlock All's screen, from level 1 (SQUARE) */
 extern int Vita_UnlockTakeChanged(void);
 #ifndef PORT_VITA_HOME
@@ -454,7 +455,7 @@ static void Option_VitaSetGuide(void) {
         } else {
             char pair[48];
             Vita_RemapActionText(b, pair, sizeof(pair), 1); /* (vita_remap.c: the player's pair, in words) */
-            if (strcmp(pair, "none") != 0 && strcmp(pair, "ninguno") != 0) {
+            if (Vita_RemapGet(b) != 0) {
                 sprintf(more, "%s only", pair);
             } else {
                 sprintf(more, "not on the touch panels");
@@ -471,7 +472,7 @@ static void Option_VitaSetGuide(void) {
         } else {
             char pair[48];
             Vita_RemapActionText(b, pair, sizeof(pair), 1);
-            if (strcmp(pair, "none") != 0 && strcmp(pair, "ninguno") != 0) {
+            if (Vita_RemapGet(b) != 0) {
                 sprintf(text, "%s not on the touch panels\n(%s still gives it).", kName[b], pair);
             } else {
                 sprintf(text, "%s not on the touch panels.", kName[b]);

@@ -323,14 +323,14 @@ int Vita_RemapHeld(int a, unsigned b) {
 
 /* ---- the editor's capture (vita_guide.c): the next binding pressed on the handheld ---- */
 int gVitaRemapTest; /* bt3.txt remaptest (development: the console runner taps, it cannot hold): while the editor
-                       captures, the buttons are made up: 0.5 s none, 0.5 s SELECT, 0.5 s SELECT + the button
+                       captures, the buttons are made up: 5 s none (the prompt), 0.5 s SELECT, 0.5 s SELECT + the button
                        remaptest names (SceCtrl bits, e.g. 4096 TRIANGLE), then none */
 static unsigned sTestReads;
 static unsigned raw_now(void) {
     SceCtrlData pad;
     if (gVitaRemapTest && capturing) {
         unsigned t = sTestReads++;
-        return t < 30 ? 0 : t < 60 ? SCE_CTRL_SELECT : t < 90 ? (SCE_CTRL_SELECT | ((unsigned)gVitaRemapTest & VB_ALL)) : 0;
+        return t < 300 ? 0 : t < 330 ? SCE_CTRL_SELECT : t < 360 ? (SCE_CTRL_SELECT | ((unsigned)gVitaRemapTest & VB_ALL)) : 0;
     }
     memset(&pad, 0, sizeof(pad));
     sceCtrlPeekBufferPositive(0, &pad, 1);
@@ -446,6 +446,12 @@ void Vita_RemapActionText(int a, char *out, int size, int words) {
     case VR_UNFUSE:
         snprintf(out, (size_t)size, words ? "L3 + R3" : "{L3} + {R3}");
         break;
+    case VR_L2: case VR_R2: case VR_L3: case VR_R3: { /* no pair: on the touch panels, or nowhere */
+        extern int Vita_TouchGetSpot(int b);
+        int sp = Vita_TouchGetSpot(a);
+        snprintf(out, (size_t)size, "%s", sp == 0 || sp == 1 ? (en ? "touch only" : "solo táctil") : (en ? "none" : "ninguno"));
+        break;
+    }
     default:
         snprintf(out, (size_t)size, "%s", en ? "none" : "ninguno");
         break;
@@ -473,6 +479,33 @@ char *Vita_RemapExpand(const char *in, char *out, int size, int words) {
                     continue;
                 }
             }
+        }
+        if (strncmp(in, "%TOUCHLINES%", 12) == 0) { /* the guide's lines: "{L2}   Rear pad, top left" (vita_touch.c spots) */
+            extern int Vita_TouchGetSpot(int b);
+            static const char *const kTm[4] = {"{L2}", "{R2}", "{L3}", "{R3}"};
+            static const char *const kRearEn[4] = {"top left", "top right", "bottom left", "bottom right"};
+            static const char *const kRearEs[4] = {"arriba a la izquierda", "arriba a la derecha", "abajo a la izquierda", "abajo a la derecha"};
+            /* (the screen's corners: vita_touch.c corner_btn, L2 / R2 the lower ones, L3 / R3 the upper) */
+            static const char *const kFrontEn[4] = {"bottom left", "bottom right", "top left", "top right"};
+            static const char *const kFrontEs[4] = {"abajo a la izquierda", "abajo a la derecha", "arriba a la izquierda", "arriba a la derecha"};
+            int b2, en = gVitaBt4English;
+            for (b2 = 0; b2 < 4 && o < size - 1; b2++) {
+                int sp = Vita_TouchGetSpot(b2);
+                if (sp == 0) {
+                    o += snprintf(out + o, (size_t)(size - o), "%s%s   %s %s", b2 ? "\n" : "", kTm[b2], en ? "Rear pad," : "Panel trasero,",
+                                  (en ? kRearEn : kRearEs)[b2]);
+                } else if (sp == 1) {
+                    o += snprintf(out + o, (size_t)(size - o), "%s%s   %s %s", b2 ? "\n" : "", kTm[b2], en ? "Screen corner," : "Esquina de la pantalla,",
+                                  (en ? kFrontEn : kFrontEs)[b2]);
+                } else {
+                    o += snprintf(out + o, (size_t)(size - o), "%s%s   %s", b2 ? "\n" : "", kTm[b2], en ? "Not on touch" : "Sin táctil");
+                }
+            }
+            if (o >= size - 1) {
+                o = size - 1;
+            }
+            in += 12;
+            continue;
         }
         if (strncmp(in, "%TOUCHW%", 8) == 0) { /* where L2 / R2 / L3 / R3 are touched now, grouped: "L2 R2 L3 R3: rear pad" */
             extern int Vita_TouchGetSpot(int b);
