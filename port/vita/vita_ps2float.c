@@ -24,7 +24,7 @@ int gVitaPs2Float;            /* bt3.txt ps2float: 0 the float unit's own result
 unsigned gVitaPfFpscrClear;   /* the float unit's status bits cleared around a double operation: 0, or (ps2float=1) the
                                  rounding mode and flush to zero (bits 22-24): round to nearest with denormals, as the
                                  PC's doubles (host IEEE arithmetic, port/src/plat_libm.c) */
-int gVitaPfFast;              /* bt3.txt pffast: 1 the pieces of code do the replaced instruction themselves while
+int gVitaPfFast = 1;          /* bt3.txt pffast (default 1 since the console runs p15_*): 1 the pieces of code do the replaced instruction themselves while
                                  ps2float is 0 (ps2float.py's gate: no call of the entry points, offline play at the
                                  default build's speed); 0 every operation through the entry points as before */
 int gVitaPfGate = 1;          /* what the pieces look at: 0 their own instruction, anything else the entry point */
