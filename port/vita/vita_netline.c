@@ -75,6 +75,22 @@ void Port_UiBanner(const char *text, int ms) {
     sBanner.until = ms > 0 ? now_us() + (unsigned long long)ms * 1000ull : 0;
 }
 
+/* R1.7 (ui.cpp): the Ranked result after a match. The PC slides a small panel in for ~4.2 s; the Vita shows the same
+   three lines as its own banner for that long (no new drawing). */
+void Port_UiRankedSettlement(int points, int delta) {
+    char text[192], line[80];
+    snprintf(text, sizeof(text), "%s\n", PortOnline_Text("Ranked result"));
+    snprintf(line, sizeof(line), PortOnline_Text("%+d points"), delta);
+    strncat(text, line, sizeof(text) - strlen(text) - 2);
+    strncat(text, "\n", sizeof(text) - strlen(text) - 1);
+    snprintf(line, sizeof(line), PortOnline_Text("Total: %d points"), points);
+    strncat(text, line, sizeof(text) - strlen(text) - 1);
+    Vita_Log("net: ranked settlement %+d (%d)\n", delta, points);
+    snprintf(sBanner.text, sizeof(sBanner.text), "%s", text);
+    sBanner.version++;
+    sBanner.until = now_us() + 4200ull * 1000ull;
+}
+
 /* the text cut into the lines it is drawn as: at its own line ends, then between words to fit the width */
 static void wrap(NetLine *l) {
     const char *p = l->text;

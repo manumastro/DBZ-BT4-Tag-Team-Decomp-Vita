@@ -654,6 +654,10 @@ def vpk():
         extra += ["-a", f"{f}=fonts/{f.relative_to(fonts).as_posix()}"]
         n += 1
     print(f"the package carries {n} files of BT4decomp's own screens (tbo/ui, fonts)")
+    # R1.19: Jiren's transformation shout (snd_adx.c jiren_scream_path reads <base>tbo/audio/jiren/<language>.adx, as
+    # upstream's port/tools/package.py take_jiren_voice packs them; 31 KB). Its length counts in a match's timing.
+    for f in ("english", "japanese", "spanish"):
+        extra += ["-a", f"{ROOT / 'port/assets/jiren-voice' / (f + '.adx')}=tbo/audio/jiren/{f}.adx"]
     # the film behind the Tag Team screens (vita_tagmovie.c, bt3.txt tbomovie=1): the two H.264 films made from upstream's
     # .pss by port/vita/tools/make_tagmovie.sh (1.3 MB; the .pss, 30 MB, only with BT4_VITA_TAGMOVIE=1, below)
     for f in ("tag_ui_intro.mp4", "tag_ui_loop.mp4"):

@@ -51,7 +51,8 @@ void Lobby_Packet(const uint8_t *pkt, int n, const struct sockaddr_in *from, uin
 void Lobby_Tick(void);                    /* in a session, with every look at the socket: its timers (cheap) */
 void Lobby_Pump(void);                    /* outside a session, every blank (game thread): the socket and the timers */
 void Lobby_SessionLeaving(void);          /* Port_NetLeave, before the goodbyes */
-int Lobby_SessionEnded(void);             /* Port_NetSessionEnd: 1 = the lobby goes on with the socket */
+int Lobby_SpectatorMayRetry(void);
+int Lobby_SessionEnded(int retrySpectator);             /* Port_NetSessionEnd: 1 = the lobby goes on with the socket */
 int Lobby_ServesSpectators(void);         /* this copy's session sends the match to the lobby's spectators (its owner) */
 int Lobby_IsMember(const struct sockaddr_in *from); /* (the owner: one of its members; a member: the owner) */
 int Lobby_MaySpectate(const struct sockaddr_in *from);
@@ -65,13 +66,14 @@ void Lobby_Stranger(const uint8_t *pkt, int n, const struct sockaddr_in *from, u
 
 /* ---- the window (ui.cpp) ---- */
 #define LOBBY_CLASSIC_SLOTS 8
-#define LOBBY_SLOTS 22
+#define LOBBY_TOUR_LEGACY 22
 #define LOBBY_NAME 20
 #define LOBBY_CHAT 32
 #define LOBBY_LOG 6
-#define LOBBY_TOUR 22
+#define LOBBY_TOUR 32
 #define LOBBY_TOUR_LEAVES 32
 #define LOBBY_TOUR_WATCHERS 2
+#define LOBBY_SLOTS (LOBBY_TOUR + LOBBY_TOUR_WATCHERS)
 typedef struct PortLobbyView {
     int state;                  /* 0 none, 1 connecting, 2 in the lobby, 3 closed (error says why; Port_LobbyDo(LOBBY_OK) clears it) */
     int owner;                  /* this copy owns the lobby */
@@ -105,7 +107,7 @@ typedef struct PortLobbyView {
     int tour;                   /* 0 no bracket, 1 a tournament is on, 2 it is over (tourChamp) */
     unsigned tourGen;           /* the tournaments drawn so far (a new one: it changed) */
     int tourSize;               /* the bracket's power-of-two leaf count */
-    int tourCount;              /* the occupied entrant places, up to 22 */
+    int tourCount;              /* the occupied entrant places */
     char tourName[LOBBY_TOUR][LOBBY_NAME];
     int tourGone[LOBBY_TOUR];   /* the entrant left the lobby (its matches are lost by walkover) */
     int tourDrop[LOBBY_TOUR];   /* its game fell silent: the seconds left that its place is held (a rejoin), 0 none */
@@ -119,7 +121,7 @@ typedef struct PortLobbyView {
     int tourChamp;              /* the champion (an entrant), -1 none yet */
     int tourChoose;             /* the match whose winner the owner chooses (its two games disagreed twice), -1 none */
     int readyCount;             /* places marked ready */
-    int entrants;               /* the player places: 2 in versus, or 2 through 22 in tournament */
+    int entrants;               /* the player places: 2 in versus, up to LOBBY_TOUR in tournament */
     int entrantCount;           /* of them taken (a tournament started now has these) */
     int longBeamClash;
 } PortLobbyView;

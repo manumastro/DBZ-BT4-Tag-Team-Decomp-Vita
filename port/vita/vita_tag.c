@@ -27,7 +27,7 @@
 static TtRoom state;
 static uint32_t member;
 static int local_room, cpu_fill, cpu_difficulty = 2, configured_ffa, configured_quick;
-static int offline_mode, offline_custom, offline_beans; /* (BT4decomp 0.1.39.6: its dedicated offline menu's room) */
+static int offline_mode, offline_training, offline_custom, offline_beans; /* (BT4decomp 0.1.39.6: its dedicated offline menu's room) */
 static char room_code[7], error[128];
 
 #ifdef BT4_VITA_NETLINK
@@ -419,7 +419,7 @@ void Port_TagClose(void) {
     ping_at_ms = 0;
     { extern void Port_TagWaitResumed(void), Port_TagWaitClear(void); Port_TagWaitResumed(); Port_TagWaitClear(); }
 #endif
-    offline_mode = 0;
+    offline_mode = offline_training = 0;
     memset(&state, 0, sizeof(state));
     member = 0;
     local_room = 0;
@@ -427,8 +427,14 @@ void Port_TagClose(void) {
 }
 void Port_TagCPUOptions(int fill, int difficulty) { cpu_fill = fill == 1; cpu_difficulty = difficulty >= 0 && difficulty <= 4 ? difficulty : 2; }
 void Port_TagModeOptions(int free_for_all, int quick) { configured_ffa = free_for_all == 1; configured_quick = quick == 1; }
-void Port_TagOpenWithRules(int size, int limit, int delay, const char *name, uint64_t content, unsigned rules) {
-    (void)delay;
+int Port_TagStartOffline(int mode, int left, int right, int time_limit, int difficulty, int custom, int beans);
+int Port_TagStartTraining(void) { /* tag_team_net.c (R1.7): the online hub's Training > 2 vs 2, a local room */
+    if (!Port_TagStartOffline(1, 2, 2, 4, 1, 0, 0)) return 0;
+    offline_training = 1;
+    return 1;
+}
+void Port_TagOpenListedWithRules(int size, int limit, int delay, const char *name, uint64_t content, unsigned rules, int listed) {
+    (void)delay; (void)listed;
     if (configured_ffa && configured_quick) size = 3;
 #ifdef BT4_VITA_NETLINK
     if (net_room) { /* tag_team_net.c: the OPEN request, with the shared options of the expanded rules */
@@ -444,6 +450,7 @@ void Port_TagOpenWithRules(int size, int limit, int delay, const char *name, uin
         Ttw_Write(b + 52, cpu_fill); Ttw_Write(b + 56, cpu_difficulty);
         Ttw_Write(b + 60, configured_ffa); Ttw_Write(b + 64, configured_quick);
         Ttw_Write(b + TTW_OPEN_BATTLE_RULES, rules);
+        Ttw_Write(b + TTW_OPEN_LISTED, listed != 0);
         Tt_OptionsDefault(&options);
         for (i = 0; i < TT_OPTION_SCALARS; ++i) options.value[i] = Port_Setting(keys[i], options.value[i]);
         for (i = 0; i < 10; ++i) {
@@ -477,6 +484,9 @@ void Port_TagOpenWithRules(int size, int limit, int delay, const char *name, uin
     Tt_SetMode(&state, member, state.epoch, configured_ffa);
     if (cpu_fill) Tt_FillCPU(&state, member, state.epoch, cpu_difficulty);
     memcpy(room_code, "LOCAL0", 7);
+}
+void Port_TagOpenWithRules(int size, int limit, int delay, const char *name, uint64_t content, unsigned rules) {
+    Port_TagOpenListedWithRules(size, limit, delay, name, content, rules, 0);
 }
 void Port_TagOpen(int size, int limit, int delay, const char *name, uint64_t content) {
     Port_TagOpenWithRules(size, limit, delay, name, content, 0);
@@ -585,6 +595,7 @@ int Port_TagCancelSelect(void) {
    (state.options.version 0): those read as the PC's local room reads them (the player's own settings, the defaults). */
 int Port_TagNetwork(void);
 int Port_TagOfflineMode(void) { return local_room ? offline_mode : 0; }
+int Port_TagOfflineTraining(void) { return local_room && offline_training; } /* (R1.7: the hub's Training > 2 vs 2) */
 int Port_TagOfflineCustom(void) { return Port_TagNetwork() ? Port_TagOption("tag_off_custom", 0) : !Port_TagOfflineMode() || offline_custom; }
 int Port_TagOfflineBeans(void) { return Port_TagNetwork() ? Port_TagOption("tag_off_senzu", 0) : Port_TagOfflineMode() ? offline_beans : 0; }
 int Port_TagStartOffline(int mode, int left, int right, int time_limit, int difficulty, int custom, int beans) {
@@ -593,7 +604,7 @@ int Port_TagStartOffline(int mode, int left, int right, int time_limit, int diff
         time_limit < 0 || time_limit > 4 || difficulty < 0 || difficulty > 4 || beans < 0 || beans > 5)
         return 0;
     if (!Port_TagConnect(NULL)) return 0;
-    offline_mode = 0;
+    offline_mode = offline_training = 0;
     offline_custom = custom != 0;
     offline_beans = beans;
     Tt_Open(&state, member, "Player 1", 2, 0);

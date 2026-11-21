@@ -2,6 +2,8 @@ extern int TagBattle_Active(void);
 #include "common.h"
 extern s32 Bt4_HasRecoveryVariant(void *chr);
 #include "battle/btl_act_f.h"
+#include "battle/bt4_balance.h"
+#include "battle/btl_char_mgr.h"
 
 /*
  * Blast 2 / Ultimate Blast actions: 0x1F5460..0x1FC2B0, in two parts (to 0x1F8C00, and from there the rush
@@ -123,6 +125,9 @@ extern s32 BtlSuper_GetStepCount(BtlSuperChr *chr, s32 cls);  /* number of rush 
 extern s32 BtlSuper_GetDrain(BtlSuperChr *chr, s32 cls);  /* health drained */
 extern s32 BtlSuper_GetCooldownFrames(BtlSuperChr *chr, s32 cls);  /* cooldown: seconds * 30 */
 extern s32 BtlSuper_GetChargeLimitFrames(BtlSuperChr *chr, s32 cls);  /* charge time: seconds * 30 */
+#ifdef BT4_TAG_TEAM_EXPANDED
+extern s32 BtlSuper_GetReleaseDelayFrames(BtlSuperChr *chr, s32 cls);
+#endif
 extern s32 BtlSuper_GetDamage(BtlSuperChr *chr, s32 cls, s32 a2, s32 a3); /* damage */
 extern s32 BtlSuper_GetKiCost(BtlSuperChr *chr, s32 cls);  /* ki cost (halved with ability 0x2B) */
 extern s32 BtlSuper_IsThrow(BtlSuperChr *chr, s32 cls);  /* one of the technique's four reactions is 0x22 (a catch) */
@@ -1073,6 +1078,14 @@ void BtlAct_SuperLongBeamHandler(BtlSuperChr *chr, s32 phase) {
  * the charge time (a third with ability 0x4A).
  */
 void BtlAct_SuperChargeHandler(BtlSuperChr *chr, s32 phase) {
+#ifdef BT4_TAG_TEAM_EXPANDED
+    s32 *releaseDelay = &chr->work[3];
+
+    if (phase == 0) {
+        s32 delay = BtlSuper_GetReleaseDelayFrames(chr, BtlAct_GetCurrentClass(chr));
+        *releaseDelay = delay > 0 ? delay : -1;
+    }
+#endif
     s32 *timer = &chr->work[2];
     s32 cls = BtlAct_GetCurrentClass(chr);
 
@@ -1110,8 +1123,13 @@ void BtlAct_SuperChargeHandler(BtlSuperChr *chr, s32 phase) {
             aim = 1;
             BtlSuper_SetClass(chr, cls);
             BtlChar_SetFlag(chr, 0x53);
-            if (++*timer >= limit) {
-                chr->work[0] |= 1;
+#ifdef BT4_TAG_TEAM_EXPANDED
+            if (!(chr->work[0] & 1) || *releaseDelay < 0)
+#endif
+            {
+                if (++*timer >= limit) {
+                    chr->work[0] |= 1;
+                }
             }
             chr->charge = *timer * 2.0f / limit;
             if (BtlMember_HasAbility(chr, 0x4A)) {
@@ -1128,6 +1146,12 @@ void BtlAct_SuperChargeHandler(BtlSuperChr *chr, s32 phase) {
                 chr->chargeFull++;
             }
             if (chr->work[0] & 1) {
+#ifdef BT4_TAG_TEAM_EXPANDED
+                if (*releaseDelay > 0) {
+                    --*releaseDelay;
+                    break;
+                }
+#endif
                 BtlAnim_Request(chr, SUPER_ANIM(cls, 2), 0.0f);
                 *timer = 0;
             }
@@ -3103,7 +3127,20 @@ void BtlAct_ClashLostHandler(ActGChr *chr, s32 phase) {
     if (phase == 0) {
         BtlAnim_Play(chr, 0x172, 0.0f);
         ChrCam_RequestCut(chr, 1, chr->player + 0x21);
-        if (!Bt4_HasRecoveryVariant(chr)) {
+#ifdef BT4_TAG_TEAM_EXPANDED
+        {
+            extern BtlMgrMember *BtlMember_GetActive(void *chr);
+            const BtlMgrMember *member = BtlMember_GetActive(chr);
+            if (Bt4_ExtraFormsAllowed() && member->chara == BT4_ZAMASU_FUSED &&
+                member->clashCorruption == BT4_CLASH_CORRUPTION_PENDING) {
+                BtlAct_SetFormCurrent(chr);
+                chr->form.costume = BT4_ZAMASU_CORRUPTED_OUTFIT;
+                chr->form.unk14 = 0;
+                chr->work[0] |= 1;
+            }
+        }
+#endif
+        if (!(chr->work[0] & 1) && !Bt4_HasRecoveryVariant(chr)) {
             chr->work[0] |= 1;
             BtlAct_SetFormCurrent(chr);
         }

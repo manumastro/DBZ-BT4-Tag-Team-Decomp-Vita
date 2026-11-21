@@ -154,7 +154,9 @@ typedef struct BtlParam {
 
 /* The fighter's battle object (BtlChar_GetObj). */
 typedef struct BtlTechObj {
-    /* 0x000 */ u8 unk0[0x91C];
+    /* 0x000 */ u8 unk0[0xC];
+    /* 0x00C */ s32 chara;
+    /* 0x010 */ u8 unk10[0x91C - 0x10];
     /* 0x91C */ BtlParam *param;
     /* 0x920 */ BtlAtkRecord *atk;  /* BTL_ATK_COUNT records (a pointer, not an inline array) */
     /* 0x924 */ u8 unk924[0xC90 - 0x924];
@@ -173,7 +175,9 @@ typedef struct BtlTechMember {
 
 /* Gauge block of the active member (BtlMember_GetActiveGauge). */
 typedef struct BtlTechGauge {
-    /* 0x00 */ u8 unk0[0x20];
+    /* 0x00 */ s32 health;
+    /* 0x04 */ s32 healthMax;
+    /* 0x08 */ u8 unk8[0x18];
     /* 0x20 */ s32 variant;         /* non-zero: BtlParam_GetType turns types 2..4 into 7 / 8 */
 } BtlTechGauge;
 
