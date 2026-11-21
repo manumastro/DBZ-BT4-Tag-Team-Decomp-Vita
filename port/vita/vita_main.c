@@ -2192,7 +2192,8 @@ static void read_settings(void) {
            (mode=demo, film=...): a game started from its bubble goes to its title screen, not into a test fight */
         if (strcmp(line, "disc") != 0 && strcmp(line, "heap") != 0 && strcmp(line, "wide") != 0 && strcmp(line, "report") != 0 &&
             strcmp(line, "fightres") != 0 && strcmp(line, "tagteam") != 0 && strcmp(line, "es_disc") != 0 && strcmp(line, "anime_music") != 0 &&
-            strcmp(line, "remap") != 0 && strncmp(line, "vbind_", 6) != 0 && strcmp(line, "online_server") != 0) {
+            strcmp(line, "remap") != 0 && strncmp(line, "vbind_", 6) != 0 && strcmp(line, "online_server") != 0 &&
+            strcmp(line, "trainwait") != 0) {
             continue;
         }
 #endif
@@ -2337,6 +2338,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "tagtarget") == 0) { /* Tag Team's target choice until the player picks one (vita_gfx.c): 0 L3, 1 (default) the right stick, 2 the D-pad */
             extern int gVitaTagTargetDefault;
             gVitaTagTargetDefault = atoi(eq);
+        } else if (strcmp(line, "trainwait") == 0) { /* the online search's "Train While Waiting" (vita_tbo.c): 0 (default) hidden, 1 shown as on the PC */
+            extern int gVitaTrainWait;
+            gVitaTrainWait = atoi(eq);
         } else if (strcmp(line, "tagui_scale") == 0) { /* the Tag Team screens' letters, percent of the PC's (vita_tbo.c): by default 100 with taguivita, 130 without */
             extern int gVitaTagUiScale;
             gVitaTagUiScale = atoi(eq);
@@ -2394,6 +2398,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "tbomoviecsc") == 0) { /* tbomovie=1: the colour conversion of the chip's YUV texture: 0 CSC0 (default), 1 CSC1 (vitaGL's sample) */
             extern int gVitaTagMovieCsc;
             gVitaTagMovieCsc = atoi(eq);
+        } else if (strcmp(line, "vglcirc") == 0) { /* vitaGL's circular pool (vita_vgl.c gVitaVglCirc): 0 (default) vitaGL's 32 MB, 1 12 KB (temporary data in blocks of their own, as before v1.4.1), 2 the soak's B battles */
+            extern int gVitaVglCirc;
+            gVitaVglCirc = atoi(eq);
         } else if (strcmp(line, "vglpool") == 0) { /* KB of vitaGL's immediate-mode pool (vita_vgl.c gVitaVglPoolKb; 16384 the old 16 MB) */
             extern int gVitaVglPoolKb;
             gVitaVglPoolKb = atoi(eq);

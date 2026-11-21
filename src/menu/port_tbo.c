@@ -921,10 +921,18 @@ static char *Tb_HostAddr(s32 port) {
     return text;
 }
 
+#ifdef PORT_VITA
+extern int gVitaTrainWait; /* (bt3.txt trainwait, port/vita/vita_tbo.c) */
+#endif
 static void Tb_WaitUpdate(s32 live) {
     Pad *pad = &gPad[0];
 
     if (!sTb->found) {
+#ifdef PORT_VITA
+        /* (bt3.txt trainwait, port/vita/vita_tbo.c: 0, the default for now, the entry hidden: its sparring fight on
+           the World Tournament stage ended in a graphics-chip crash at its start on the Vita, 2026-11-21) */
+        if (gVitaTrainWait)
+#endif
         Ps_Prompt(1, "Train While Waiting");
         Ps_Prompt(4, "Cancel");
     }
@@ -934,7 +942,11 @@ static void Tb_WaitUpdate(s32 live) {
     if (!live || sTb->found) {
         return;
     }
-    if (pad->gamePressed & PADG_SQUARE) { /* the fighters of the sparring fight first; the search goes on */
+#ifdef PORT_VITA
+    if ((pad->gamePressed & PADG_SQUARE) && gVitaTrainWait) {
+#else
+    if (pad->gamePressed & PADG_SQUARE) {
+#endif /* the fighters of the sparring fight first; the search goes on */
         Snd_PlaySe(1, 1);
         sTb->spCur = 2;
         Tb_SetMode(TB_SPAR);

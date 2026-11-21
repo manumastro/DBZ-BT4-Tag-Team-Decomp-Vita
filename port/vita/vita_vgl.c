@@ -39,6 +39,15 @@
 extern int gVitaTagMovie; /* bt3.txt tbomovie (vita_tagmovie.c) */
 extern int gVitaTagMovieCsc; /* bt3.txt tbomoviecsc */
 extern int gVitaTagMovieMem; /* bt3.txt tbomoviemem: MB of physically contiguous memory left to the player */
+/* bt3.txt vglcirc (GPU-crash hunt, 2026-11-21; default 0, vitaGL's own 32 MB circular pool as v1.4.1 and the release
+   candidate): 1 vitaGL's circular pool made 12 KB (4 KB per display buffer), smaller than the immediate-mode pool
+   (vglpool) vitaGL takes from it at a picture's first scene, so that every picture's temporary data (the copied vertex
+   and index arrays, GL_STREAM_DRAW buffers) is a block of its own freed by vitaGL's garbage collector once the chip is
+   done with it: what the 16 MB immediate-mode pool did before v1.4.1 (it overran the pool at every picture's start).
+   The suspicion: the circular pool's thirds are written again three pictures later whatever the chip is still reading
+   (work targets' scenes begin before the display buffer's wait), and every graphics-chip crash at a fight's start
+   (World Tournament stage) came after v1.4.1's vglpool change. 2 the soak's B battles. */
+int gVitaVglCirc = 0;
 int gVitaVglPoolKb = 64; /* bt3.txt vglpool=<KB>: vitaGL's immediate-mode pool (vitaGL's start, below; 16384 before v1.4.1's fix) */
 
 extern int gGsMainFbp;  /* gs_sony.c: the buffer this frame is drawn into */
@@ -1819,6 +1828,12 @@ int GsGpu_Init(void) {
            begins a scene again and asks for the pool again) went round for good: the drawing thread asleep in
            gpu_alloc_mapped_aligned_unsafe_for_cpu, every other thread waiting behind it (a crash dump of the freeze,
            2026-11-18). 64 KB now, taken from the circular pool. bt3.txt vglpool=<KB>: 16384 the old way. */
+        {
+            extern int gVitaAbSide;
+            if (gVitaVglCirc == 1 || (gVitaVglCirc == 2 && gVitaAbSide == 1)) {
+                vglSetCircularPoolSize(3 * 4096); /* (below vglpool: overrun at every picture's first scene) */
+            }
+        }
         vglInitWithCustomThreshold(gVitaVglPoolKb * 1024, gVitaMenuHi ? SCR_W_MENU : SCR_W_FIGHT, gVitaMenuHi ? SCR_H_MENU : SCR_H_FIGHT, 0x1800000,
                     0, gVitaTagMovie == 1 ? gVitaTagMovieMem * 1024 * 1024 : 0, 0x8C6000 /* (vitaGL's SCE_KERNEL_MAX_MAIN_CDIALOG_MEM_SIZE: none of that pool) */,
                     gVitaMsaa == 4 ? SCE_GXM_MULTISAMPLE_4X : gVitaMsaa == 2 ? SCE_GXM_MULTISAMPLE_2X : SCE_GXM_MULTISAMPLE_NONE);
@@ -1828,7 +1843,8 @@ int GsGpu_Init(void) {
                  gVitaTagMovieMem == 0 ? " (none: vitaGL's pool is given back to the system while the film plays)" : "",
                  (unsigned)(vglMemFree(VGL_MEM_PHYCONT) / 1024), (unsigned)(vglMemTotal(VGL_MEM_PHYCONT) / 1024));
     }
-    Vita_Log("vgl: vitaGL's immediate-mode pool %d KB (vglpool)\n", gVitaVglPoolKb);
+    Vita_Log("vgl: vitaGL's immediate-mode pool %d KB (vglpool); its circular pool %s (vglcirc=%d)\n", gVitaVglPoolKb,
+             gVitaVglCirc == 1 ? "12 KB: every picture's temporary data in blocks of their own" : "vitaGL's 32 MB", gVitaVglCirc);
     Vita_Log("vgl: multisampling %s; menus at %s, fights at %d x %d\n", gVitaMsaa == 4 ? "4x" : gVitaMsaa == 2 ? "2x" : "off",
              gVitaMenuHi ? "960 x 544" : "the fights' size", SCR_W_FIGHT, SCR_H_FIGHT);
     disp_plugins();
