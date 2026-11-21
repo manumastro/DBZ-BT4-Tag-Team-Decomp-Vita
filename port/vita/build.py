@@ -189,7 +189,8 @@ def pf_compile(cmd, o, policy):
     if r.returncode:
         return r
     try:
-        text, counts = ps2float.rewrite(s.read_text(encoding="latin-1"), f32=policy == "f32", mul=PS2F == "mul")
+        text, counts = ps2float.rewrite(s.read_text(encoding="latin-1"), f32=policy == "f32", mul=PS2F == "mul",
+                                        cluster=os.environ.get("BT4_PF_RUNS", "1") == "1")  # (0: a gate per instruction)
     except ps2float.Error as e:
         return subprocess.CompletedProcess(cmd, 1, "", f"error: ps2float: {e}\n")
     s.write_text(text, encoding="latin-1")
@@ -516,7 +517,9 @@ def compile_all():
             for l in p.read_text().splitlines():
                 k, v = l.split()
                 total[k] = total.get(k, 0) + int(v)
-        print(f"ps2float: {sum(total.values())} instructions replaced in {files} objects: " + " ".join(f"{k} {v}" for k, v in sorted(total.items())))
+        runs = total.pop("runs", 0)  # (ps2float.py runs(): the gate once for a run of replaced instructions)
+        print(f"ps2float: {sum(total.values())} instructions replaced in {files} objects: " + " ".join(f"{k} {v}" for k, v in sorted(total.items())) +
+              f"; {runs} runs under one gate")
     print(f"{len(objs)} objects, {len(bad)} failed")
     return not bad
 

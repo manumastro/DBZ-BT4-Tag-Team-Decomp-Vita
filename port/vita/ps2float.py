@@ -30,7 +30,10 @@ and ps2float=0 (offline play): then it does the replaced instruction itself and 
 pop, the instruction, the branch back: some 8 cycles), without the call, the eight registers' save and the float unit
 <-> core moves of the model's entry point (some 30-50 cycles: in a Tag 2 vs 2 fight about 60,000 replaced operations a
 blank made the game thread ~8 ms a step slower, 29 -> 24 pictures a second). Any other word: the piece as before.
-None of push, ldr, cbnz and pop changes the flags, and no replaced instruction reads sp.
+None of push, ldr, cbnz and pop changes the flags, and no replaced instruction reads sp. Runs (runs()): where two or
+more replaced instructions lie in one stretch of straight code (no branch, label, IT block, stack move, literal or
+pc-relative access between them), the first one's open gate does them all and the lines between, then goes back after
+the last one: one look at the gate for the run (build switch BT4_PF_RUNS=0: one per instruction).
 
 The objects are compiled with -mrestrict-it, so that no float instruction sits in an IT block (a 32-bit instruction
 is not allowed there under that rule); one that does stops the build.
@@ -105,9 +108,73 @@ def thunk_f64(n, mn, typ, ops, orig):
             orig.split("@")[0].strip(), "vmsr\tfpscr, r0", "pop\t{r0, r1}", f"b.w\t.Lpf{n}r", ".p2align 2", f".Lpf{n}k:", ".word\tgVitaPfFpscrClear"]
 
 
-def rewrite(text, f32=True, mul=False, tag="pf"):
+SITE = re.compile(r"^\tb\.w\t\.Lpf(\d+)$")
+# what a run's copy may not hold: control flow, IT blocks, the stack pointer moved, the status registers, and
+# anything that reads relative to where it is (literal pools and local labels, pc)
+STOP = ("b", "cb", "it", "tb", "adr", "svc", "bkpt", "udf", "push", "pop", "ldm", "stm", "vpush", "vpop", "vldm", "vstm",
+        "msr", "mrs", "vmsr", "vmrs", "dmb", "dsb", "isb", "ldrex", "strex", "clrex", "wfi", "wfe", "sev", "nop")
+KEEP_B = ("bic", "bics", "bfi", "bfc")
+WORD = re.compile(r"[A-Za-z_.][\w.]*")
+
+
+def copyable(s):
+    """A line between two replaced instructions that a run's copy can hold as it is: True (copy it), None (leave it
+    out: a blank, a comment, a .loc), False (the run ends before it)."""
+    if not s or (s.startswith("@") and '"' not in s) or s.startswith(".loc"):
+        return None
+    if s.startswith((".", "@")) or s.endswith(":"):
+        return False
+    mn = s.split()[0].lower()
+    base = mn.split(".")[0]
+    if base.startswith(STOP) and not base.startswith(KEEP_B):
+        return False
+    ops = s[len(mn):].split("@")[0]
+    words = WORD.findall(ops)
+    if "pc" in words or any(w.startswith(".L") for w in words) or "=" in ops or ops.strip().startswith("sp") or "!" in ops:
+        return False
+    return True
+
+
+def runs(out, sites, span=64, maxcopy=24):
+    """The gate once for a run of replaced instructions: when two or more lie in one stretch of straight code with only
+    copyable lines between them (copyable()), the first one's piece does, with the gate open, its instruction, the
+    lines between and the others' instructions, then goes back after the last one (each later one keeps its own
+    piece for the closed gate, which comes back after its own instruction as before). Returns the runs made."""
+    made, i = 0, 0
+    while i < len(out):
+        m = SITE.match(out[i])
+        if not m or i + 1 >= len(out) or out[i + 1] != f".Lpf{m.group(1)}r:":
+            i += 1
+            continue
+        head, copy, last, j = int(m.group(1)), [], None, i + 2
+        pend = []
+        while j < len(out) and j - i < span:
+            m2 = SITE.match(out[j])
+            if m2 and j + 1 < len(out) and out[j + 1] == f".Lpf{m2.group(1)}r:":
+                k = int(m2.group(1))
+                if len(copy) + len(pend) + 1 > maxcopy:
+                    break  # (the piece's cbnz reaches 126 bytes ahead: the copy stays under it)
+                copy += pend + [sites[k][1]]
+                pend, last = [], k
+                j += 2
+                continue
+            c = copyable(out[j].strip())
+            if c is False:
+                break
+            if c:
+                pend.append(out[j].strip())
+            j += 1
+        if last is not None:
+            piece = sites[head][0]  # [label, push, ldr, ldr, cbnz, pop, the instruction, b.w back, ...]
+            piece[7:8] = ["\t" + c for c in copy] + [f"\tb.w\t.Lpf{last}r"]
+            made += 1
+        i += 2
+    return made
+
+
+def rewrite(text, f32=True, mul=False, tag="pf", cluster=True):
     """Returns (new text, {kind: count})."""
-    out, thunks, counts = [], {}, {}
+    out, thunks, counts, sites = [], {}, {}, {}
     section = ".text"
     stack = []
     it_left = 0
@@ -159,6 +226,7 @@ def rewrite(text, f32=True, mul=False, tag="pf"):
                 out.append(f"\tb.w\t.Lpf{n}")
                 out.append(f".Lpf{n}r:")
                 thunks.setdefault(section, []).append([f".Lpf{n}:"] + ["\t" + c if not c.startswith(".L") else c for c in code])
+                sites[n] = (thunks[section][-1], line.split("@")[0].strip())
                 key = base + typ
                 counts[key] = counts.get(key, 0) + 1
                 n += 1
@@ -166,6 +234,8 @@ def rewrite(text, f32=True, mul=False, tag="pf"):
         if it_left > 0 and s and not s.startswith((".", "@")) and not s.endswith(":"):
             it_left -= 1
         out.append(line)
+    if cluster:
+        counts["runs"] = runs(out, sites)
     if thunks:
         out.append("@ ps2float.py: the replaced instructions' code")
         for sec, items in thunks.items():
