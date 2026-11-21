@@ -257,6 +257,7 @@ static volatile unsigned sLogHead, sLogTail, sLogLost;
 static unsigned sLogSplit, sLogBytes; /* bt3.txt logsplit=<KB> */
 static int sLogPart = 1;
 static volatile int sLogLock, sLogDrainLock, sLogThreaded;
+static int sLogSync; /* bt3.txt logsync=1 (development): no log thread */
 static void log_put(const char *p, unsigned n) {
     while (__sync_lock_test_and_set(&sLogLock, 1)) {
     }
@@ -2398,6 +2399,11 @@ static void read_settings(void) {
         } else if (strcmp(line, "tbomoviecsc") == 0) { /* tbomovie=1: the colour conversion of the chip's YUV texture: 0 CSC0 (default), 1 CSC1 (vitaGL's sample) */
             extern int gVitaTagMovieCsc;
             gVitaTagMovieCsc = atoi(eq);
+        } else if (strcmp(line, "fightlog") == 0) { /* the first <n> pictures of a battle logged draw by draw (vita_vgl.c gVitaFightLog) */
+            extern int gVitaFightLog;
+            gVitaFightLog = atoi(eq);
+        } else if (strcmp(line, "logsync") == 0) { /* 1: no log thread, every line written at once (a crash keeps the last lines) */
+            sLogSync = atoi(eq) != 0;
         } else if (strcmp(line, "vglcirc") == 0) { /* vitaGL's circular pool (vita_vgl.c gVitaVglCirc): 0 (default) vitaGL's 32 MB, 1 12 KB (temporary data in blocks of their own, as before v1.4.1), 2 the soak's B battles */
             extern int gVitaVglCirc;
             gVitaVglCirc = atoi(eq);
@@ -3783,7 +3789,7 @@ int __wrap_main(int argc, char **argv) {
         logf_(r == 1 ? "vita: processor counters on (libperf)\n" : "vita: processor counters off (libperf kernel plugin not loaded: %08x)\n", r);
         { extern int gVitaPerfK; if (gVitaPerfK != 0) { logf_("vita: libperf's kernel plugin loaded from the app's folder: %08x\n", (unsigned)gVitaPerfK); } }
     }
-    sLogThreaded = logThread;
+    sLogThreaded = logThread && !sLogSync;
     th = sceKernelCreateThread("bt3_game", game_thread, 0x10000100, GAME_STACK, 0, 0x00010000 /* the first core, to itself */, NULL);
     Vita_WatchThread(0, th, "game");
     if (th < 0 || sceKernelStartThread(th, 0, NULL) < 0) {

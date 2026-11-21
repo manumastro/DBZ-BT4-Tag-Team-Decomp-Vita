@@ -48,6 +48,11 @@ extern int gVitaTagMovieMem; /* bt3.txt tbomoviemem: MB of physically contiguous
    (work targets' scenes begin before the display buffer's wait), and every graphics-chip crash at a fight's start
    (World Tournament stage) came after v1.4.1's vglpool change. 2 the soak's B battles. */
 int gVitaVglCirc = 0;
+/* bt3.txt fightlog=<pictures> (development, the GPU-crash hunt; default 0): at a battle's start (Vita_InBattle) the next
+   <pictures> pictures logged draw by draw (sLogFrames' lines). It also keeps the render thread from doing the swaps in
+   those pictures (sFeAsync needs sLogFrames 0). With bt3.txt logsync=1 (vita_main.c) every line is written before the
+   program goes on, so that a crash keeps the last ones. */
+int gVitaFightLog = 0;
 int gVitaVglPoolKb = 64; /* bt3.txt vglpool=<KB>: vitaGL's immediate-mode pool (vitaGL's start, below; 16384 before v1.4.1's fix) */
 
 extern int gGsMainFbp;  /* gs_sony.c: the buffer this frame is drawn into */
@@ -8107,6 +8112,10 @@ void GsGpu_FrameEnd(void) {
             gVitaSkipAsyncN++;
         } else {
             lastAsync = 0;
+        }
+        if (VITA_RARE(gVitaFightLog > 0) && battle && !battleWas) {
+            sLogFrames = gVitaFightLog;
+            Vita_Log("vgl: fightlog: the battle began at picture %u: the next %d logged draw by draw\n", gGsFrame, gVitaFightLog);
         }
         battleWas = battle;
     }
