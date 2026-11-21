@@ -441,6 +441,10 @@ void MainMenu_Init(s32 section) {
             continue;
         }
 #ifdef PORT_VITA
+        if (i == MAINMENU_GUIDE) { /* (the Vita Guide is listed once, last, after this loop: MAINMENU_ITEM_MAX is 13 on
+                                      the Vita, so the loop reaches its id too and listed it twice) */
+            continue;
+        }
         if (i == MAINMENU_TAG) { /* (the Vita: the PC's dedicated Tag Team entry and its screens, bt3.txt tagteam=1, the
                                     default; tagteam=2 the Vita's earlier entry after item 3 instead, below; 0 neither) */
             extern int Vita_TagMenu(void);

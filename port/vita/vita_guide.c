@@ -17,7 +17,7 @@
 
    Three places use it:
    - the main menu's "Vita Guide" entry (src/menu/menu_a.c, PORT_VITA; the PC's online item's slot, which the Vita
-     never lists): a contents page, then each topic's pages (vita_guide_text.h);
+     never lists): the contents (five sections), each section's list of pages, each page's text (vita_guide_text.h);
    - the battle pause menu's "Vita Controls" entry (src/battle/hud_0.c, hud_0_b.c): the controls of the fight (the
      Tag Team page too in a Tag fight), and SQUARE there turns the reminder below on and off;
    - the reminder line at the foot of a fight (bt3.txt / saved hudhelp: 0 off, 1 on, 2 the first fights; default 2,
@@ -361,21 +361,30 @@ enum { GL_X0 = 18, GL_X1 = 494, GL_Y0 = 22, GL_Y1 = 426, GL_TEXT_X = 34, GL_TEXT
        GL_H = 324, GL_ROW = 25 };
 #define GL_SCALE 0.90f
 #define GL_HSCALE 0.95f
-static int sOpen, sTopic, sPage, sPages, sCursor, sLastTopic = -1, sLastPages;
+/* Where the guide is: sSection -1 the contents (the sections, sCursor on one); sSection >= 0 and sTopic -1 that
+   section's list of pages (sItem on one); sTopic >= 0 a page's text; sTopic TOPIC_BUTTONS the Vita Buttons editor */
+static int sOpen, sTopic, sPage, sPages, sCursor, sLastTopic = -1, sLastPages, sSection = -1, sItem;
 #define PAGES_MAX 16
 static int sPageStart[PAGES_MAX + 1]; /* the first line of each page, the line count after the last */
 static u16 sTitle[96], sFoot[160], sCount[32];
 
 static const VgTopic *topics(void) { return gVitaBt4English ? kVgEn : kVgEs; }
+static const VgSection *sections(void) { return gVitaBt4English ? kVgSectionsEn : kVgSectionsEs; }
 
-/* The contents: the topics, then (bt3.txt remap) "Vita Buttons", the editor of the Vita's own controls (below);
-   with it the rows are a little closer, so that the fourteen fit over the footer */
+/* A section's pages: Controls lists "Vita Buttons" (the editor of the Vita's own controls, below) only with bt3.txt
+   remap on (it is its last page) */
 #define TOPIC_BUTTONS (-2)
-static int content_rows(void) { return VG_TOPICS + (Vita_RemapOn() ? 1 : 0); }
-static int content_step(void) { return content_rows() > VG_TOPICS ? 23 : GL_ROW; }
-static const char *content_title(int i) {
-    return i < VG_TOPICS ? topics()[i].title : gVitaBt4English ? "Vita Buttons: change them" : "Botones Vita: cámbialos";
+static int section_count(int s) {
+    int n = sections()[s].count;
+    if (s == VG_SEC_CONTROLS && !Vita_RemapOn()) {
+        n--;
+    }
+    return n;
 }
+static int section_topic(int s, int i) { return sections()[s].first + i; }
+/* the section's rows a little closer when there are many (Online's ten fit over the footer) */
+static int section_step(int s) { return section_count(s) > 8 ? 27 : 32; }
+#define CONTENTS_STEP 58 /* the contents: a section's title and its line under it */
 static int buttons_input(void);
 static void buttons_draw(void);
 static int sFromOptions; /* the editor opened from Vita Settings: closing it goes back there */
@@ -387,6 +396,7 @@ void Vita_GuideOpen(void) {
     sOpen = 1;
     sLogFrames = 1;
     sTopic = -1; /* the contents */
+    sSection = -1;
     sFromOptions = 0;
     sPage = 0;
     Snd_PlaySe(1, 1);
@@ -624,24 +634,20 @@ int Vita_GuideInput(void) {
     if (sTopic == TOPIC_BUTTONS) {
         return buttons_input();
     }
-    if (sTopic < 0) {
-        if (sCursor >= content_rows()) {
+    if (sSection < 0) { /* the contents: the sections */
+        if (sCursor < 0 || sCursor >= VG_SECTIONS) {
             sCursor = 0;
         }
         if (rep & PADG_UP) {
-            sCursor = (sCursor + content_rows() - 1) % content_rows();
+            sCursor = (sCursor + VG_SECTIONS - 1) % VG_SECTIONS;
             Snd_PlaySe(1, 0);
         } else if (rep & PADG_DOWN) {
-            sCursor = (sCursor + 1) % content_rows();
+            sCursor = (sCursor + 1) % VG_SECTIONS;
             Snd_PlaySe(1, 0);
         } else if (press & (PADG_CROSS | PADG_RIGHT)) {
-            sTopic = sCursor < VG_TOPICS ? sCursor : TOPIC_BUTTONS;
-            if (sTopic == TOPIC_BUTTONS) {
-                extern int gVitaGuideEdRow;
-                gVitaGuideEdRow = 0;
-                sFromOptions = 0;
-            }
-            sPage = 0;
+            sSection = sCursor;
+            sItem = 0;
+            sTopic = -1;
             Snd_PlaySe(1, 1);
         } else if (press & (PADG_TRIANGLE | PADG_CIRCLE | PADG_START)) {
             sOpen = 0;
@@ -650,13 +656,48 @@ int Vita_GuideInput(void) {
         }
         return 1;
     }
+    if (sTopic < 0) { /* a section's pages */
+        int n = section_count(sSection);
+        if (sItem < 0 || sItem >= n) {
+            sItem = 0;
+        }
+        if (rep & PADG_UP) {
+            sItem = (sItem + n - 1) % n;
+            Snd_PlaySe(1, 0);
+        } else if (rep & PADG_DOWN) {
+            sItem = (sItem + 1) % n;
+            Snd_PlaySe(1, 0);
+        } else if (press & (PADG_CROSS | PADG_RIGHT)) {
+            int t = section_topic(sSection, sItem);
+            sTopic = topics()[t].body ? t : TOPIC_BUTTONS;
+            if (sTopic == TOPIC_BUTTONS) {
+                extern int gVitaGuideEdRow;
+                gVitaGuideEdRow = 0;
+                sFromOptions = 0;
+            }
+            sPage = 0;
+            Snd_PlaySe(1, 1);
+        } else if (press & (PADG_TRIANGLE | PADG_CIRCLE | PADG_LEFT)) {
+            sSection = -1; /* back to the contents */
+            Snd_PlaySe(1, 2);
+        } else if (press & PADG_START) {
+            sOpen = 0;
+            Snd_PlaySe(1, 2);
+            return 0;
+        }
+        return 1;
+    }
     topic_lines(sTopic);
-    if (rep & (PADG_RIGHT | PADG_R1 | PADG_CROSS)) { /* the next page, then the next topic */
+    if (rep & (PADG_RIGHT | PADG_R1 | PADG_CROSS)) { /* the next page, then the section's next text page */
         if (sPage + 1 < sPages) {
             sPage++;
         } else {
-            sTopic = (sTopic + 1) % VG_TOPICS;
-            sCursor = sTopic;
+            int n = section_count(sSection), k = sItem;
+            do {
+                k = (k + 1) % n;
+            } while (k != sItem && topics()[section_topic(sSection, k)].body == NULL);
+            sItem = k;
+            sTopic = section_topic(sSection, k);
             sPage = 0;
         }
         Snd_PlaySe(1, 0);
@@ -664,14 +705,18 @@ int Vita_GuideInput(void) {
         if (sPage > 0) {
             sPage--;
         } else {
-            sTopic = (sTopic + VG_TOPICS - 1) % VG_TOPICS;
-            sCursor = sTopic;
+            int n = section_count(sSection), k = sItem;
+            do {
+                k = (k + n - 1) % n;
+            } while (k != sItem && topics()[section_topic(sSection, k)].body == NULL);
+            sItem = k;
+            sTopic = section_topic(sSection, k);
             topic_lines(sTopic);
             sPage = sPages - 1;
         }
         Snd_PlaySe(1, 0);
     } else if (press & (PADG_TRIANGLE | PADG_CIRCLE)) {
-        sTopic = -1; /* back to the contents */
+        sTopic = -1; /* back to the section's pages */
         Snd_PlaySe(1, 2);
     } else if (press & PADG_START) {
         sOpen = 0;
@@ -732,7 +777,7 @@ static void style_heading(void) {
 
 /* after the main menu's own drawing, on its page */
 void Vita_GuideDraw(void) {
-    static u16 sRow[VG_TOPICS + 1][96];
+    static u16 sRow[VG_SECTION_MAX + 1 + VG_SECTIONS][96]; /* (the font keeps pointers to the lines until its flush) */
     u64 *p;
     int i;
 
@@ -762,9 +807,12 @@ void Vita_GuideDraw(void) {
     quad(&p, GL_X0, GL_Y0, GL_X1, GL_Y0 + 34, RGBA(0x10, 0x30, 0x68, 0x80)); /* its title band */
     quad(&p, GL_X0, GL_Y0 + 34, GL_X1, GL_Y0 + 36, RGBA(0x89, 0xC3, 0xE5, 0x70));
     quad(&p, GL_X0, GL_Y1 - 32, GL_X1, GL_Y1 - 30, RGBA(0x89, 0xC3, 0xE5, 0x50));
-    if (sTopic == -1) { /* the cursor's bar */
-        int y = GL_TEXT_Y - 3 + sCursor * content_step();
-        quad(&p, GL_X0 + 10, y, GL_X1 - 10, y + content_step() - 1, RGBA(0x30, 0x60, 0xA0, 0x60));
+    if (sSection < 0) { /* the cursor's bar: the section's title and line */
+        int y = GL_TEXT_Y - 6 + sCursor * CONTENTS_STEP;
+        quad(&p, GL_X0 + 10, y, GL_X1 - 10, y + CONTENTS_STEP - 4, RGBA(0x30, 0x60, 0xA0, 0x60));
+    } else if (sTopic == -1) { /* the cursor's bar on a section's page */
+        int y = GL_TEXT_Y - 4 + sItem * section_step(sSection);
+        quad(&p, GL_X0 + 10, y, GL_X1 - 10, y + section_step(sSection) - 2, RGBA(0x30, 0x60, 0xA0, 0x60));
     } else if (sTopic == TOPIC_BUTTONS) { /* the editor's row bar */
         extern int gVitaGuideEdRow;
         int y = GL_TEXT_Y - 3 + gVitaGuideEdRow * 24;
@@ -784,23 +832,46 @@ void Vita_GuideDraw(void) {
     style_heading();
     if (sTopic == TOPIC_BUTTONS) {
         buttons_draw();
-    } else if (sTopic < 0) {
+    } else if (sSection < 0) { /* the contents: each section's title, its pages in a line under it */
         to_u16(gVitaBt4English ? "Vita Guide" : "Guía Vita", sTitle, 96);
         Font_PrintAt(GL_TEXT_X, GL_Y0 + 7, sTitle);
-        Font_SetScale(GL_SCALE);
         shadow_mode(1);
         Font_SetShadowColorRGBA(0, 0, 0x10, 0x60);
-        for (i = 0; i < content_rows(); i++) {
-            to_u16(content_title(i), sRow[i], 96);
+        for (i = 0; i < VG_SECTIONS; i++) {
+            int y = GL_TEXT_Y + i * CONTENTS_STEP;
+            Font_SetScale(1.0f);
+            to_u16(sections()[i].title, sRow[i], 96);
             if (i == sCursor) {
                 Font_SetColorRGBA(0xF4, 0xFF, 0x3F, 0x80); /* the pause menu's cursor colour */
             } else {
                 Font_SetColorRGBA(0xE8, 0xF0, 0xFF, 0x80); /* (white: the pause menu's blue was dim on the window) */
             }
-            Font_PrintAt(GL_TEXT_X + 12, GL_TEXT_Y + i * content_step(), sRow[i]);
+            Font_PrintAt(GL_TEXT_X + 12, y, sRow[i]);
+            Font_SetScale(0.78f);
+            Font_SetColorRGBA(0x9C, 0xCC, 0xEC, 0x80);
+            to_u16(sections()[i].line, sRow[VG_SECTION_MAX + 1 + i], 96);
+            Font_PrintAt(GL_TEXT_X + 24, y + 25, sRow[VG_SECTION_MAX + 1 + i]);
         }
         to_u16(gVitaBt4English ? "{U}{D} Choose     {X} Open     {T} Close"
                                : "{U}{D} Elegir     {X} Abrir     {T} Cerrar", sFoot, 160);
+    } else if (sTopic < 0) { /* a section's pages */
+        int n = section_count(sSection), st = section_step(sSection);
+        to_u16(sections()[sSection].title, sTitle, 96);
+        Font_PrintAt(GL_TEXT_X, GL_Y0 + 7, sTitle);
+        Font_SetScale(GL_SCALE + 0.05f);
+        shadow_mode(1);
+        Font_SetShadowColorRGBA(0, 0, 0x10, 0x60);
+        for (i = 0; i < n; i++) {
+            to_u16(topics()[section_topic(sSection, i)].title, sRow[i], 96);
+            if (i == sItem) {
+                Font_SetColorRGBA(0xF4, 0xFF, 0x3F, 0x80);
+            } else {
+                Font_SetColorRGBA(0xE8, 0xF0, 0xFF, 0x80);
+            }
+            Font_PrintAt(GL_TEXT_X + 12, GL_TEXT_Y + i * st, sRow[i]);
+        }
+        to_u16(gVitaBt4English ? "{U}{D} Choose     {X} Open     {T} Back"
+                               : "{U}{D} Elegir     {X} Abrir     {T} Volver", sFoot, 160);
     } else {
         int first, n;
         topic_lines(sTopic);
@@ -808,7 +879,7 @@ void Vita_GuideDraw(void) {
         Font_PrintAt(GL_TEXT_X, GL_Y0 + 7, sTitle);
         {
             char count[16];
-            snprintf(count, sizeof(count), "%d/%d", sTopic + 1, VG_TOPICS);
+            snprintf(count, sizeof(count), "%d/%d", sItem + 1, section_count(sSection));
             to_u16(count, sCount, 32); /* (to_u16 keeps 12 places for a tag: 16 held 4 letters, "10/13" lost its 3) */
         }
         Font_SetScale(0.8f);
@@ -833,12 +904,12 @@ void Vita_GuideDraw(void) {
         }
         if (sPages > 1) {
             char pg[80];
-            snprintf(pg, sizeof(pg), gVitaBt4English ? "{LT}{RT} Page %d of %d     {T} Topics" : "{LT}{RT} Página %d de %d     {T} Temas",
+            snprintf(pg, sizeof(pg), gVitaBt4English ? "{LT}{RT} Page %d of %d     {T} Back" : "{LT}{RT} Página %d de %d     {T} Volver",
                      sPage + 1, sPages);
             to_u16(pg, sFoot, 160);
         } else {
-            to_u16(gVitaBt4English ? "{LT}{RT} Other topics     {T} Topics"
-                                   : "{LT}{RT} Otros temas     {T} Temas", sFoot, 160);
+            to_u16(gVitaBt4English ? "{LT}{RT} Other pages     {T} Back"
+                                   : "{LT}{RT} Otras páginas     {T} Volver", sFoot, 160);
         }
     }
     style_body();
@@ -947,8 +1018,9 @@ static int buttons_close(void) {
         sOpen = 0;
         return 0;
     }
-    sTopic = -1;
-    sCursor = VG_TOPICS;
+    sTopic = -1; /* back to Controls' pages, on Vita Buttons */
+    sSection = VG_SEC_CONTROLS;
+    sItem = VG_T_BUTTONS;
     return 1;
 }
 
@@ -1120,8 +1192,13 @@ void Vita_GuideMenuLabel(f32 x, f32 y, f32 sx, f32 sy, int alpha, int lit) {
 /* the message window's line under the menu (MsgWin_PortDrawString's form: 0xFEFF, lines of at most ~31 letters) */
 u16 *Vita_GuideMenuDescription(void) {
     static u16 line[160];
+#ifdef BT4_VITA_NETLINK
+    const char *text = gVitaBt4English ? "Controls, Tag Team, online and help:\nall about playing on the Vita."
+                                       : "Controles, Tag Team, online y ayuda:\ntodo sobre jugar en la Vita.";
+#else
     const char *text = gVitaBt4English ? "Controls, Tag Team, settings and help:\nall about playing on the Vita."
                                        : "Controles, Tag Team, ajustes y ayuda:\ntodo sobre jugar en la Vita.";
+#endif
     int n = 1;
     line[0] = 0xFEFF;
     while (*text && n < 158) {
@@ -1304,14 +1381,14 @@ const char *Vita_GuideTagLegend(int i) {
 const char *Vita_GuideTagHelp(int which) {
     static const char *const kEn[3] = {
         "In battle: %K:target% picks the target. Stay near a downed ally to revive. Senzu: %K:senzu%. Fusion: %K:fusion% + "
-        "direction. Change them: Vita Guide > Vita Buttons.",
+        "direction. Change them: Vita Guide > Controls > Vita Buttons.",
         "Use %K:fusion% + direction near a compatible ally; %K:fusion% accepts. Control is random and both players help in "
         "clashes. The spectator follows only the fusion. %K:unfuse% separates temporary fusions; the timer also ends them.",
         "Set the number of Senzu Beans each fighter can use. To heal: %K:senzu%.",
     };
     static const char *const kEs[3] = {
         "En combate: %K:target% elige el objetivo. Quédate cerca de un aliado caído para reanimarlo. Semilla: %K:senzu%. "
-        "Fusión: %K:fusion% + dirección. Cámbialos: Guía Vita > Botones Vita.",
+        "Fusión: %K:fusion% + dirección. Cámbialos: Guía Vita > Controles > Botones Vita.",
         "%K:fusion% y una dirección solicita la fusión con un aliado compatible; %K:fusion% la acepta. El control se sortea y "
         "ambos ayudan en los choques. El espectador sigue sólo a la fusión. Las temporales terminan al agotarse el tiempo "
         "o pulsar %K:unfuse%.",
