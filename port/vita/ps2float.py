@@ -25,6 +25,13 @@ Replaced (double precision):   every arithmetic or conversion with a .f64 operan
 Left alone:                    vmul (truncating on both), vcvt to and from signed integers, vneg, vabs, vcmp, moves,
                                loads and stores; vsqrt.f32 (not the model's: see docs/vita/online-bt4.md).
 
+The gate (bt3.txt pffast, gVitaPfGate in vita_ps2float.c): each piece begins with a look at one word, 0 when pffast=1
+and ps2float=0 (offline play): then it does the replaced instruction itself and goes back (push r0, two loads, cbnz,
+pop, the instruction, the branch back: some 8 cycles), without the call, the eight registers' save and the float unit
+<-> core moves of the model's entry point (some 30-50 cycles: in a Tag 2 vs 2 fight about 60,000 replaced operations a
+blank made the game thread ~8 ms a step slower, 29 -> 24 pictures a second). Any other word: the piece as before.
+None of push, ldr, cbnz and pop changes the flags, and no replaced instruction reads sp.
+
 The objects are compiled with -mrestrict-it, so that no float instruction sits in an IT block (a 32-bit instruction
 is not allowed there under that rule); one that does stops the build.
 
@@ -141,6 +148,10 @@ def rewrite(text, f32=True, mul=False, tag="pf"):
             if code is None:
                 code = thunk_f64(n, base, typ, ops, line)
             if code is not None:
+                # the gate (see the top): the instruction itself when gVitaPfGate is 0, the piece otherwise
+                code = (["push\t{r0}", f"ldr\tr0, .Lpf{n}g", "ldr\tr0, [r0]", f"cbnz\tr0, .Lpf{n}s", "pop\t{r0}",
+                         line.split("@")[0].strip(), f"b.w\t.Lpf{n}r", f".Lpf{n}s:", "pop\t{r0}"] + code +
+                        [".p2align 2", f".Lpf{n}g:", ".word\tgVitaPfGate"])
                 if base != mn or it_left > 0:
                     raise Error(f"a replaced instruction in an IT block or conditional: {line.strip()} (build with -mrestrict-it)")
                 if "text" not in section and '"ax"' not in section:

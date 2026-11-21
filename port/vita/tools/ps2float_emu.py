@@ -197,12 +197,13 @@ def main():
     regs_core = [getattr(A, f"UC_ARM_REG_R{i}") for i in range(13)] + [A.UC_ARM_REG_LR, A.UC_ARM_REG_SP]
     regs_d = [getattr(A, f"UC_ARM_REG_D{i}") for i in range(32)]
     rnd = random.Random(7)
-    for mode in (0, 1, 3):
+    for mode, gate in ((0, 1), (1, 1), (3, 1), (0, 0)):  # (gate 0: pffast=1 offline, the pieces' own instruction)
         for name, insn in SNIPPETS:
             for trial in range(40):
                 uc = fresh()
                 gaddr = syms["gVitaPs2Float"]
                 uc.mem_write(gaddr, struct.pack("<I", mode))
+                uc.mem_write(syms["gVitaPfGate"], struct.pack("<I", gate))
                 uc.mem_write(syms["gVitaPfFpscrClear"], struct.pack("<I", (7 << 22) if mode else 0))
                 state = {}
                 for r in regs_core[:13] + [A.UC_ARM_REG_LR]:

@@ -2771,6 +2771,10 @@ static void read_settings(void) {
         } else if (strcmp(line, "ps2float") == 0) { /* the PS2's float arithmetic: 0 the float unit's, 1 the PS2's (the PC's);
                                                        only in the BT4_PS2FLOAT=1 build (port/vita/ps2float.py, vita_ps2float.c) */
             sPs2Float = atoi(eq);
+        } else if (strcmp(line, "pffast") == 0) { /* the BT4_PS2FLOAT build with ps2float 0: 1 the pieces of code do the
+                                                     replaced instruction themselves (vita_ps2float.c gVitaPfFast) */
+            extern int gVitaPfFast;
+            gVitaPfFast = atoi(eq) != 0;
         } else if (strcmp(line, "asyncread") == 0) { /* 0: reads on the caller's thread (vita_read.c) */
             extern int gVitaAsyncRead;
             gVitaAsyncRead = atoi(eq) != 0;
@@ -2835,6 +2839,11 @@ static void read_settings(void) {
             logf_("vita: ps2float=%d: the game's float instructions that can differ from the PS2's go through the model's"
                   " entry points (the BT4_PS2FLOAT build); %s\n", sPs2Float, sPs2Float == 0 ? "the float unit's own results" :
                   sPs2Float == 3 ? "the PS2's results, by the C model alone" : "the PS2's results");
+            {
+                extern int gVitaPfFast, gVitaPfGate;
+                logf_("vita: pffast=%d: %s\n", gVitaPfFast, gVitaPfGate == 0 ? "the pieces do the instruction themselves until"
+                      " an online session (no entry point, no count)" : "every piece through the model's entry points");
+            }
             Vita_PfSelfTest(Vita_Log);
         }
 #else
