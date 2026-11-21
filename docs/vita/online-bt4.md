@@ -11,6 +11,14 @@ against Vita** (ad-hoc, local network, internet) and **Vita against PC** (agains
 PC port's online play, which BT4decomp builds on, is in [online.md](online.md); this document says what BT4decomp
 does differently.
 
+**v1.5 (branch `rel/v1.5`, 2026-11-21): upstream merged at `9e5d586` = tag `v0.1.39.6-R1.19`** (client
+`0.1.39.6-R1.19`, display "R1 1.11"). The game-data identity moved to `BT4-B14-Rev2-sim17` `0xebb8305a83eb78de`
+(roster balance, arena boundaries, new transformations change the simulation): a Vita without this merge cannot
+meet a current PC. Unchanged: `NET_VERSION 0x42543414` (`bt4-duel-1112814612`), `LOBBY_VERSION 4`,
+`TT_PROTOCOL 0x54540009` (`bt4-p2p-2`). New upstream calls the Vita provides: `Port_TagOpenListedWithRules`,
+`Port_TagStartTraining`, `Port_TagOfflineTraining` (vita_tag.c), `Port_UiRankedSettlement` (vita_netline.c, a banner);
+the Jiren shout files are packed as `tbo/audio/jiren/*.adx`. Not yet run on the console against a PC R1.19.
+
 ## Where this tree stands
 
 - The BT4decomp side is NauTaro's `5b2c4f3` (2026-11-12, `0.1.39.5-R5.7` in `port/include/bt4_version.h`), merged
