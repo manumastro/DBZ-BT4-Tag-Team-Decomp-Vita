@@ -74,7 +74,7 @@ SAMPLES = pathlib.Path(os.environ.get("VITA_SAMPLES", SDK.parent / "samples"))  
 TITLE_ID = os.environ.get("BT3_VITA_TITLE_ID") or ("BTFV00008" if DEV else "BTFV00010")
 TITLE = os.environ.get("BT3_VITA_TITLE") or ("BT4 (development)" if DEV else "Dragon Ball Z: BT4")
 VPK = os.environ.get("BT3_VITA_VPK") or ("BT4-Vita-dev.vpk" if DEV else "BT4-Vita.vpk").replace(".vpk", ("-pgo" + PGO if PGO else "") + PF_TAG.replace("_", "-") + ".vpk")
-APP_VER = "01.41"  # the version the LiveArea and VitaShell show (README "Changes")
+APP_VER = "01.50"  # the version the LiveArea and VitaShell show (README "Changes")
 
 # A few names exist both in the game's side and in the SDK's libraries with other meanings: the internals of the
 # PS2's maths library (port/third_party/newlib_libm), the PS2 C library's character table, and the generic soft-float
