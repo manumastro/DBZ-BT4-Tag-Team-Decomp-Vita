@@ -5446,6 +5446,9 @@ static char *Tb_Help(void) {
                 return TB_VITA_ES ? "\xC3\x9Anete a una partida: escribe la IP y el puerto del anfitri\xC3\xB3n (por ejemplo 192.168.1.20:7000)."
                                   : "Join a match: type the host's IP address and port (for example 192.168.1.20:7000).";
         }
+        if (sTb->hubCur == HUB_TAG) /* (Tag Team online is not on the Vita yet: Tb_VitaNoTagOnline) */
+            return TB_VITA_ES ? "Tag Team en l\xC3\xADnea a\xC3\xBAn no est\xC3\xA1 en Vita. Juega Tag Team desde el men\xC3\xBA principal."
+                              : "Tag Team online is not on the Vita yet. Play Tag Team from the main menu.";
 #endif
         return sTbHubSay[sTb->hubCur];
     case TB_TAG:{
