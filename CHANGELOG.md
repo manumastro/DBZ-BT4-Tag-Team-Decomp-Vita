@@ -4,12 +4,11 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 ## Unreleased
 
-- **Online play, first version (Vita vs PC or Vita vs Vita, by IP address)**: main menu > Tenkaichi Budokai
-  Online. Create Match hosts a lobby (tell the other player your IP address and port), Join types the host's address.
-  The lobby, the rules and the match are the PC port's own, and the matches run inside the game: after each one you
-  are back in the lobby. Works on the same Wi-Fi, or over the internet with the host's port forwarded (UDP). Quick
-  Match, Ranked and Tournament need the PC port's online service and are not on the Vita yet (they say so).
-  1 vs 1 only (Tag Team online is not there yet).
+- **Online play, first version (1 vs 1, Vita vs PC or Vita vs Vita)**: main menu > Tenkaichi Budokai Online, on
+  the PC port's own online service (its developer allowed it): a nickname the first time, Quick Match, Ranked, Create
+  Match (room code or by IP address), Join, Tournament. The lobby, the rules and the match are the PC port's own, and
+  the matches run inside the game: after each one you are back in the lobby. `online_server=none` in bt3.txt turns
+  the service off (matches by address only). Tag Team online is not there yet.
 - **The main menu lists the online entry and the Vita Guide together** (the guide stays the last row, just above the
   first).
 - **Every Vita-only control can now be changed** (`remap=1`, not yet run on the console): Vita Guide > Vita Buttons,

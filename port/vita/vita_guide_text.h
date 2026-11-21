@@ -166,9 +166,9 @@ static const VgTopic kVgEn[VG_TOPICS] = {
 #ifdef BT4_VITA_NETLINK
      "# Online now (1 vs 1)\n"
      "Main menu > Tenkaichi Budokai Online:\n"
-     "Create Match, or Join with the host's IP.\n"
+     "Quick Match, Ranked, Create Match, Join,\n"
+     "Tournament (the PC version's service).\n"
      "# Coming later, maybe\n"
-     "Quick Match, Ranked, Tournament\n"
      "Online Tag Team\n"
 #else
      "# Coming later, maybe\n"
@@ -333,9 +333,9 @@ static const VgTopic kVgEs[VG_TOPICS] = {
 #ifdef BT4_VITA_NETLINK
      "# En línea ya (1 contra 1)\n"
      "Menú principal > Tenkaichi Budokai Online:\n"
-     "Crear partida, o Unirse con la IP del otro.\n"
+     "Partida rápida, Clasificatorias, Crear,\n"
+     "Unirse, Torneo (el servicio del PC).\n"
      "# Quizá más adelante\n"
-     "Partida rápida, Clasificatorias, Torneo\n"
      "Tag Team en línea\n"
 #else
      "# Quizá más adelante\n"

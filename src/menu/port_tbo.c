@@ -580,6 +580,14 @@ static s32 Tb_VitaNoService(s32 hub) {
                        : "Not on the Vita yet: it needs the online service. Use Create Match or Join with an IP address.");
     return 1;
 }
+/* Tag Team online (2 vs 2 over the network) is not on the Vita yet: the hub's Tag Team row says so and points at the
+   main menu's Tag Team (the local one) instead of opening the online Tag screens. */
+static s32 Tb_VitaNoTagOnline(void) {
+    Snd_PlaySe(1, 2);
+    Tb_Note(TB_VITA_ES ? "Tag Team en l\xC3\xADnea a\xC3\xBAn no est\xC3\xA1 en Vita. Juega Tag Team desde el men\xC3\xBA principal."
+                       : "Tag Team online is not on the Vita yet. Play Tag Team from the main menu.");
+    return 1;
+}
 #endif
 static void Tb_Say(const char *line) {
     Ps_Copy(sTb->sayLine, line, 256);
@@ -1955,6 +1963,10 @@ static void Tb_HubUpdate(s32 live) {
 #endif
             break;
         case HUB_TAG:
+#ifdef PORT_VITA
+            Tb_VitaNoTagOnline();
+            break;
+#endif
 #ifdef BT4_TAG_TEAM_EXPANDED
             sTb->train=PORT_TBO_OPEN_TAG;
             sTb->leaving=1;
