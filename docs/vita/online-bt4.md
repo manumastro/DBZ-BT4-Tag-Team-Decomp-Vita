@@ -19,6 +19,20 @@ meet a current PC. Unchanged: `NET_VERSION 0x42543414` (`bt4-duel-1112814612`), 
 `Port_TagStartTraining`, `Port_TagOfflineTraining` (vita_tag.c), `Port_UiRankedSettlement` (vita_netline.c, a banner);
 the Jiren shout files are packed as `tbo/audio/jiren/*.adx`. Not yet run on the console against a PC R1.19.
 
+**Quick Match never paired on v1.5 (developer's test, 2026-11-21 22:38): fixed by merging R1.20** (`wip/qm15`, upstream
+`a5e13c9` = tag `v0.1.39.6-R1.20`, display "R1 1.12", released 14:38 UTC that day; PC clients update themselves). Its
+battle emotes moved the identity to `BT4-B14-Rev2-sim18` `0xd38bc8482ed814b6`. The v5 service (upstream
+`cloudflare/online_core.mjs` `queue()`) pairs only equal `mode`, `wire`, `content` and `rules` (no region, platform,
+rollback or delay field), Public Rooms list only the same `content`, a room code of another `content` answers
+`INCOMPATIBLE_DATA`: a Vita one identity behind waits alone, with no error. **Every upstream release that changes
+`BT4_ONLINE_COMPAT_ID` cuts the Vita off the same way until it is merged.** The Vita now logs its signaling (the
+thread's stderr is lost there): `net: signal sent <op> ... content <id>, rules <q>, client <version> capability 2` and
+`net: signal reply <op>: ...` (`cloudflare_signal.inc`, `PORT_VITA`). Console 2026-11-21 23:05 (set `qm15_quick`,
+BTFV00008, real service): queue S sent with `d38bc8482ed814b6`, a room at once, a match against a PC stranger started
+and ran ~80 s of fight (the dev watchdog `hangdump=10` then stopped the app at a 9 s stall of the stranger's input; the
+headless PC R1.20 was paired with another stranger at the same moment). Emotes: the Vita sends pad byte 16 = 0 (no
+emote input yet; the simulation is the same). Xbox prompts: `PortInput_XboxGlyphs` returns 0.
+
 ## Where this tree stands
 
 - The BT4decomp side is NauTaro's `5b2c4f3` (2026-11-12, `0.1.39.5-R5.7` in `port/include/bt4_version.h`), merged
