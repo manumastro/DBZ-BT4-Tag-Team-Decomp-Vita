@@ -495,7 +495,7 @@ char *Vita_RemapExpand(const char *in, char *out, int size, int words) {
                     o += snprintf(out + o, (size_t)(size - o), "%s%s   %s %s", b2 ? "\n" : "", kTm[b2], en ? "Rear pad," : "Panel trasero,",
                                   (en ? kRearEn : kRearEs)[b2]);
                 } else if (sp == 1) {
-                    o += snprintf(out + o, (size_t)(size - o), "%s%s   %s %s", b2 ? "\n" : "", kTm[b2], en ? "Screen corner," : "Esquina de la pantalla,",
+                    o += snprintf(out + o, (size_t)(size - o), "%s%s   %s %s", b2 ? "\n" : "", kTm[b2], en ? "Screen corner," : "Pantalla,",
                                   (en ? kFrontEn : kFrontEs)[b2]);
                 } else {
                     o += snprintf(out + o, (size_t)(size - o), "%s%s   %s", b2 ? "\n" : "", kTm[b2], en ? "Not on touch" : "Sin táctil");

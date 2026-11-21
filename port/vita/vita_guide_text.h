@@ -95,10 +95,10 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "%TOUCHLINES%\n"
      "# Another way\n"
      "%KEYLINES%\n"
+     "Change the pairs: Controls > Vita Buttons\n"
      "# Move them\n"
      "Options > Controller > Vita Settings > Touch\n"
      "Put them in the screen's corners, or off.\n"
-     "Button pairs: Controls > Vita Buttons\n"
      "# In the menus\n"
      "Tap an item, tap it again to choose it.\n"
      "Swipe to scroll. Two fingers: go back."},
@@ -162,7 +162,6 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "on a Vita or on a PC."},
     {"Create Match",
      "# Your own room\n"
-     "Tenkaichi Budokai Online > Create Match\n"
      "Choose the rules, then Create Room.\n"
      "# Connection\n"
      "Room Code   Friends join with a code\n"
@@ -223,16 +222,14 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "Tag Team Tutorial   Learn the Tag moves"},
     {"Playing PC players",
      "# Vita and PC together\n"
-     "The Vita uses the PC version's service.\n"
-     "In Quick Match, Ranked, rooms and\n"
-     "tournaments you can meet PC players.\n"
+     "You meet PC players in every mode.\n"
      "# The same version\n"
      "Both games must be the same release.\n"
      "When the PC version updates, wait for\n"
-     "a new release of this port to play online.\n"
+     "a new release of this port.\n"
      "# Smooth fights\n"
      "Play close to your Wi-Fi router.\n"
-     "The Vita has no rollback: with a slow\n"
+     "No rollback on the Vita: on a slow\n"
      "connection the fight waits a little."},
     {"Not on the Vita yet",
      "# Not online on the Vita yet\n"
@@ -293,8 +290,7 @@ static const VgTopic kVgEn[VG_TOPICS] = {
      "# Common mistakes\n"
      "Copy the .iso, not the .7z, .rar or .zip.\n"
      "Unpack it on a computer, not a phone.\n"
-     "A FAT32 card cannot hold over 4 GB:\n"
-     "use exFAT.\n"
+     "FAT32 cards hold at most 4 GB: use exFAT.\n"
      "\"Archive not found\": copy the .iso again.\n"
      "# Updating\n"
      "Install the new VPK. Your saves stay."},
@@ -365,7 +361,7 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "# Botones que la Vita no tiene\n"
      "{L2}   Onda\n"
      "{R2}   Bajar\n"
-     "Estos y {L3} {R3}: táctiles, mira la página siguiente.\n"
+     "Estos y {L3} {R3}: ver la página siguiente.\n"
      "# Pausa y salir\n"
      "{ST}   Pausa\n"
      "Mantén %K:quit%   Cerrar el juego"},
@@ -374,10 +370,10 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "%TOUCHLINES%\n"
      "# Otra forma\n"
      "%KEYLINES%\n"
+     "Cambiar parejas: Controles > Botones Vita\n"
      "# Cambiarlos de sitio\n"
      "Opciones > Mando > Vita Settings > Touch\n"
      "Ponlos en las esquinas de la pantalla, o apágalos.\n"
-     "Parejas de botones: Controles > Botones Vita\n"
      "# En los menús\n"
      "Toca una opción y tócala otra vez para elegirla.\n"
      "Desliza para bajar. Dos dedos: volver."},
@@ -398,11 +394,11 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "3 contra 3 y equipos mayores aún van lentos."},
     {"En combate",
      "# Tu objetivo\n"
-     "%K:target%   Cambia el enemigo al que apuntas\n"
+     "%K:target%   Cambiar de objetivo\n"
      "Lo marcan un anillo y una barra de vida.\n"
      "# Ayuda a tu equipo\n"
      "Junto a un aliado caído   Lo reanimas\n"
-     "%K:senzu%   Semilla del ermitaño\n"
+     "%K:senzu%   Comer una semilla\n"
      "%K:fusion% + una dirección   Fusión con un aliado\n"
      "%K:unfuse%   Deshacer la fusión\n"
      "# ¿Se te olvidó algo?\n"
@@ -441,7 +437,6 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "en una Vita o en un PC."},
     {"Crear partida",
      "# Tu propia sala\n"
-     "Tenkaichi Budokai Online > Crear partida\n"
      "Elige las reglas y luego Crear sala.\n"
      "# Conexión\n"
      "Código de sala   Entran con un código\n"
@@ -499,16 +494,14 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "Tenkaichi Budokai Online > Entrenamiento\n"
      "1 vs 1   El modo Entrenamiento del juego\n"
      "2 vs 2   Tag Team contra la CPU\n"
-     "Tutorial de Tag Team   Aprende lo de Tag"},
+     "Tutorial   Aprende lo de Tag Team"},
     {"Jugar contra el PC",
      "# Vita y PC juntos\n"
-     "La Vita usa el servicio de la versión de PC.\n"
-     "En Partida rápida, Clasificatorias, salas\n"
-     "y torneos puedes encontrar jugadores de PC.\n"
+     "Juegas con gente de PC en todos los modos.\n"
      "# La misma versión\n"
      "Los dos juegos deben ser la misma versión.\n"
-     "Cuando la versión de PC se actualiza, espera\n"
-     "una versión nueva de este port para jugar.\n"
+     "Si la versión de PC se actualiza, espera\n"
+     "una versión nueva de este port.\n"
      "# Combates fluidos\n"
      "Juega cerca de tu router Wi-Fi.\n"
      "La Vita no tiene rollback: con una conexión\n"
@@ -532,7 +525,7 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "Opciones > Mando > Vita Settings\n"
      "# Las filas\n"
      "Touch   Dónde están {L2} {R2} {L3} {R3}\n"
-     "Clashes   Gana los choques con {S} o el stick\n"
+     "Clashes   Gana con {S} o el stick\n"
      "2nd Pad   Un segundo jugador (PS TV)\n"
      "Mods   Tus mods, sí o no\n"
      "Mods, fila de abajo   La música del anime\n"
@@ -572,8 +565,7 @@ static const VgTopic kVgEs[VG_TOPICS] = {
      "# Errores frecuentes\n"
      "Copia la .iso, no el .7z, .rar o .zip.\n"
      "Descomprímela en un ordenador, no en el móvil.\n"
-     "Una tarjeta FAT32 no admite más de 4 GB:\n"
-     "usa exFAT.\n"
+     "FAT32 no admite más de 4 GB: usa exFAT.\n"
      "\"Archive not found\": copia la .iso otra vez.\n"
      "# Actualizar\n"
      "Instala el VPK nuevo. Tus partidas se quedan."},
