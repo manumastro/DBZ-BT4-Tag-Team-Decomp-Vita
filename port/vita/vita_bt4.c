@@ -271,6 +271,7 @@ void Port_TagHudView(const float *v,const float *p,const float *nearZ) {}
 void Port_WallMesh(const void *key, int second, int culled, const float *screen, const float *cam, const float *vtx, int quadCount, const void *quads, unsigned long long tex0) {}
 
 /* (port/src/gs/gs_input.c; PortInput_TagTargetMethod is the Vita's own: vita_gfx.c) */
+int PortInput_XboxGlyphs(int player) { (void)player; return 0; } /* (R1.20: Xbox prompts; the Vita's own buttons) */
 int PortTbo_CommunityTake(void) { return 0; }
 int PortTbo_TextRead(void) { return 0; }
 int Port_RumbleTest(void) { return 0; }

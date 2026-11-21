@@ -24,6 +24,27 @@ static bool cloudBackend(){return true;} /* (the Vita has no Supabase identity t
 #else
 static bool cloudBackend(){const char *v=SDL_getenv("BT4_ONLINE_BACKEND");return !v||strcmp(v,"supabase");}
 #endif
+#ifdef PORT_VITA
+/* (Vita) the signaling thread's stderr is not the program's file there: the matchmaking requests a player starts (a
+   room, a join, a quick match, the queue counts, the public rooms) and their answers go to the port's log instead,
+   with what the service pairs a quick match on (mode, wire, content, rules) and the client version. No token, no
+   address. */
+extern "C" void Vita_Log(const char *fmt, ...);
+static void vitaSignalLog(const char *what,const Job &job,const Sj *body){
+    if(!bt4route::admission(job.op)&&job.op!="counts"&&job.op!="cancel"&&job.op!="public_rooms")return;
+    if(!body){
+        std::string client;auto c=job.args.find("_client");
+        if(c!=job.args.end()&&c->is_object())client=str(*c,"version")+" capability "+std::to_string(c->value("capability",0));
+        Vita_Log("net: signal %s %s (serial %u): mode %s, wire %s, content %s, rules %s, client %s\n",what,job.op.c_str(),job.serial,
+                 str(job.args,"mode").c_str(),str(job.args,"wire").c_str(),str(job.args,"content").c_str(),str(job.args,"rules").c_str(),
+                 client.empty()?"-":client.c_str());
+    }else{
+        std::string text=body->dump();if(text.size()>240)text=text.substr(0,240)+"...";
+        if(!str(*body,"generation").empty()||body->contains("members"))text="state "+str(*body,"state")+", a room (generation, members)";
+        Vita_Log("net: signal %s %s (serial %u): %s\n",what,job.op.c_str(),job.serial,text.c_str());
+    }
+}
+#endif
 static bool cloudStoreSession(const Sj &reply){
     auto &i=identities[2];auto u=reply.find("user");
     auto access=str(reply,"access_token"),refresh=str(reply,"refresh_token");
@@ -86,6 +107,9 @@ static int cloudEntry(void*){
     auto current=[](const Job &j){std::lock_guard<std::mutex> guard(state.lock);return j.session==state.sessions[j.consumer];};
     auto pin=[](const std::string &g){std::lock_guard<std::mutex> guard(state.lock);state.roomGeneration=g;};
     auto complete=[&](const Job &job,const Sj &body){
+#ifdef PORT_VITA
+        vitaSignalLog("reply",job,&body);
+#endif
         if(str(body,"error")=="UPDATE_REQUIRED")Update_SetOnlineRequired(1);
         const bool admission=bt4route::admission(job.op);
         const auto generation=str(body,"generation");
@@ -190,6 +214,9 @@ static int cloudEntry(void*){
                 if(!ok&&!body.is_object())body={{"error","SIGNALING_UNAVAILABLE"}};
                 complete(job,body);state.status=ok?1:-1;
             }else{
+#ifdef PORT_VITA
+            vitaSignalLog("sent",job,nullptr);
+#endif
             socket->text(Sj{{"op",job.op},{"args",job.args},{"serial",job.serial},{"consumer",job.consumer}}.dump());
             if(diagnostics)fprintf(stderr,"bt4: Cloudflare command=%s consumer=%d serial=%u\n",job.op.c_str(),job.consumer,job.serial);
             pending[key(job.consumer,job.serial)]={std::move(job),now};
