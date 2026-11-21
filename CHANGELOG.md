@@ -4,6 +4,10 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
 
 ## Unreleased
 
+- **Fixed: the game could close with "render gpu crash" at the start of a fight**, seen on the World Tournament stage
+  (Online > Quick Match > Train While Waiting, and Tag Team 2 vs 2) in every build since v1.4.1. v1.4.1's freeze fix
+  had made vitaGL keep each picture's temporary data in its circular pool; it is now in blocks of their own again,
+  as before v1.4.1 (`vglcirc=1`, the default; checked on the console).
 - **Online play, first version (1 vs 1, Vita vs PC or Vita vs Vita)**: main menu > Tenkaichi Budokai Online, on
   the PC port's own online service (its developer allowed it): a nickname the first time, Quick Match, Ranked, Create
   Match (room code or by IP address), Join, Tournament. The lobby, the rules and the match are the PC port's own, and

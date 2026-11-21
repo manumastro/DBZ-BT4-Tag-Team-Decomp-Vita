@@ -929,7 +929,7 @@ static void Tb_WaitUpdate(s32 live) {
 
     if (!sTb->found) {
 #ifdef PORT_VITA
-        /* (bt3.txt trainwait, port/vita/vita_tbo.c: 0, the default for now, the entry hidden: its sparring fight on
+        /* (bt3.txt trainwait, port/vita/vita_tbo.c: 1 by default; 0 the entry hidden, as the interim build: its sparring fight on
            the World Tournament stage ended in a graphics-chip crash at its start on the Vita, 2026-11-21) */
         if (gVitaTrainWait)
 #endif

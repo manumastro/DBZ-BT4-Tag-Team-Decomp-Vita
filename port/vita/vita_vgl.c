@@ -39,15 +39,16 @@
 extern int gVitaTagMovie; /* bt3.txt tbomovie (vita_tagmovie.c) */
 extern int gVitaTagMovieCsc; /* bt3.txt tbomoviecsc */
 extern int gVitaTagMovieMem; /* bt3.txt tbomoviemem: MB of physically contiguous memory left to the player */
-/* bt3.txt vglcirc (GPU-crash hunt, 2026-11-21; default 0, vitaGL's own 32 MB circular pool as v1.4.1 and the release
-   candidate): 1 vitaGL's circular pool made 12 KB (4 KB per display buffer), smaller than the immediate-mode pool
+/* bt3.txt vglcirc (GPU-crash hunt, 2026-11-21; default 1 since the console runs gpu_s4_circ1*; 0 vitaGL's own 32 MB
+   circular pool as v1.4.1 and the release candidate, which crashed the chip at a fight's start on the World Tournament
+   stage): 1 vitaGL's circular pool made 12 KB (4 KB per display buffer), smaller than the immediate-mode pool
    (vglpool) vitaGL takes from it at a picture's first scene, so that every picture's temporary data (the copied vertex
    and index arrays, GL_STREAM_DRAW buffers) is a block of its own freed by vitaGL's garbage collector once the chip is
    done with it: what the 16 MB immediate-mode pool did before v1.4.1 (it overran the pool at every picture's start).
    The suspicion: the circular pool's thirds are written again three pictures later whatever the chip is still reading
    (work targets' scenes begin before the display buffer's wait), and every graphics-chip crash at a fight's start
    (World Tournament stage) came after v1.4.1's vglpool change. 2 the soak's B battles. */
-int gVitaVglCirc = 0;
+int gVitaVglCirc = 1;
 /* bt3.txt fightlog=<pictures> (development, the GPU-crash hunt; default 0): at a battle's start (Vita_InBattle) the next
    <pictures> pictures logged draw by draw (sLogFrames' lines). It also keeps the render thread from doing the swaps in
    those pictures (sFeAsync needs sLogFrames 0). With bt3.txt logsync=1 (vita_main.c) every line is written before the

@@ -2339,7 +2339,7 @@ static void read_settings(void) {
         } else if (strcmp(line, "tagtarget") == 0) { /* Tag Team's target choice until the player picks one (vita_gfx.c): 0 L3, 1 (default) the right stick, 2 the D-pad */
             extern int gVitaTagTargetDefault;
             gVitaTagTargetDefault = atoi(eq);
-        } else if (strcmp(line, "trainwait") == 0) { /* the online search's "Train While Waiting" (vita_tbo.c): 0 (default) hidden, 1 shown as on the PC */
+        } else if (strcmp(line, "trainwait") == 0) { /* the online search's "Train While Waiting" (vita_tbo.c): 1 (default) shown as on the PC, 0 hidden */
             extern int gVitaTrainWait;
             gVitaTrainWait = atoi(eq);
         } else if (strcmp(line, "tagui_scale") == 0) { /* the Tag Team screens' letters, percent of the PC's (vita_tbo.c): by default 100 with taguivita, 130 without */
@@ -2404,7 +2404,7 @@ static void read_settings(void) {
             gVitaFightLog = atoi(eq);
         } else if (strcmp(line, "logsync") == 0) { /* 1: no log thread, every line written at once (a crash keeps the last lines) */
             sLogSync = atoi(eq) != 0;
-        } else if (strcmp(line, "vglcirc") == 0) { /* vitaGL's circular pool (vita_vgl.c gVitaVglCirc): 0 (default) vitaGL's 32 MB, 1 12 KB (temporary data in blocks of their own, as before v1.4.1), 2 the soak's B battles */
+        } else if (strcmp(line, "vglcirc") == 0) { /* vitaGL's circular pool (vita_vgl.c gVitaVglCirc): 1 (default) 12 KB (temporary data in blocks of their own, as before v1.4.1), 0 vitaGL's 32 MB, 2 the soak's B battles */
             extern int gVitaVglCirc;
             gVitaVglCirc = atoi(eq);
         } else if (strcmp(line, "vglpool") == 0) { /* KB of vitaGL's immediate-mode pool (vita_vgl.c gVitaVglPoolKb; 16384 the old 16 MB) */

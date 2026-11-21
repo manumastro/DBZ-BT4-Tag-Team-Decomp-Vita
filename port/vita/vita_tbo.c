@@ -1749,10 +1749,10 @@ void Vita_TboFrameEnd(void) {
    reads them itself (the maker's job if it had begun one: waited for, at most 1.5 s; the screen keeps the match's last picture meanwhile) and the next pictures upload them whatever the
    budget. 0: as before. */
 int gVitaSessionWarm = 1;
-/* bt3.txt trainwait (default 0 since 2026-11-21): the online search's "Train While Waiting" entry (src/menu/port_tbo.c
+/* bt3.txt trainwait (default 1; 0 for the interim build of 2026-11-21): the online search's "Train While Waiting" entry (src/menu/port_tbo.c
    Tb_WaitUpdate). Its sparring fight (the World Tournament stage) ended in a graphics-chip crash at its start in the
-   developer's release candidate; 0 hides the entry until that crash is understood, 1 shows it as on the PC. */
-int gVitaTrainWait = 0;
+   developer's release candidate (vitaGL's circular pool: vglcirc, vita_vgl.c, fixed); 0 hides the entry, 1 shows it as on the PC. */
+int gVitaTrainWait = 1;
 void Vita_TboSessionKeep(void) {
     unsigned id, n = 0, nText = 0;
     for (id = 0; id < TBO_ART_COUNT; id++) {
