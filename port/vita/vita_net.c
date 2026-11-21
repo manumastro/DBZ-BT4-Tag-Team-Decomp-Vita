@@ -52,7 +52,8 @@ static int sPoolKb = 1024;
 
 /* 1 when bt3.txt names a server (online_server): without one the Vita has no online service (no sign-in, nickname,
    Quick Match, Ranked, room codes); the hub's matches by address still work (port_tbo.c, match_supabase.cpp) */
-int Vita_NetHasServer(void) { return sServer[0] != '\0'; }
+static int sNoServer; /* bt3.txt online_server=none: no service at all (matches by address only) */
+int Vita_NetHasServer(void) { return !sNoServer; }
 
 int gVitaNetRelaunch;      /* bt3.txt online_relaunch: a session from bt3.txt lines goes through the restart (vita_netglue.c) */
 int gVitaNetNeutralWanted; /* bt3.txt online_neutral: a session plays with the PC's neutral Vita Settings (vita_netglue.c) */
@@ -99,7 +100,8 @@ void Vita_NetSetting(const char *name, const char *value) {
     } else if (strcmp(name, "online_test") == 0) {
         gVitaOnlineTest = atoi(value);
     } else if (strcmp(name, "online_server") == 0) {
-        snprintf(sServer, sizeof(sServer), "%s", value);
+        sNoServer = strcmp(value, "none") == 0 || strcmp(value, "off") == 0 || strcmp(value, "0") == 0;
+        snprintf(sServer, sizeof(sServer), "%s", sNoServer ? "" : value);
     } else if (strcmp(name, "online_ca") == 0) {
         snprintf(sCa, sizeof(sCa), "%s", value);
     } else if (strcmp(name, "online_ssllock") == 0) { /* OpenSSL's locks: one recursive mutex (below) */
@@ -123,8 +125,10 @@ void Vita_NetSetting(const char *name, const char *value) {
 }
 
 /* the signaling client's server (cloudflare_signal.inc under PORT_VITA): online_server, or a name that never resolves */
-const char *Vita_NetHost(void) { return sHost[0] != '\0' ? sHost : "no-server.invalid"; }
-const char *Vita_NetUrl(void) { return sUrl[0] != '\0' ? sUrl : "https://no-server.invalid"; }
+/* NULL: BT4decomp's own service, as the PC (cloudflare_signal.inc BT4_CLOUDFLARE_HOST; the PC port's developer allowed
+   the Vita on it, 2026-11-21) */
+const char *Vita_NetHost(void) { return sHost[0] != '\0' ? sHost : sNoServer ? "no-server.invalid" : NULL; }
+const char *Vita_NetUrl(void) { return sUrl[0] != '\0' ? sUrl : sNoServer ? "https://no-server.invalid" : NULL; }
 
 #ifndef BT4_VITA_ONLINE
 /* ---- a build without the online part (the release, unless BT4_VITA_ONLINE=1) ---- */

@@ -7,12 +7,14 @@
 #define BT4_CLOUDFLARE_HOST "bt4-online-v5.mellamannau22.workers.dev"
 #endif
 #ifdef PORT_VITA
-/* PS Vita (port/vita/vita_net.c): the server is bt3.txt's online_server, read at run time; with none set, a name that
-   never resolves (the Vita's test builds never reach the default service by accident) */
+/* PS Vita (port/vita/vita_net.c): bt3.txt's online_server (a test server) if set, "none" for no service; otherwise
+   BT4decomp's own service, as the PC */
 extern "C" const char *Vita_NetHost(void);
 extern "C" const char *Vita_NetUrl(void);
-#define cloudHost Vita_NetHost()
-#define cloudUrl Vita_NetUrl()
+static const char *vitaCloudHost(){const char *h=Vita_NetHost();return h?h:BT4_CLOUDFLARE_HOST;}
+static const char *vitaCloudUrl(){const char *u=Vita_NetUrl();return u?u:"https://" BT4_CLOUDFLARE_HOST;}
+#define cloudHost vitaCloudHost()
+#define cloudUrl vitaCloudUrl()
 #else
 static constexpr const char *cloudHost=BT4_CLOUDFLARE_HOST;
 static constexpr const char *cloudUrl="https://" BT4_CLOUDFLARE_HOST;

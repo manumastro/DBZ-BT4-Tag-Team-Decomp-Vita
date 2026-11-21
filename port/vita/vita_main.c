@@ -2192,7 +2192,7 @@ static void read_settings(void) {
            (mode=demo, film=...): a game started from its bubble goes to its title screen, not into a test fight */
         if (strcmp(line, "disc") != 0 && strcmp(line, "heap") != 0 && strcmp(line, "wide") != 0 && strcmp(line, "report") != 0 &&
             strcmp(line, "fightres") != 0 && strcmp(line, "tagteam") != 0 && strcmp(line, "es_disc") != 0 && strcmp(line, "anime_music") != 0 &&
-            strcmp(line, "remap") != 0 && strncmp(line, "vbind_", 6) != 0) {
+            strcmp(line, "remap") != 0 && strncmp(line, "vbind_", 6) != 0 && strcmp(line, "online_server") != 0) {
             continue;
         }
 #endif
