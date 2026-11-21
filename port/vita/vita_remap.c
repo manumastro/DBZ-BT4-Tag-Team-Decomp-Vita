@@ -552,7 +552,7 @@ char *Vita_RemapExpand(const char *in, char *out, int size, int words) {
                 any = 1;
             }
             if (!any) {
-                o += snprintf(out + o, (size_t)(size - o), "%s", gVitaBt4English ? "None: Vita Guide > Vita Buttons" : "Ninguno: Guía Vita > Botones Vita");
+                o += snprintf(out + o, (size_t)(size - o), "%s", gVitaBt4English ? "None: Vita Guide > Controls > Vita Buttons" : "Ninguno: Guía Vita > Controles > Botones Vita");
             }
             in += 10;
             continue;
