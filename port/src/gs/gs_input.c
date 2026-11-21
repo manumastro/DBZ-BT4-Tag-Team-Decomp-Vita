@@ -1,3 +1,4 @@
+#include "../../../include/battle/emotes.h"
 /*
  * Controller input for the windowed PC build: fills the game's pad buffer (the libpad2 layout the game reads in
  * src/sys/pad.c) from the keyboard and from SDL gamepads, through bindings the settings window (ui.cpp) edits and
@@ -620,6 +621,20 @@ static SDL_Gamepad *pad_of(int player) {
     return NULL;
 }
 
+static SDL_AtomicInt sXboxGlyphs[2];
+
+int PortInput_XboxGlyphs(int player) {
+    extern int Port_Setting(const char *, int);
+    const int style = Port_Setting("pad_glyph_style", 0);
+    if (style == 1) return 0;
+    if (style == 2) return 1;
+    return player >= 0 && player < 2 && SDL_GetAtomicInt(&sXboxGlyphs[player]);
+}
+
+static int xbox_type(SDL_GamepadType type) {
+    return type == SDL_GAMEPAD_TYPE_XBOX360 || type == SDL_GAMEPAD_TYPE_XBOXONE;
+}
+
 /* BT3_PAD="frame:button,frame:button,...": scripted presses for player 1, each held for 4 frames from that frame
    (frame = the renderer's frame counter). Buttons: start select up down left right cross circle square triangle
    l1 r1 l2 r2. For tests without a person at the keyboard. */
@@ -1210,7 +1225,10 @@ int Port_PadRead(int socket, unsigned char *data) {
         sSwallow = held;
     }
     /* (the settings window is worked with the controller too while it is open: nothing of it for the game) */
-    g = gPortInputCapture || gPortOverlayOpen || sSwallow ? NULL : pad_of(socket);
+    g = pad_of(socket);
+    SDL_SetAtomicInt(&sXboxGlyphs[socket], g &&
+        (xbox_type(SDL_GetRealGamepadType(g)) || xbox_type(SDL_GetGamepadType(g))));
+    if (gPortInputCapture || gPortOverlayOpen || sSwallow) g = NULL;
     if (g != NULL) {
         for (a = 0; a < PORT_PAD_BUTTONS; a++) {
             int src = sPadBtn[socket][a];
@@ -1295,6 +1313,13 @@ int Port_PadRead(int socket, unsigned char *data) {
     data[0] = (unsigned char)(~btn & 0xFF);       /* active low */
     data[1] = (unsigned char)(~(btn >> 8) & 0xFF);
     data[2] = rx; data[3] = ry; data[4] = lx; data[5] = ly;
+    {
+        /* This byte travels in rollback histories and in spectator recordings. */
+        extern int Port_Setting(const char *, int);
+        extern int PortMods_InBattle(void);
+        const int emote = PortMods_InBattle() ? Port_Setting(BTL_EMOTE_SETTING, 0) : 0;
+        if (emote > 0 && emote <= BTL_EMOTE_COUNT) data[BTL_EMOTE_PAD_BYTE] = (unsigned char)emote;
+    }
     {
         extern int PortMods_InBattle(void), Port_TagBattleRenderActive(void);
         const int tag = Port_TagBattleRenderActive() && PortMods_InBattle() && !PortSpectator_ConsumesInput();
