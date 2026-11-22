@@ -2,58 +2,43 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
-## Unreleased
+## v1.5 (2026-11-22)
 
+- **Online play, first version (1 vs 1, Vita vs PC or Vita vs Vita)**: main menu > Tenkaichi Budokai Online, on
+  the PC port's own online service (upstream 0.1.39.6-R1.20, compatibility identity `sim18`): a nickname the first time,
+  Quick Match (114% competitive speed with Train While Waiting), Ranked (rival points and settlement banner), Create
+  Match (room code, public rooms, or by IP address), Join / Public Rooms, and Tournament (up to 32 players). Matches
+  run inside the running game (in-process snapshots with slabbed zero-run RLE and system-memory fallback, returning to
+  the lobby in ~120 ms with no restart). Online fights keep the Vita's offline Normal button layout (Ki Charge on L,
+  Guard/Dash on L2) without desyncing, use delay-only auto-delay with `p90` jitter coverage when hosting without
+  rollback, and keep full sound effects. `online_server=none` in `bt3.txt` turns the service off (matches by address
+  only). Tag Team online and voice chat are not on the Vita yet.
 - **Fixed: the game could close with "render gpu crash" at the start of a fight**, seen on the World Tournament stage
   (Online > Quick Match > Train While Waiting, and Tag Team 2 vs 2) in every build since v1.4.1. v1.4.1's freeze fix
   had made vitaGL keep each picture's temporary data in its circular pool; it is now in blocks of their own again,
-  as before v1.4.1 (`vglcirc=1`, the default; checked on the console).
-- **Online play, first version (1 vs 1, Vita vs PC or Vita vs Vita)**: main menu > Tenkaichi Budokai Online, on
-  the PC port's own online service (its developer allowed it): a nickname the first time, Quick Match, Ranked, Create
-  Match (room code or by IP address), Join, Tournament. The lobby, the rules and the match are the PC port's own, and
-  the matches run inside the game: after each one you are back in the lobby. `online_server=none` in bt3.txt turns
-  the service off (matches by address only). Tag Team online is not there yet.
-- **The main menu lists the online entry and the Vita Guide together** (the guide stays the last row, just above the
-  first).
-- **Every Vita-only control can now be changed** (`remap=1`, not yet run on the console): Vita Guide > Vita Buttons,
-  or Options > Controller > Vita Settings and START. Choose a SELECT + button pair for L2, R2, L3, R3, the Tag Team
-  Senzu Bean, fusion and undo-fusion, quitting the game and Unlock All, and the Tag target method; SQUARE twice puts
-  every default back. The guide, the pause page, the reminder line, the Tag Team legend and help lines always show
-  your current buttons. A SELECT + button pair no longer sends a stray SELECT press first.
-- **Tag Team target: the PC's default** (L3, the rear pad's lower-left quarter) for players who never chose one; pick
-  the right stick or the D-pad on Camera mode > Target selection or in Vita Buttons (`tagtarget=1` for the old
-  default).
-- **Vita Guide in the main menu** (`vitaguide=1`): everything about playing on the Vita,
-  in the game, in English or Spanish: the controls and the touch buttons, a full Tag Team guide (how to start, the
-  setup, targeting, revive, Senzu, fusion, the HUD), Unlock All, every Vita Settings option, the anime soundtrack, the
-  right game files and where they go, mods, what to send when something breaks, and what is not there yet. It is the
-  entry just above the first one when the main menu opens.
-- **Vita Controls in the pause menu**: the controls of the fight you are in (where L2, R2, L3 and R3 are now, and the
-  Tag Team controls in a Tag fight).
-- **A controls legend on the Tag Team setup page** ("In the fight": target, revive, Senzu, fusion).
-- **A short controls reminder at the bottom of the screen in your first 5 fights** (20 seconds each); pause > Vita
-  Controls, SQUARE, turns it on for good or off.
-- **The Tag Team fight's HUD drawn like the game's own** (`taghudvita=1`, not yet run on the console): your gauge is
-  now exactly the one of a normal 1 vs 1 fight (same size, same corner), the allies' gauges in proportion at the
-  bottom left, the game's own timer at the top, a sharp radar and target ring, and readable names and labels (before,
-  the gauges sat away from the corner and every word was squeezed to three quarters of its width). It also draws less
-  each frame.
-- **The Tag Team screens drawn like the game's own menus** (`taguivita=1`, not yet run on the console): the bars,
-  windows, buttons and logo are now made for the Vita's screen (sharp edges instead of soft ones), every word is
-  written at the exact size it is shown (no more blurry or grainy letters), the words have the PC's proportions again
-  (they no longer fill the bars), and the Tag Team screens keep about 4 MB less memory busy, 6 MB less during fights.
-- **Multiplayer, the start** (nothing a player sees yet): BT4decomp's online code brought to its latest public release
-  (0.1.39.6 R1.6: Ranked abandonment and results, sturdier sign-in); the Vita's network start-up and the PC's
-  float arithmetic (built, not run on the console); **Ad Hoc** (Vita to Vita without internet) started: the system's
-  group dialog and a first check between Vitas (`adhoc_test`, not run on the console yet); BT4decomp's online menus
-  and its 1 vs 1 network code built for the Vita (a separate development build, `online_menu`; matches cannot start yet).
-- **Multiplayer, next steps** (development build, all off by default, not run on the console yet): a session starts
-  by restarting the app with a session file, as the PC restarts its program; the online messages ("Connecting to your
-  rival...", a desync) drawn in the port screens' own window and letters (`online_line`); **Ad Hoc rooms** in the PC's
-  menus: Create Match > Connection "Ad Hoc" and Join > "AD HOC", a list of the rooms nearby, the PC's lobby and match
-  carried over Ad Hoc (`adhoc_menu`, needs two Vitas); in a session the Vita Settings that change the pad are neutral
-  (`online_neutral`) and a room's speed above 100 % is kept (`online_speed`); the waiting message over the held
-  picture (`online_hold`) and the players' names under the health bars (`online_names`).
+  as before v1.4.1 (`vglcirc=1`, default on; checked on the console).
+- **Fixed: online fight freeze (`Mods_WantCamera`)**, which froze fights on the Vita right after entering battle when
+  paired with PC R1.20.
+- **Vita Guide in the main menu** (`vitaguide=1`, English and Spanish): the entry just above the first one when the
+  main menu opens (listed together with Tenkaichi Budokai Online). Covers controls, touch corners, Tag Team (setup,
+  targeting, revive, Senzu Bean, fusion, HUD), Unlock All, Vita Settings, anime soundtrack, required game files, mods,
+  bug reporting, and known limits.
+- **Every Vita-only control can now be changed** (`remap=1`): Vita Guide > Vita Buttons, or Options > Controller >
+  Vita Settings and START. Choose a SELECT + button pair for L2, R2, L3, R3, the Tag Team Senzu Bean, fusion,
+  undo-fusion, quitting the game, and Unlock All, plus the Tag target method; SQUARE twice restores defaults. The
+  guide, pause > Vita Controls, the fight reminder line, and the Tag Team setup legend always show your current
+  buttons. A SELECT + button pair no longer sends a stray SELECT press first.
+- **Vita Controls in the pause menu & controls reminder**: pause > Vita Controls shows the controls for the fight you
+  are in (1 vs 1 or Tag Team), and a short reminder appears at the bottom of the screen during your first 5 fights
+  (toggleable for good with SQUARE on pause > Vita Controls).
+- **Tag Team fight HUD and screens remade for the Vita** (`taghudvita=1`, `taguivita=1`): sharp Vita-sized graphics
+  and fonts, your gauge in the same corner and size as a 1 vs 1 fight, readable names and timer, and 4-6 MB less
+  memory used. Tag Team target defaults to the PC's L3 (rear pad lower-left quarter), changeable in Camera mode >
+  Target selection or Vita Buttons (`tagtarget=1` for the old right-stick default).
+- **Smoother heavy stages and battles** (9 new renderer & CPU speed-ups enabled by default after console soak on
+  stages 4, 12, 15, 19: `splitms`, `fxbox`, `upneon`, `postskip`, `snapneon`, `vglcached`, `fxcull`, `vifneon`,
+  `pffast2`, plus `pffast` single-gate ps2float): render thread busy time -25%, GPU heavy-blend screens ~-6 ms,
+  stage 4 +1.7 fps (lows 10.1 -> 13.2), stage 15 lows 16.7 -> 20.4, stage 19 lows 18.5 -> 22.9.
 
 ## v1.4.1 (2026-11-18)
 
