@@ -1768,8 +1768,9 @@ static inline int splitms_off(void) {
     extern int gVitaAbSide;
     return gVitaSplitMs == 2 ? gVitaAbSide == 1 : gVitaSplitMs != 0;
 }
-/* bt3.txt vglcached: 1 calls vglUseCachedMem(GL_TRUE) before vglInit (cached vertex/uniform pools). Default 0. */
-int gVitaVglCached = 1;
+/* bt3.txt vglcached: 1 calls vglUseCachedMem(GL_TRUE) before vglInit (cached pools). Default 0:
+   on console, cached mem stalls glTexImage2D (vitaGL texture uploads jumped from 1-2 ms to 500-1999 ms/2s). */
+int gVitaVglCached = 0;
 /* bt3.txt postskip: skip game-side GS packets the renderer always drops (ObjOutline_Draw passes when native outline is on).
    0 off (default), 1 on, 2 soak B. */
 int gVitaPostSkip = 1;
