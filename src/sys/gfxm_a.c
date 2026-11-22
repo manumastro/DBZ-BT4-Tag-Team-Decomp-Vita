@@ -1454,6 +1454,20 @@ void ObjOutline_Draw(void) {
 #ifdef PORT
     Port_GsMarker(PORT_FX_OUTLINE); /* the GPU renderer draws the outline natively here and drops the passes below */
 #endif
+#ifdef PORT_VITA
+    {
+        extern int Vita_PostSkipOutline(void);
+        if (Vita_PostSkipOutline()) {
+            GfxPost_AddScreenFrame();
+            Gfx_ClearScreen(0xFFFFFF, 0);
+            Dma_AddZbuf(0xE0, 1);
+            Dma_AddColClamp(1);
+            GfxPost_AddXyOffset(0x7000, 0x7200);
+            Dma_AddFrame((gGfx.frame & 1) ? 0 : 0x70, 8, 0);
+            return;
+        }
+    }
+#endif
     Dma_AddData(gObjOutline->tex.upload, 0x10);
     Dma_AddTexFlush();
     GfxPost_ClearWork(GFXPOST_WORK_FBP, 0xFF000000);

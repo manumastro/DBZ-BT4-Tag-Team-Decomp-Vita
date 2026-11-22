@@ -105,8 +105,18 @@ static void tables_init(void) {
    A 256-byte block holds 8 x 8 pixels of 32 bits, 16 x 8 of 16, 16 x 16 of 8 or 32 x 16 of 4. An upload whose
    rectangle is made of whole blocks (nearly every texture) is a permutation of its bytes inside each block, which
    costs a fraction of one address computation per pixel. ---- */
+#include <arm_neon.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
+
+/* bt3.txt upneon: NEON 16-byte swizzled writes into sVram (32- and 16-bit blocks) and 4-way NEON block hashing.
+   0 off (default), 1 on, 2 in the soak's B battles, 3 on + bit-exact check of every NEON block write against C. */
+int gVitaUpNeon = 1;
+unsigned gVitaUpNeonN[4]; /* (the log) 32-bit NEON blocks, 16-bit NEON blocks, blk_content_id NEON, mode-3 mismatches */
+static inline int upneon_mode(void) {
+    extern int gVitaAbSide;
+    return gVitaUpNeon == 2 ? (gVitaAbSide == 1) : gVitaUpNeon == 3 ? 3 : gVitaUpNeon != 0;
+}
 
 /* The pixels of one block in the layout of format psm. */
 static void psm_block(uint32_t psm, uint32_t *w, uint32_t *h) {
@@ -121,9 +131,8 @@ static void psm_block(uint32_t psm, uint32_t *w, uint32_t *h) {
     }
 }
 
-/* Writes block b whole from rows of source pixels `stride` bytes apart (bits: 32, 16, 8, 4). */
-static void block_write(uint32_t b, int bits, const uint8_t *src, uint32_t stride) {
-    uint32_t *d = &sVram[(b & 0x3FFF) * 64], x, y;
+static void block_write_c(uint32_t *d, int bits, const uint8_t *src, uint32_t stride) {
+    uint32_t x, y;
     uint8_t *d8 = (uint8_t *)d;
     uint16_t *d16 = (uint16_t *)d;
 
@@ -159,6 +168,64 @@ static void block_write(uint32_t b, int bits, const uint8_t *src, uint32_t strid
         }
         break;
     }
+}
+
+static void block_write_neon32(uint32_t *d, const uint8_t *src, uint32_t stride) {
+    uint32_t y;
+    for (y = 0; y < 8; y += 2, src += stride * 2, d += 16) {
+        uint64x2_t a0 = vreinterpretq_u64_u8(vld1q_u8(src));
+        uint64x2_t a1 = vreinterpretq_u64_u8(vld1q_u8(src + 16));
+        uint64x2_t b0 = vreinterpretq_u64_u8(vld1q_u8(src + stride));
+        uint64x2_t b1 = vreinterpretq_u64_u8(vld1q_u8(src + stride + 16));
+        vst1q_u32(d + 0,  vreinterpretq_u32_u64(vcombine_u64(vget_low_u64(a0),  vget_low_u64(b0))));
+        vst1q_u32(d + 4,  vreinterpretq_u32_u64(vcombine_u64(vget_high_u64(a0), vget_high_u64(b0))));
+        vst1q_u32(d + 8,  vreinterpretq_u32_u64(vcombine_u64(vget_low_u64(a1),  vget_low_u64(b1))));
+        vst1q_u32(d + 12, vreinterpretq_u32_u64(vcombine_u64(vget_high_u64(a1), vget_high_u64(b1))));
+    }
+}
+
+static void block_write_neon16(uint16_t *d16, const uint8_t *src, uint32_t stride) {
+    uint32_t y;
+    for (y = 0; y < 8; y += 2, src += stride * 2, d16 += 32) {
+        uint16x8_t a_lo = vreinterpretq_u16_u8(vld1q_u8(src));
+        uint16x8_t a_hi = vreinterpretq_u16_u8(vld1q_u8(src + 16));
+        uint16x8_t b_lo = vreinterpretq_u16_u8(vld1q_u8(src + stride));
+        uint16x8_t b_hi = vreinterpretq_u16_u8(vld1q_u8(src + stride + 16));
+        uint16x8x2_t za = vzipq_u16(a_lo, a_hi);
+        uint16x8x2_t zb = vzipq_u16(b_lo, b_hi);
+        uint64x2_t a0 = vreinterpretq_u64_u16(za.val[0]);
+        uint64x2_t a1 = vreinterpretq_u64_u16(za.val[1]);
+        uint64x2_t b0 = vreinterpretq_u64_u16(zb.val[0]);
+        uint64x2_t b1 = vreinterpretq_u64_u16(zb.val[1]);
+        vst1q_u16(d16 + 0,  vreinterpretq_u16_u64(vcombine_u64(vget_low_u64(a0),  vget_low_u64(b0))));
+        vst1q_u16(d16 + 8,  vreinterpretq_u16_u64(vcombine_u64(vget_high_u64(a0), vget_high_u64(b0))));
+        vst1q_u16(d16 + 16, vreinterpretq_u16_u64(vcombine_u64(vget_low_u64(a1),  vget_low_u64(b1))));
+        vst1q_u16(d16 + 24, vreinterpretq_u16_u64(vcombine_u64(vget_high_u64(a1), vget_high_u64(b1))));
+    }
+}
+
+/* Writes block b whole from rows of source pixels `stride` bytes apart (bits: 32, 16, 8, 4). */
+static void block_write(uint32_t b, int bits, const uint8_t *src, uint32_t stride) {
+    uint32_t *d = &sVram[(b & 0x3FFF) * 64];
+    int mode = upneon_mode();
+    if (mode != 0 && (bits == 32 || bits == 16)) {
+        if (bits == 32) {
+            block_write_neon32(d, src, stride);
+            gVitaUpNeonN[0]++;
+        } else {
+            block_write_neon16((uint16_t *)d, src, stride);
+            gVitaUpNeonN[1]++;
+        }
+        if (mode == 3) {
+            uint32_t ref[64];
+            block_write_c(ref, bits, src, stride);
+            if (memcmp(d, ref, 256) != 0) {
+                gVitaUpNeonN[3]++;
+            }
+        }
+        return;
+    }
+    block_write_c(d, bits, src, stride);
 }
 
 uint64_t gGsMipTbp[4];   /* MIPTBP1_1, MIPTBP1_2, MIPTBP2_1, MIPTBP2_2 as last written */
@@ -211,6 +278,20 @@ static void blk_real(uint32_t b) {
 static uint32_t blk_content_id(uint32_t b) {
     const uint32_t *w = &sVram[b * 64];
     uint32_t h = 2166136261u, i;
+    if (upneon_mode() != 0) {
+        static const uint32_t kInit[4] = {2166136261u, 2654435761u, 2246822519u, 3266489917u};
+        uint32x4_t acc = vld1q_u32(kInit);
+        uint32x4_t mul = vdupq_n_u32(16777619u);
+        uint32_t lanes[4];
+        for (i = 0; i < 64; i += 4) {
+            acc = vmulq_u32(veorq_u32(acc, vld1q_u32(w + i)), mul);
+        }
+        vst1q_u32(lanes, acc);
+        h = lanes[0] ^ (lanes[1] * 0x27D4EB2Fu) ^ (lanes[2] * 0x165667B1u) ^ (lanes[3] * 0x9E3779B1u);
+        h ^= h >> 15;
+        gVitaUpNeonN[2]++;
+        return h;
+    }
     for (i = 0; i < 64; i++) {
         h = (h ^ w[i]) * 16777619u;
         h ^= h >> 15;
@@ -3066,6 +3147,15 @@ static inline int skipfast_now(void) {
     return gVitaGsSkip && (gVitaSkipFast == 2 ? gVitaAbSide == 1 : gVitaSkipFast != 0);
 }
 /* n packets of 7 quadwords at q (tag, register list, PRIM, TEX0, 3 x (RGBAQ, ST, XYZF2), NOP), the same PRIM and TEX0 */
+/* bt3.txt fxcull: early culling of invisible primitives in tri_run / spr_run before building vertices.
+   0 off (default), 1 on, 2 soak B, 3 check (count only, draw everything). */
+int gVitaFxCull = 1;
+unsigned gVitaFxCullN[4]; /* (the log) tri degen, tri alpha0/black, spr degen, spr outside scissor */
+static inline int fxcull_mode(void) {
+    extern int gVitaAbSide;
+    return gVitaFxCull == 2 ? (gVitaAbSide == 1) : gVitaFxCull == 3 ? 3 : gVitaFxCull != 0;
+}
+
 static void tri_run(const uint64_t *q, uint32_t n) {
     extern int gVitaGsSkip;
     extern void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri);
@@ -3074,6 +3164,8 @@ static void tri_run(const uint64_t *q, uint32_t n) {
     int ctx, type;
     float ox, oy;
     const int lean = skipfast_now();
+    const int cull = !lean && !gVitaGsSkip ? fxcull_mode() : 0;
+    int cullAlpha = 0, cullBlack = 0;
     gVitaTriRunN[0]++;
     gVitaTriRunN[1] += n;
     sStat[3] += n;
@@ -3081,6 +3173,22 @@ static void tri_run(const uint64_t *q, uint32_t n) {
     reg_write(texreg, q[3]);
     ctx = (int)((gs.prim >> 9) & 1);
     type = (int)(gs.prim & 7);
+    if (cull != 0 && type == 3) {
+        uint64_t al = gs.alpha[ctx], zb = gs.zbuf[ctx], fr = gs.frame[ctx], t0 = gs.tex0[ctx];
+        int abe = (int)((gs.prim >> 6) & 1), tme = (int)((gs.prim >> 4) & 1);
+        int zmask = (int)((zb >> 32) & 1); /* 1 = no depth write */
+        int fbmskA = (int)((fr >> 56) & 0xFF); /* 0xFF = alpha channel masked */
+        int tfx = (int)((t0 >> 35) & 3);
+        int al8 = (int)(al & 0xFF);
+        if (abe && zmask && fbmskA == 0xFF && (!tme || tfx != 1)) {
+            if (al8 == 0x44 || al8 == 0x48) { /* Cs*As + Cd*(1-As) or Cs*As + Cd */
+                cullAlpha = 1;
+            }
+            if (al8 == 0x48 || al8 == 0x42) { /* additive: Cs*As + Cd or Cs*FIX + Cd */
+                cullBlack = 1;
+            }
+        }
+    }
     if (type != 3) { /* (another kind of primitive: the GS's own way, vertex by vertex) */
         for (i = 0; i < n; i++, q += 14) {
             if (i > 0) {
@@ -3098,13 +3206,13 @@ static void tri_run(const uint64_t *q, uint32_t n) {
     ox = (float)(gs.xyoffset[ctx] & 0xFFFF);
     oy = (float)((gs.xyoffset[ctx] >> 32) & 0xFFFF);
     for (i = 0; i < n; i += 64) {
-        uint32_t m = n - i < 64 ? n - i : 64, c0 = 0, c1;
+        uint32_t m = n - i < 64 ? n - i : 64, out = 0, c0 = 0, c1;
         if (gVitaZoneOn & 1) {
             Vita_PmonGet(0, 31, &c0);
         }
         for (j = 0; j < m; j++) {
             const uint64_t *pk = q + 14 * (i + j);
-            GsVertex *v = &vb[3 * j];
+            GsVertex *v;
             if (i + j + 3 < n) { /* the packet three ahead on its way into the cache */
                 const char *ahead = (const char *)(pk + 14 * 3);
                 __builtin_prefetch(ahead);
@@ -3124,6 +3232,26 @@ static void tri_run(const uint64_t *q, uint32_t n) {
                 gVitaSkipFastN[0]++;
                 continue;
             }
+            if (cull != 0 && i + j + 1 != n) {
+                uint32_t xy0 = (uint32_t)pk[6], xy1 = (uint32_t)pk[9], xy2 = (uint32_t)pk[12];
+                if (xy0 == xy1 || xy0 == xy2 || xy1 == xy2) {
+                    gVitaFxCullN[0]++;
+                    if (cull != 3) {
+                        continue;
+                    }
+                } else if (cullAlpha && (((pk[4] | pk[7] | pk[10]) >> 24) & 0xFF) == 0) {
+                    gVitaFxCullN[1]++;
+                    if (cull != 3) {
+                        continue;
+                    }
+                } else if (cullBlack && ((pk[4] | pk[7] | pk[10]) & 0x00FFFFFFu) == 0) {
+                    gVitaFxCullN[1]++;
+                    if (cull != 3) {
+                        continue;
+                    }
+                }
+            }
+            v = &vb[3 * out++];
             for (k = 0; k < 3; k++) {
                 uint64_t c = pk[4 + 3 * k], st = pk[5 + 3 * k], xyz = pk[6 + 3 * k];
                 uint32_t qq = (uint32_t)(c >> 32), tt = (uint32_t)(st >> 32), ss = (uint32_t)st;
@@ -3143,8 +3271,8 @@ static void tri_run(const uint64_t *q, uint32_t n) {
             gVitaTriRunCyc[0] += c1 - c0;
             gVitaTriRunCyc[1] += m;
         }
-        if (!gVitaGsSkip) {
-            GsGpu_DrawTriRun(ctx, vb, m);
+        if (!gVitaGsSkip && out > 0) {
+            GsGpu_DrawTriRun(ctx, vb, out);
         }
     }
     q += 14 * (n - 1); /* (the registers as the last packet leaves them) */
@@ -3464,14 +3592,46 @@ static void spr_run(const uint64_t *d, uint32_t nl, int uvs) {
     if (!gVitaGsSkip) {
         gVitaSprRunN[0]++;
     }
+    const int cull = !gVitaGsSkip && !sSeamAny ? fxcull_mode() : 0;
+    const uint64_t sc = gs.scissor[ctx];
+    const float sx0 = (float)(sc & 0x7FF), sx1 = (float)((sc >> 16) & 0x7FF) + 1.0f;
+    const float sy0 = (float)((sc >> 32) & 0x7FF), sy1 = (float)((sc >> 48) & 0x7FF) + 1.0f;
+    GsVertex lastV[2];
     for (i = 0; i < nl; i += 64) {
-        uint32_t m = nl - i < 64 ? nl - i : 64;
+        uint32_t m = nl - i < 64 ? nl - i : 64, out = 0;
         for (j = 0; j < m; j++) {
             const uint64_t *pk = d + stride * (i + j);
+            GsVertex *v0, *v1;
+            if (cull != 0 && i + j + 1 != nl) {
+                uint64_t xyz0 = uvs ? pk[1] : pk[0], xyz1 = uvs ? pk[3] : pk[1];
+                uint32_t ix0 = (uint32_t)(xyz0 & 0xFFFF), iy0 = (uint32_t)((xyz0 >> 16) & 0xFFFF);
+                uint32_t ix1 = (uint32_t)(xyz1 & 0xFFFF), iy1 = (uint32_t)((xyz1 >> 16) & 0xFFFF);
+                if (ix0 == ix1 || iy0 == iy1) {
+                    if (uvs) { uv = pk[2]; }
+                    gVitaFxCullN[2]++;
+                    if (cull != 3) {
+                        continue;
+                    }
+                } else {
+                    float fx0 = ((float)(int)ix0 - ox) / 16.0f, fx1 = ((float)(int)ix1 - ox) / 16.0f;
+                    float fy0 = ((float)(int)iy0 - oy) / 16.0f, fy1 = ((float)(int)iy1 - oy) / 16.0f;
+                    if ((fx0 < sx0 && fx1 < sx0) || (fx0 >= sx1 && fx1 >= sx1) ||
+                        (fy0 < sy0 && fy1 < sy0) || (fy0 >= sy1 && fy1 >= sy1)) {
+                        if (uvs) { uv = pk[2]; }
+                        gVitaFxCullN[3]++;
+                        if (cull != 3) {
+                            continue;
+                        }
+                    }
+                }
+            }
+            v0 = &vb[2 * out];
+            v1 = &vb[2 * out + 1];
+            out++;
             for (k = 0; k < 2; k++) {
                 uint64_t xyz = uvs ? pk[2 * k + 1] : pk[k];
                 uint32_t x = (uint32_t)(xyz & 0xFFFF), y = (uint32_t)((xyz >> 16) & 0xFFFF), z = (uint32_t)(xyz >> 32);
-                GsVertex *v = &vb[2 * j + k];
+                GsVertex *v = k == 0 ? v0 : v1;
                 if (uvs) {
                     uv = pk[2 * k];
                 }
@@ -3491,14 +3651,18 @@ static void spr_run(const uint64_t *d, uint32_t nl, int uvs) {
                 v->u = (int)(uv & 0x3FFF);
                 v->v = (int)((uv >> 16) & 0x3FFF);
             }
+            if (i + j + 1 == nl) {
+                lastV[0] = *v0;
+                lastV[1] = *v1;
+            }
         }
-        if (!gVitaGsSkip) {
-            GsGpu_DrawSprRun(ctx, vb, m);
+        if (!gVitaGsSkip && out > 0) {
+            GsGpu_DrawSprRun(ctx, vb, out);
         }
     }
     gs.uv = uv; /* (the registers as the last sprite leaves them) */
-    gs.vtx[0] = vb[2 * ((nl - 1) % 64)];
-    gs.vtx[1] = vb[2 * ((nl - 1) % 64) + 1];
+    gs.vtx[0] = lastV[0];
+    gs.vtx[1] = lastV[1];
     sVtxSeam[0] = seam[0];
     sVtxSeam[1] = seam[1];
     gs.vcount = 0;
@@ -6691,6 +6855,32 @@ static struct { uint32_t addr, qwc, h, same; } sImgSeen[4096]; /* (same: lists i
 int gVitaSnapCut = 0;
 unsigned gVitaSnapCutN[4]; /* (the log) sums not made; of those (3) changed; calls not walked; images inside calls (3) */
 static int sSnapCutNow; /* (snap_make: this list's) */
+/* bt3.txt snapneon: 4-way NEON image summing in snap_make (game thread). 0 off (default), 1 on, 2 soak B, 3 check against C. */
+int gVitaSnapNeon = 1;
+unsigned gVitaSnapNeonN[3]; /* (the log) images summed in NEON, qwc summed, mode-3 decision mismatches */
+static inline int snapneon_mode(void) {
+    extern int gVitaAbSide;
+    return gVitaSnapNeon == 2 ? (gVitaAbSide == 1) : gVitaSnapNeon == 3 ? 3 : gVitaSnapNeon != 0;
+}
+static uint32_t img_sum_neon(const uint32_t *w, uint32_t words) {
+    static const uint32_t kInitA[4] = {0x9E3779B1u, 0x85EBCA6Bu, 0xC2B2AE35u, 0x27D4EB2Fu};
+    static const uint32_t kInitB[4] = {0x165667B1u, 0x9E3779B9u, 0x7F4A7C15u, 0x01000193u};
+    uint32x4_t va = vld1q_u32(kInitA);
+    uint32x4_t vb = vld1q_u32(kInitB);
+    uint32x4_t mul = vdupq_n_u32(0x01000193u);
+    uint32_t la[4], lb[4], i = 0;
+    for (; i + 8 <= words; i += 8) {
+        va = vaddq_u32(vmulq_u32(veorq_u32(va, vld1q_u32(w + i)), mul), vld1q_u32(w + i + 4));
+        vb = vmulq_u32(veorq_u32(vb, vld1q_u32(w + i + 4)), mul);
+    }
+    for (; i + 4 <= words; i += 4) {
+        va = vmulq_u32(veorq_u32(va, vld1q_u32(w + i)), mul);
+    }
+    vst1q_u32(la, va);
+    vst1q_u32(lb, vb);
+    return (la[0] ^ (la[1] * 0x27D4EB2Fu) ^ (la[2] * 0x165667B1u) ^ (la[3] * 0x85EBCA6Bu)) ^
+           ((lb[0] ^ (lb[1] * 0x9E3779B1u) ^ (lb[2] * 0xC2B2AE35u) ^ (lb[3] * 0x01000193u)) * 0x27D4EB2Fu);
+}
 static uint32_t img_sum(const uint32_t *w, uint32_t words) {
     uint32_t a = 0x9E3779B1u, b = 0x85EBCA6Bu, i;
     for (i = 0; i + 4 <= words; i += 4) {
@@ -6701,7 +6891,7 @@ static uint32_t img_sum(const uint32_t *w, uint32_t words) {
 }
 static int snap_img_changed(uint32_t addr, uint32_t qwc) {
     uint32_t h, k = ((addr >> 4) * 0x9E3779B1u) >> 20, t;
-    int skip;
+    int skip, snMode = snapneon_mode();
     for (t = 0; t < 8; t++, k = (k + 1) & 4095) {
         if (sImgSeen[k].addr == addr || sImgSeen[k].addr == 0) {
             break;
@@ -6717,7 +6907,25 @@ static int snap_img_changed(uint32_t addr, uint32_t qwc) {
             return 0; /* (long unchanged: read in place without its sum) */
         }
     }
-    h = img_sum((const uint32_t *)(uintptr_t)addr, qwc * 4);
+    if (snMode != 0) {
+        h = img_sum_neon((const uint32_t *)(uintptr_t)addr, qwc * 4);
+        gVitaSnapNeonN[0]++;
+        gVitaSnapNeonN[1] += qwc;
+        if (snMode == 3) {
+            uint32_t hc = img_sum((const uint32_t *)(uintptr_t)addr, qwc * 4);
+            /* in mode 3 keep C hash in sImgSeen so decision matches baseline, and verify NEON hash tracks changes */
+            static uint32_t sImgNeonH[4096];
+            int cSame = sImgSeen[k].addr == addr && sImgSeen[k].qwc == qwc && sImgSeen[k].h == hc;
+            int nSame = sImgSeen[k].addr == addr && sImgSeen[k].qwc == qwc && sImgNeonH[k] == h;
+            if (sImgSeen[k].addr == addr && sImgSeen[k].qwc == qwc && cSame != nSame) {
+                gVitaSnapNeonN[2]++;
+            }
+            sImgNeonH[k] = h;
+            h = hc;
+        }
+    } else {
+        h = img_sum((const uint32_t *)(uintptr_t)addr, qwc * 4);
+    }
     if (sImgSeen[k].addr == addr && sImgSeen[k].qwc == qwc && sImgSeen[k].h == h) {
         sImgSeen[k].same++;
         return 0;
