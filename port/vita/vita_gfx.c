@@ -528,8 +528,9 @@ int Port_PadRead(int socket, unsigned char *data) {
     if (socket == 0 && !ds) {
         extern int gVitaSimExact;
         extern int Port_NetSession(void);
+        extern void *gBtlSeq;
         extern int BtlSeq_IsFighting(void);
-        if (gVitaSimExact && Port_NetSession() && BtlSeq_IsFighting()) {
+        if (gVitaSimExact && Port_NetSession() && gBtlSeq != NULL && BtlSeq_IsFighting()) {
             unsigned l1 = (btn & B_L1) != 0, l2 = (btn & B_L2) != 0;
             btn = (btn & ~(B_L1 | B_L2)) | (l1 ? B_L2 : 0) | (l2 ? B_L1 : 0);
         }
