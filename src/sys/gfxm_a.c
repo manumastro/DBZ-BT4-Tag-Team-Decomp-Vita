@@ -1458,6 +1458,8 @@ void ObjOutline_Draw(void) {
     {
         extern int Vita_PostSkipOutline(void);
         if (Vita_PostSkipOutline()) {
+            GfxPost_AddScreenFrame();
+            Gfx_ClearScreen(0xFFFFFF, 0);
             Dma_AddZbuf(0xE0, 1);
             Dma_AddColClamp(1);
             GfxPost_AddXyOffset(0x7000, 0x7200);
