@@ -330,9 +330,11 @@ static int stream_ready(void) {
         SDL_AudioSpec spec;
 
         if (dev == 0) {
+#ifndef PORT_VITA
             if (GsGpu_Enabled() || gGsFrame > 2) {
                 sTried = 1; /* decided: no device */
             }
+#endif
             return 0;
         }
         sTried = 1;
@@ -343,6 +345,9 @@ static int stream_ready(void) {
         if (sStream != NULL) {
             SDL_SetAudioStreamGetCallback(sStream, mix, NULL);
             SDL_BindAudioStream(dev, sStream);
+#ifdef PORT_VITA
+            { extern void Vita_Log(const char *fmt, ...); Vita_Log("se: sound effects stream bound\n"); }
+#endif
         }
     }
     return sStream != NULL;
@@ -486,17 +491,6 @@ static void play(int mask, int id, int volume, int pan, int pitch, int handle,in
     if(actor>=0&&actor<10&&(slot==4||slot==5)&&sActorBanks[actor].set)bank=&sActorBanks[actor];
 
     if (slot < 0 || muted(slot, id, handle) || !bank->set || !lookup(bank, id, &start, &rate)) {
-#ifdef PORT_VITA
-        static int sDropLog = 0;
-        extern int Port_NetSession(void);
-        extern void Vita_Log(const char *fmt, ...);
-        if (Port_NetSession() && !gPortResim && sDropLog < 8) {
-            sDropLog++;
-            Vita_Log("se: drop slot=%d id=%d muted=%d set=%d ready=%d vol=%.2f\n",
-                     slot, id, slot >= 0 ? muted(slot, id, handle) : -1, bank ? bank->set : -1,
-                     sStream != NULL, slot >= 0 ? sBanks[slot].volume : -1.0f);
-        }
-#endif
         return;
     }
     for (k = 0; k < VOICES; k++) {
@@ -525,18 +519,6 @@ static void play(int mask, int id, int volume, int pan, int pitch, int handle,in
     v->on = 1;
     v->serial = ++sSerial;
     heard(slot, id, pick);
-#ifdef PORT_VITA
-    {
-        static int sPlayLog = 0;
-        extern int Port_NetSession(void);
-        extern void Vita_Log(const char *fmt, ...);
-        if (Port_NetSession() && sPlayLog < 6) {
-            sPlayLog++;
-            Vita_Log("se: play slot=%d id=%d vol=%d bvol=%.2f gl=%.3f gr=%.3f prox=%.2f gSe=%d gV=%d\n",
-                     slot, id, volume, sBanks[slot].volume, v->gl, v->gr, v->proximity, gPortSePercent, gPortVoicePercent);
-        }
-    }
-#endif
     if (getenv("BT3_SND_VERBOSE") != NULL) {
         fprintf(stderr, "se: play bank %d effect %d: %u Hz, volume %d, pan %d, pitch %d, handle %d\n", slot, id, rate, volume, pan, pitch, handle);
     }
