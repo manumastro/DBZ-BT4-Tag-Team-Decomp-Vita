@@ -2382,6 +2382,13 @@ static void net_start(int role, const char *host, const char *join) {
         fprintf(stderr, "bt4: net: adaptive timing: rtt_p50_ms=%d rtt_p90_ms=%d missed=%d/%d delay=%d rollback=%d\n",
                 sTimingQuality.median, sTimingQuality.p90, sTimingQuality.missed, sTimingQuality.sent, sDelay, sRollMax);
     }
+#ifdef PORT_VITA
+    {
+        extern void Vita_Log(const char *fmt, ...);
+        Vita_Log("net: timing: mode=%d relayed=%d rtt=%d speed=%d delay=%d roll=%d adaptive=%d\n",
+                 sMode, sFromLobby && Port_LobbyRelayed(), sSetupRtt, rules_speed(), sDelay, sRollMax, sAdaptive);
+    }
+#endif
     if (sMode != 3 && !sDataBad && !sFpHeard && fp_required()) {
         /* none has come: given a second more (it travels with the greetings, the pings and the host's choices, so
            only a copy that sends none at all should get here), then refused */

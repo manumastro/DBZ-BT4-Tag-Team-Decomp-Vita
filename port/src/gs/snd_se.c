@@ -525,6 +525,18 @@ static void play(int mask, int id, int volume, int pan, int pitch, int handle,in
     v->on = 1;
     v->serial = ++sSerial;
     heard(slot, id, pick);
+#ifdef PORT_VITA
+    {
+        static int sPlayLog = 0;
+        extern int Port_NetSession(void);
+        extern void Vita_Log(const char *fmt, ...);
+        if (Port_NetSession() && sPlayLog < 6) {
+            sPlayLog++;
+            Vita_Log("se: play slot=%d id=%d vol=%d bvol=%.2f gl=%.3f gr=%.3f prox=%.2f gSe=%d gV=%d\n",
+                     slot, id, volume, sBanks[slot].volume, v->gl, v->gr, v->proximity, gPortSePercent, gPortVoicePercent);
+        }
+    }
+#endif
     if (getenv("BT3_SND_VERBOSE") != NULL) {
         fprintf(stderr, "se: play bank %d effect %d: %u Hz, volume %d, pan %d, pitch %d, handle %d\n", slot, id, rate, volume, pan, pitch, handle);
     }

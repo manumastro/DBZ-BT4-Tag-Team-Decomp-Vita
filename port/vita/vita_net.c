@@ -57,7 +57,7 @@ int Vita_NetHasServer(void) { return !sNoServer; }
 
 int gVitaNetRelaunch;      /* bt3.txt online_relaunch: a session from bt3.txt lines goes through the restart (vita_netglue.c) */
 int gVitaNetNeutralWanted; /* bt3.txt online_neutral: a session plays with the PC's neutral Vita Settings (vita_netglue.c) */
-int gVitaNetSpeedOn;       /* bt3.txt online_speed: a session's speed above 100 % paced (vita_netglue.c) */
+int gVitaNetSpeedOn = 1;   /* bt3.txt online_speed: a session's speed above 100 % paced (vita_netglue.c; 1 for Quick Match 114%) */
 /* bt3.txt session_inproc: 0 sessions restart the application (vita_netglue.c), 1 sessions inside the running game,
    3 measure only (vita_session.c, network builds); session_test / session_leave / session_again: its test without a
    network (blank to ask at, blanks to stay, blanks to the next) */
