@@ -35,10 +35,9 @@ The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/
   and fonts, your gauge in the same corner and size as a 1 vs 1 fight, readable names and timer, and 4-6 MB less
   memory used. Tag Team target defaults to the PC's L3 (rear pad lower-left quarter), changeable in Camera mode >
   Target selection or Vita Buttons (`tagtarget=1` for the old right-stick default).
-- **Smoother heavy stages and battles** (8 new renderer & CPU speed-ups enabled by default after console soak on
-  stages 4, 12, 15, 19: `splitms`, `fxbox`, `upneon`, `postskip`, `snapneon`, `fxcull`, `vifneon`, `pffast2`, plus
-  `pffast` single-gate ps2float): render thread busy time -25%, GPU heavy-blend screens ~-6 ms (`vglcached` reverted
-  to default 0 after console logs showed `vglUseCachedMem(GL_TRUE)` stalled `glTexImage2D` from 1-2 ms to 500-1999 ms).
+- **Smoother heavy stages and battles** (6 new CPU/NEON speed-ups enabled by default: `upneon`, `postskip`,
+  `snapneon`, `fxcull`, `vifneon`, `pffast2`, plus `pffast` single-gate ps2float; `vglcached`, `splitms`, and `fxbox`
+  kept off by default to preserve smooth 1v1 GPU frame-pacing and fast texture creation).
 
 ## v1.4.1 (2026-11-18)
 

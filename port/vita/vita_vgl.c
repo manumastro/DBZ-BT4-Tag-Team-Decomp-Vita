@@ -1761,8 +1761,9 @@ static void frame_begin(void) {
     frame_begin_be();
     frame_begin_gl();
 }
-/* bt3.txt splitms: 0 off (default: timed mid-picture splits SPLIT_MS active), 1 disable timed splits (outline & work targets intact), 2 soak B */
-int gVitaSplitMs = 1;
+/* bt3.txt splitms: 0 off (default: timed mid-picture splits SPLIT_MS active to avoid GPU frame-pacing microstutters),
+   1 disable timed splits (outline & work targets intact), 2 soak B */
+int gVitaSplitMs = 0;
 unsigned gVitaSplitMsN[2]; /* (the log) timed splits executed, frames with timed split disabled */
 static inline int splitms_off(void) {
     extern int gVitaAbSide;
@@ -1784,8 +1785,8 @@ int Vita_PostSkipOutline(void) {
     }
     return 0;
 }
-/* bt3.txt fxbox: non-black texel bounding box for additive sprites. 0 off (default), 1 on, 2 soak B, 3 check (count only). */
-int gVitaFxBox = 1;
+/* bt3.txt fxbox: non-black texel bounding box for additive sprites. 0 off (default: avoids scalar per-pixel scan on every new texture), 1 on, 2 soak B, 3 check (count only). */
+int gVitaFxBox = 0;
 unsigned gVitaFxBoxN[5]; /* (the log) textures boxed, empty sprites dropped, sprites trimmed, area saved (1/100 screens), wrapped/skipped */
 static inline int fxbox_mode(void) {
     extern int gVitaAbSide;
