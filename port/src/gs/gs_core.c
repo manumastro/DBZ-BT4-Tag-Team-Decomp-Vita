@@ -111,7 +111,7 @@ static void tables_init(void) {
 
 /* bt3.txt upneon: NEON 16-byte swizzled writes into sVram (32- and 16-bit blocks) and 4-way NEON block hashing.
    0 off (default), 1 on, 2 in the soak's B battles, 3 on + bit-exact check of every NEON block write against C. */
-int gVitaUpNeon = 0;
+int gVitaUpNeon = 1;
 unsigned gVitaUpNeonN[4]; /* (the log) 32-bit NEON blocks, 16-bit NEON blocks, blk_content_id NEON, mode-3 mismatches */
 static inline int upneon_mode(void) {
     extern int gVitaAbSide;
@@ -3149,7 +3149,7 @@ static inline int skipfast_now(void) {
 /* n packets of 7 quadwords at q (tag, register list, PRIM, TEX0, 3 x (RGBAQ, ST, XYZF2), NOP), the same PRIM and TEX0 */
 /* bt3.txt fxcull: early culling of invisible primitives in tri_run / spr_run before building vertices.
    0 off (default), 1 on, 2 soak B, 3 check (count only, draw everything). */
-int gVitaFxCull = 0;
+int gVitaFxCull = 1;
 unsigned gVitaFxCullN[4]; /* (the log) tri degen, tri alpha0/black, spr degen, spr outside scissor */
 static inline int fxcull_mode(void) {
     extern int gVitaAbSide;
@@ -6856,7 +6856,7 @@ int gVitaSnapCut = 0;
 unsigned gVitaSnapCutN[4]; /* (the log) sums not made; of those (3) changed; calls not walked; images inside calls (3) */
 static int sSnapCutNow; /* (snap_make: this list's) */
 /* bt3.txt snapneon: 4-way NEON image summing in snap_make (game thread). 0 off (default), 1 on, 2 soak B, 3 check against C. */
-int gVitaSnapNeon = 0;
+int gVitaSnapNeon = 1;
 unsigned gVitaSnapNeonN[3]; /* (the log) images summed in NEON, qwc summed, mode-3 decision mismatches */
 static inline int snapneon_mode(void) {
     extern int gVitaAbSide;

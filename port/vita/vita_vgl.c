@@ -1762,17 +1762,17 @@ static void frame_begin(void) {
     frame_begin_gl();
 }
 /* bt3.txt splitms: 0 off (default: timed mid-picture splits SPLIT_MS active), 1 disable timed splits (outline & work targets intact), 2 soak B */
-int gVitaSplitMs = 0;
+int gVitaSplitMs = 1;
 unsigned gVitaSplitMsN[2]; /* (the log) timed splits executed, frames with timed split disabled */
 static inline int splitms_off(void) {
     extern int gVitaAbSide;
     return gVitaSplitMs == 2 ? gVitaAbSide == 1 : gVitaSplitMs != 0;
 }
 /* bt3.txt vglcached: 1 calls vglUseCachedMem(GL_TRUE) before vglInit (cached vertex/uniform pools). Default 0. */
-int gVitaVglCached = 0;
+int gVitaVglCached = 1;
 /* bt3.txt postskip: skip game-side GS packets the renderer always drops (ObjOutline_Draw passes when native outline is on).
    0 off (default), 1 on, 2 soak B. */
-int gVitaPostSkip = 0;
+int gVitaPostSkip = 1;
 unsigned gVitaPostSkipN[2]; /* (the log) outline passes skipped */
 int Vita_PostSkipOutline(void) {
     extern int gVitaAbSide;
@@ -1784,7 +1784,7 @@ int Vita_PostSkipOutline(void) {
     return 0;
 }
 /* bt3.txt fxbox: non-black texel bounding box for additive sprites. 0 off (default), 1 on, 2 soak B, 3 check (count only). */
-int gVitaFxBox = 0;
+int gVitaFxBox = 1;
 unsigned gVitaFxBoxN[5]; /* (the log) textures boxed, empty sprites dropped, sprites trimmed, area saved (1/100 screens), wrapped/skipped */
 static inline int fxbox_mode(void) {
     extern int gVitaAbSide;

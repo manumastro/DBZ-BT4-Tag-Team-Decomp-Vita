@@ -205,7 +205,7 @@ static const uint8_t *vview(uint32_t a, uint32_t n, int *stable) {
 #include <arm_neon.h>
 /* bt3.txt vifneon: ARM NEON UNPACK for hot V4-32, V4-16, V4-8 formats + prefetch.
    0 off (default), 1 on, 2 soak B, 3 check (bit-exact compare against C). */
-int gVitaVifNeon = 0;
+int gVitaVifNeon = 1;
 unsigned gVitaVifNeonN[4]; /* (the log) V4-32 vecs, V4-16 vecs, V4-8 vecs, mode-3 mismatches */
 static inline int vifneon_mode(void) {
     extern int gVitaAbSide;
