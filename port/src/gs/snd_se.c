@@ -486,6 +486,17 @@ static void play(int mask, int id, int volume, int pan, int pitch, int handle,in
     if(actor>=0&&actor<10&&(slot==4||slot==5)&&sActorBanks[actor].set)bank=&sActorBanks[actor];
 
     if (slot < 0 || muted(slot, id, handle) || !bank->set || !lookup(bank, id, &start, &rate)) {
+#ifdef PORT_VITA
+        static int sDropLog = 0;
+        extern int Port_NetSession(void);
+        extern void Vita_Log(const char *fmt, ...);
+        if (Port_NetSession() && !gPortResim && sDropLog < 8) {
+            sDropLog++;
+            Vita_Log("se: drop slot=%d id=%d muted=%d set=%d ready=%d vol=%.2f\n",
+                     slot, id, slot >= 0 ? muted(slot, id, handle) : -1, bank ? bank->set : -1,
+                     sStream != NULL, slot >= 0 ? sBanks[slot].volume : -1.0f);
+        }
+#endif
         return;
     }
     for (k = 0; k < VOICES; k++) {

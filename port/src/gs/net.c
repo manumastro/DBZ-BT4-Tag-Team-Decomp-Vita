@@ -2309,6 +2309,13 @@ static void net_start(int role, const char *host, const char *join) {
             sDelay = settings.delay;
             sRollMax = settings.rollback;
             sSetupRtt = sTimingQuality.median;
+#ifdef PORT_VITA
+            if (!Port_RollCan()) {
+                sDelay = settings.delay + settings.rollback;
+                if (sDelay > 12) { sDelay = 12; }
+                sRollMax = 0;
+            }
+#endif
         } else if (sAutoDelay) {
             sSetupRtt = NetTiming_Summarize(&sTimingProbes).median;
             sDelay = auto_delay(sSetupRtt, relayed, sRollMax);
