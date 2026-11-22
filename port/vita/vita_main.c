@@ -1492,6 +1492,35 @@ void Vita_VBlank(unsigned vblanks) {
                         memset(gVitaTexContN, 0, sizeof(gVitaTexContN));
                     }
                     {
+                        extern int gVitaSplitMs, gVitaFxBox, gVitaUpNeon, gVitaPostSkip, gVitaSnapNeon, gVitaVglCached;
+                        extern unsigned gVitaSplitMsN[2], gVitaFxBoxN[5], gVitaUpNeonN[4], gVitaPostSkipN[2], gVitaSnapNeonN[3];
+                        if (gVitaSplitMs != 0) {
+                            logf_("vita:   splitms: %u timed splits executed, %u frames with timed split disabled\n",
+                                  gVitaSplitMsN[0], gVitaSplitMsN[1]);
+                        }
+                        if (gVitaFxBox != 0) {
+                            logf_("vita:   fxbox: %u textures boxed, %u empty sprites dropped, %u trimmed, %u.%02u screens saved, %u wrapped/skipped\n",
+                                  gVitaFxBoxN[0], gVitaFxBoxN[1], gVitaFxBoxN[2], gVitaFxBoxN[3] / 100u, gVitaFxBoxN[3] % 100u, gVitaFxBoxN[4]);
+                        }
+                        if (gVitaUpNeon != 0) {
+                            logf_("vita:   upneon: %u 32-bit blocks, %u 16-bit blocks, %u blk_content_id in NEON; check mismatches: %u\n",
+                                  gVitaUpNeonN[0], gVitaUpNeonN[1], gVitaUpNeonN[2], gVitaUpNeonN[3]);
+                        }
+                        if (gVitaPostSkip != 0) {
+                            logf_("vita:   postskip: %u outline passes skipped\n", gVitaPostSkipN[0]);
+                        }
+                        if (gVitaSnapNeon != 0) {
+                            logf_("vita:   snapneon: %u images (%u qwc) summed in NEON; check mismatches: %u\n",
+                                  gVitaSnapNeonN[0], gVitaSnapNeonN[1], gVitaSnapNeonN[2]);
+                        }
+                        (void)gVitaVglCached;
+                        memset(gVitaSplitMsN, 0, sizeof(gVitaSplitMsN));
+                        memset(gVitaFxBoxN, 0, sizeof(gVitaFxBoxN));
+                        memset(gVitaUpNeonN, 0, sizeof(gVitaUpNeonN));
+                        memset(gVitaPostSkipN, 0, sizeof(gVitaPostSkipN));
+                        memset(gVitaSnapNeonN, 0, sizeof(gVitaSnapNeonN));
+                    }
+                    {
                         extern unsigned gVitaDpBusyL[2], gVitaSilGateN[2], gVitaSkipCcN[1], gVitaWtSigN[2], gVitaRtKickN[1];
                         logf_("vita:   kept parts not recorded (their place another's in use): %u; given their second place (dpways): %u | shadow-page strips held back (silgate): %u, gone through %u\n",
                               gVitaDpBusyL[0], gVitaDpBusyL[1], gVitaSilGateN[0], gVitaSilGateN[1]);
@@ -2440,6 +2469,24 @@ static void read_settings(void) {
         } else if (strcmp(line, "texcont") == 0) { /* a texture found by its contents wherever GS memory holds them: 0 off, 1 on, 2 soak B */
             extern int gVitaTexCont;
             gVitaTexCont = atoi(eq);
+        } else if (strcmp(line, "splitms") == 0) { /* disable timed mid-picture splits (SPLIT_MS), keeping outline & work targets: 0 off (default), 1 on, 2 soak B */
+            extern int gVitaSplitMs;
+            gVitaSplitMs = atoi(eq);
+        } else if (strcmp(line, "fxbox") == 0) { /* non-black texel bounding box for additive sprites: 0 off (default), 1 on, 2 soak B, 3 check */
+            extern int gVitaFxBox;
+            gVitaFxBox = atoi(eq);
+        } else if (strcmp(line, "upneon") == 0) { /* NEON 16-byte swizzled sVram block writes & block hash: 0 off (default), 1 on, 2 soak B, 3 check */
+            extern int gVitaUpNeon;
+            gVitaUpNeon = atoi(eq);
+        } else if (strcmp(line, "postskip") == 0) { /* skip game-side GS packets always dropped by native passes (ObjOutline_Draw): 0 off (default), 1 on, 2 soak B */
+            extern int gVitaPostSkip;
+            gVitaPostSkip = atoi(eq);
+        } else if (strcmp(line, "snapneon") == 0) { /* 4-way NEON image summing in snap_make (game thread): 0 off (default), 1 on, 2 soak B, 3 check */
+            extern int gVitaSnapNeon;
+            gVitaSnapNeon = atoi(eq);
+        } else if (strcmp(line, "vglcached") == 0) { /* vglUseCachedMem(GL_TRUE) before vglInit: 0 off (default), 1 on */
+            extern int gVitaVglCached;
+            gVitaVglCached = atoi(eq) != 0;
         } else if (strcmp(line, "stl4") == 0) { /* the state of the call before for four register sets: 0 off, 1 on, 2 soak B, 3 a check */
             extern int gVitaStL4;
             gVitaStL4 = atoi(eq);

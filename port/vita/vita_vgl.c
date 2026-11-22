@@ -198,6 +198,8 @@ typedef struct Tex {
     GLuint id;
     int16_t pi, pp; /* a texture with a palette: its indices and its palette (below), or -1 */
     uint8_t amin, amax; /* (for the log: its alpha, least and most, as the shader gets it: 0x80 = 1) */
+    uint8_t fx_has, fx_empty; /* (bt3.txt fxbox) non-black texel bounding box computed; 1 if all texels have RGB == 0 */
+    float fxu0, fxv0, fxu1, fxv1; /* (fxbox) normalized [0..1] box of non-black texels, inset/padded by 1 texel */
 } Tex;
 /* a test (below, GsGpu_FrameEnd): the change in effect for the list being drawn: 0 none, 1 the fighters' TEST.DATE
    off, 2 every TEST.DATE off, 3 the fighters' strips the batches' way, 4 every texture made again */
@@ -1759,10 +1761,107 @@ static void frame_begin(void) {
     frame_begin_be();
     frame_begin_gl();
 }
+/* bt3.txt splitms: 0 off (default: timed mid-picture splits SPLIT_MS active), 1 disable timed splits (outline & work targets intact), 2 soak B */
+int gVitaSplitMs = 0;
+unsigned gVitaSplitMsN[2]; /* (the log) timed splits executed, frames with timed split disabled */
+static inline int splitms_off(void) {
+    extern int gVitaAbSide;
+    return gVitaSplitMs == 2 ? gVitaAbSide == 1 : gVitaSplitMs != 0;
+}
+/* bt3.txt vglcached: 1 calls vglUseCachedMem(GL_TRUE) before vglInit (cached vertex/uniform pools). Default 0. */
+int gVitaVglCached = 0;
+/* bt3.txt postskip: skip game-side GS packets the renderer always drops (ObjOutline_Draw passes when native outline is on).
+   0 off (default), 1 on, 2 soak B. */
+int gVitaPostSkip = 0;
+unsigned gVitaPostSkipN[2]; /* (the log) outline passes skipped */
+int Vita_PostSkipOutline(void) {
+    extern int gVitaAbSide;
+    int on = gVitaPostSkip == 2 ? gVitaAbSide == 1 : gVitaPostSkip != 0;
+    if (on && vgl_bt3_split_on && !(gVglSafe & 128)) {
+        gVitaPostSkipN[0]++;
+        return 1;
+    }
+    return 0;
+}
+/* bt3.txt fxbox: non-black texel bounding box for additive sprites. 0 off (default), 1 on, 2 soak B, 3 check (count only). */
+int gVitaFxBox = 0;
+unsigned gVitaFxBoxN[5]; /* (the log) textures boxed, empty sprites dropped, sprites trimmed, area saved (1/100 screens), wrapped/skipped */
+static inline int fxbox_mode(void) {
+    extern int gVitaAbSide;
+    return gVitaFxBox == 2 ? (gVitaAbSide == 1) : gVitaFxBox == 3 ? 3 : gVitaFxBox != 0;
+}
+static void tex_fxbox_finish(Tex *t, uint32_t tw, uint32_t th, uint32_t minx, uint32_t miny, uint32_t maxx, uint32_t maxy, int any) {
+    t->fx_has = 1;
+    if (!any) {
+        t->fx_empty = 1;
+        t->fxu0 = t->fxv0 = t->fxu1 = t->fxv1 = 0.0f;
+    } else {
+        /* pad by 1 texel on each side for bilinear filtering */
+        uint32_t x0 = minx > 0 ? minx - 1 : 0;
+        uint32_t y0 = miny > 0 ? miny - 1 : 0;
+        uint32_t x1 = maxx + 2 < tw ? maxx + 2 : tw;
+        uint32_t y1 = maxy + 2 < th ? maxy + 2 : th;
+        t->fx_empty = 0;
+        t->fxu0 = (float)x0 / (float)tw;
+        t->fxv0 = (float)y0 / (float)th;
+        t->fxu1 = (float)x1 / (float)tw;
+        t->fxv1 = (float)y1 / (float)th;
+    }
+    gVitaFxBoxN[0]++;
+}
+static void tex_fxbox_pal(Tex *t, const uint8_t *idx, const uint32_t *pal, uint32_t tw, uint32_t th) {
+    uint8_t nb[256];
+    uint32_t i, x, y, minx = tw, miny = th, maxx = 0, maxy = 0;
+    int any = 0;
+    for (i = 0; i < 256; i++) {
+        nb[i] = (pal[i] & 0x00FFFFFFu) != 0 ? 1 : 0;
+    }
+    for (y = 0; y < th; y++) {
+        const uint8_t *row = idx + y * tw;
+        for (x = 0; x < tw; x++) {
+            if (nb[row[x]]) {
+                if (!any) { minx = maxx = x; miny = maxy = y; any = 1; }
+                else {
+                    if (x < minx) { minx = x; }
+                    if (x > maxx) { maxx = x; }
+                    if (y < miny) { miny = y; }
+                    if (y > maxy) { maxy = y; }
+                }
+            }
+        }
+    }
+    tex_fxbox_finish(t, tw, th, minx, miny, maxx, maxy, any);
+}
+static void tex_fxbox_rgba(Tex *t, const uint32_t *px, uint32_t tw, uint32_t th) {
+    uint32_t x, y, minx = tw, miny = th, maxx = 0, maxy = 0;
+    int any = 0;
+    for (y = 0; y < th; y++) {
+        const uint32_t *row = px + y * tw;
+        for (x = 0; x < tw; x++) {
+            if ((row[x] & 0x00FFFFFFu) != 0) {
+                if (!any) { minx = maxx = x; miny = maxy = y; any = 1; }
+                else {
+                    if (x < minx) { minx = x; }
+                    if (x > maxx) { maxx = x; }
+                    if (y < miny) { miny = y; }
+                    if (y > maxy) { maxy = y; }
+                }
+            }
+        }
+    }
+    tex_fxbox_finish(t, tw, th, minx, miny, maxx, maxy, any);
+}
 static void frame_begin_gl(void) {
     target_set(0);
     sSplitN = 0;
-    sSplitAt = vgl_bt3_split_on ? sceKernelGetProcessTimeWide() + SPLIT_MS * 1000ull : 0;
+    if (vgl_bt3_split_on && !splitms_off()) {
+        sSplitAt = sceKernelGetProcessTimeWide() + SPLIT_MS * 1000ull;
+    } else {
+        sSplitAt = 0;
+        if (vgl_bt3_split_on) {
+            gVitaSplitMsN[1]++;
+        }
+    }
     GLC_RESET();
     glDisable(GL_SCISSOR_TEST);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -1838,6 +1937,9 @@ int GsGpu_Init(void) {
             extern int gVitaAbSide;
             if (gVitaVglCirc == 1 || (gVitaVglCirc == 2 && gVitaAbSide == 1)) {
                 vglSetCircularPoolSize(3 * 4096); /* (below vglpool: overrun at every picture's first scene) */
+            }
+            if (gVitaVglCached != 0) {
+                vglUseCachedMem(GL_TRUE);
             }
         }
         vglInitWithCustomThreshold(gVitaVglPoolKb * 1024, gVitaMenuHi ? SCR_W_MENU : SCR_W_FIGHT, gVitaMenuHi ? SCR_H_MENU : SCR_H_FIGHT, 0x1800000,
@@ -2881,6 +2983,11 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
             t->pp = (int16_t)pp;
             t->amin = 0; /* (a test's alpha range: no longer looked at, the palette lies in the chip's memory) */
             t->amax = 255;
+            t->fx_has = 0;
+            t->fx_empty = 0;
+            if (gVitaFxBox != 0 && sIdxT[pi].data != NULL && sPalT[pp].data != NULL) {
+                tex_fxbox_pal(t, (const uint8_t *)sIdxT[pi].data, (const uint32_t *)sPalT[pp].data, tw, th);
+            }
             sIdxT[pi].refs++;
             sPalT[pp].refs++;
             if (texrt_on() && sRtOn && sTexNamesN == 0) {
@@ -2975,6 +3082,11 @@ static GLuint texture_get_k_(uint64_t t0raw, uint64_t texa) {
     t->pi = t->pp = -1;
     t->amin = 0; /* (a test's alpha range: no longer worked out) */
     t->amax = 255;
+    t->fx_has = 0;
+    t->fx_empty = 0;
+    if (gVitaFxBox != 0) {
+        tex_fxbox_rgba(t, px, tw, th);
+    }
     {
         static unsigned made;
         if (made < 24 || made % 100 == 0) { /* (a line in the log costs more than the texture) */
@@ -3350,6 +3462,7 @@ static void flush_run(const FlushIn *in) {
         if (sSplitAt != 0 && w0 >= sSplitAt) { /* the picture so far to the chip */
             if (vglSplitScene()) {
                 sSplitPics += sSplitN == 0;
+                gVitaSplitMsN[0]++;
                 GLC_RESET(); /* (the state as vitaGL has it is kept; the port's copy is set again anyway) */
             }
             sSplitAt = ++sSplitN < SPLIT_MAX ? w0 + SPLIT_MS * 1000ull : 0;
@@ -6005,11 +6118,63 @@ page_draw:
     if (type == 6) { /* sprite: two corners; colour, depth and Q of the second vertex */
         const GsVertex *a = &v[0], *b = &v[1];
         float s0 = fst ? s[0] : s[0] / q[1], s1 = fst ? s[1] : s[1] / q[1], t0s = fst ? t[0] : t[0] / q[1], t1 = fst ? t[1] : t[1] / q[1];
-        if (sTexXf && xs[1] != xs[0] && b->y != a->y) {
+        float x0 = xs[0], x1 = xs[1], y0 = a->y, y1 = b->y;
+        {
+            int fbm = fxbox_mode();
+            if (fbm != 0 && d.target == 0 && d.tme && !sTexXf && d.blend && d.eq == 0 && d.dst == 1 && d.src < 4 &&
+                !d.zwrite && !d.date && d.sop == 0 && !d.fba && !(d.mask & 8) &&
+                sLast != NULL && sLast->id == d.tex && sLast->fx_has) {
+                if (sLast->fx_empty) {
+                    float a0 = fabsf((x1 - x0) * (y1 - y0));
+                    gVitaFxBoxN[1]++;
+                    gVitaFxBoxN[3] += (unsigned)(a0 * (100.0f / (512.0f * 448.0f)));
+                    if (fbm != 3) {
+                        return;
+                    }
+                } else if (s0 >= 0.0f && s0 <= 1.0f && s1 >= 0.0f && s1 <= 1.0f &&
+                           t0s >= 0.0f && t0s <= 1.0f && t1 >= 0.0f && t1 <= 1.0f &&
+                           s0 != s1 && t0s != t1) {
+                    float slo = s0 < s1 ? s0 : s1, shi = s0 < s1 ? s1 : s0;
+                    float tlo = t0s < t1 ? t0s : t1, thi = t0s < t1 ? t1 : t0s;
+                    float nslo = slo > sLast->fxu0 ? slo : sLast->fxu0;
+                    float nshi = shi < sLast->fxu1 ? shi : sLast->fxu1;
+                    float ntlo = tlo > sLast->fxv0 ? tlo : sLast->fxv0;
+                    float nthi = thi < sLast->fxv1 ? thi : sLast->fxv1;
+                    if (nslo >= nshi || ntlo >= nthi) {
+                        float a0 = fabsf((x1 - x0) * (y1 - y0));
+                        gVitaFxBoxN[1]++;
+                        gVitaFxBoxN[3] += (unsigned)(a0 * (100.0f / (512.0f * 448.0f)));
+                        if (fbm != 3) {
+                            return;
+                        }
+                    } else if (nslo > slo || nshi < shi || ntlo > tlo || nthi < thi) {
+                        float ds = s1 - s0, dt = t1 - t0s;
+                        float ns0 = s0 < s1 ? nslo : nshi, ns1 = s0 < s1 ? nshi : nslo;
+                        float nt0 = t0s < t1 ? ntlo : nthi, nt1 = t0s < t1 ? nthi : ntlo;
+                        float nx0 = x0 + (x1 - x0) * ((ns0 - s0) / ds);
+                        float nx1 = x0 + (x1 - x0) * ((ns1 - s0) / ds);
+                        float ny0 = y0 + (y1 - y0) * ((nt0 - t0s) / dt);
+                        float ny1 = y0 + (y1 - y0) * ((nt1 - t0s) / dt);
+                        float a0 = fabsf((x1 - x0) * (y1 - y0)), a1 = fabsf((nx1 - nx0) * (ny1 - ny0));
+                        gVitaFxBoxN[2]++;
+                        if (a0 > a1) {
+                            gVitaFxBoxN[3] += (unsigned)((a0 - a1) * (100.0f / (512.0f * 448.0f)));
+                        }
+                        if (fbm != 3) {
+                            x0 = nx0; x1 = nx1; y0 = ny0; y1 = ny1;
+                            s0 = ns0; s1 = ns1; t0s = nt0; t1 = nt1;
+                        }
+                    }
+                } else {
+                    gVitaFxBoxN[4]++;
+                }
+            }
+        }
+        if (sTexXf && x1 != x0 && y1 != y0) {
             /* (as gs_gpu.c) the GS takes a texel at a whole pixel's position, the chip at its middle: half a
                pixel later. Between pictures drawn here that is not cosmetic: the glow's blur steps sample a texel apart
                on purpose and would move the picture by a texel a step instead of blurring it */
-            float ds = 0.5f * (s1 - s0) / (xs[1] - xs[0]), dt = 0.5f * (t1 - t0s) / (b->y - a->y);
+            float ds = 0.5f * (s1 - s0) / (x1 - x0), dt = 0.5f * (t1 - t0s) / (y1 - y0);
             s0 -= ds; s1 -= ds; t0s -= dt; t1 -= dt;
         } else if (gVitaSprInset && d.tme && d.linear && !d.pad_[0] && !sTexXf) {
             /* A filtered sprite of an uploaded picture: the GS takes the texels at its pixels x0 .. x1 - 1
@@ -6025,8 +6190,8 @@ page_draw:
                its y and T on y and T, the rest on the second vertex (Q 1 at all four), so the six are the six put
                would make */
             V *o = &sVerts[sVertCount];
-            put_i(b, xs[0], a->y, s0, t0s, 1.0f, b, zmax);
-            put_i(b, xs[1], b->y, s1, t1, 1.0f, b, zmax);
+            put_i(b, x0, y0, s0, t0s, 1.0f, b, zmax);
+            put_i(b, x1, y1, s1, t1, 1.0f, b, zmax);
             o[4] = o[1];
             o[1] = o[0];
             o[1].x = o[4].x;
