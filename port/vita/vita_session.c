@@ -197,13 +197,18 @@ static void regions_init(void) {
 }
 
 /* ---- snapshots ---- */
+#define SLAB_SZ (256u * 1024u)
+#define MAX_SLABS 256
+
+typedef struct Slab { uint8_t *base; SceUID uid; } Slab;
 typedef struct SPart { uint8_t *at; uint32_t n; VitaBlock *blk; uint32_t first; int base; } SPart; /* first: its first piece */
 typedef struct Snap {
     SPart *part;
     int parts;
-    uint8_t **pg;                 /* per piece: NULL all zero, SAME as the base's, else its copy */
+    uint8_t **pg;                 /* per piece: NULL all zero, SAME as the base's, else 2-byte len + RLE/raw data */
     uint32_t pieces;
-    uint8_t *pool;                /* the copies */
+    Slab slabs[MAX_SLABS];
+    uint32_t nSlabs, sysSlabs, slabPos, poolBytes;
     uint8_t *stackAt, *stackCopy;
     uint32_t stackN;
     uint32_t ctx[28] __attribute__((aligned(8)));
@@ -211,6 +216,92 @@ typedef struct Snap {
     uint32_t nZero, nSame, nStored, blocks, blockBytes, us;
     int taken;
 } Snap;
+
+static uint32_t rle_pack(const uint8_t *src, uint32_t n, uint8_t *dst) {
+    uint32_t i = 0, o = 0;
+    while (i < n) {
+        if (src[i] == 0) {
+            uint32_t run = 1;
+            while (i + run < n && src[i + run] == 0 && run < 128) {
+                run++;
+            }
+            dst[o++] = (uint8_t)(run - 1);
+            i += run;
+        } else {
+            uint32_t run = 1;
+            while (i + run < n && run < 128) {
+                if (src[i + run] == 0 && i + run + 1 < n && src[i + run + 1] == 0) {
+                    break;
+                }
+                run++;
+            }
+            dst[o++] = (uint8_t)(0x80u | (run - 1));
+            memcpy(dst + o, src + i, run);
+            o += run;
+            i += run;
+        }
+    }
+    return o;
+}
+
+static void rle_unpack(const uint8_t *src, uint8_t *dst, uint32_t n) {
+    uint32_t len = (uint32_t)src[0] | ((uint32_t)src[1] << 8);
+    if (len == 0) {
+        memcpy(dst, src + 2, n);
+        return;
+    }
+    {
+        const uint8_t *p = src + 2, *end = p + len;
+        uint32_t o = 0;
+        while (p < end && o < n) {
+            uint8_t tag = *p++;
+            uint32_t run = (uint32_t)(tag & 0x7Fu) + 1u;
+            if (run > n - o) {
+                run = n - o;
+            }
+            if ((tag & 0x80u) == 0) {
+                memset(dst + o, 0, run);
+            } else {
+                memcpy(dst + o, p, run);
+                p += run;
+            }
+            o += run;
+        }
+    }
+}
+
+static uint8_t *slab_alloc(Snap *s, uint32_t need) {
+    if (s->nSlabs == 0 || s->slabPos + need > SLAB_SZ) {
+        uint8_t *p;
+        SceUID uid = -1;
+        if (s->nSlabs >= MAX_SLABS) {
+            return NULL;
+        }
+        p = malloc(SLAB_SZ);
+        if (p == NULL) {
+            void *base = NULL;
+            uid = sceKernelAllocMemBlock("bt4_snap", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, SLAB_SZ, NULL);
+            if (uid < 0 || sceKernelGetMemBlockBase(uid, &base) < 0 || base == NULL) {
+                if (uid >= 0) {
+                    sceKernelFreeMemBlock(uid);
+                }
+                return NULL;
+            }
+            p = (uint8_t *)base;
+            s->sysSlabs++;
+        }
+        s->slabs[s->nSlabs].base = p;
+        s->slabs[s->nSlabs].uid = uid;
+        s->nSlabs++;
+        s->slabPos = 0;
+    }
+    {
+        uint8_t *ret = s->slabs[s->nSlabs - 1].base + s->slabPos;
+        s->slabPos += need;
+        s->poolBytes += need;
+        return ret;
+    }
+}
 
 static int is_zero(const uint8_t *p, uint32_t n) {
     const uint32_t *w = (const uint32_t *)p;
@@ -243,7 +334,13 @@ static void snap_free(Snap *s) {
     block_unlock();
     free(s->part);
     free(s->pg);
-    free(s->pool);
+    for (k = 0; k < (int)s->nSlabs; k++) {
+        if (s->slabs[k].uid >= 0) {
+            sceKernelFreeMemBlock(s->slabs[k].uid);
+        } else {
+            free(s->slabs[k].base);
+        }
+    }
     free(s->stackCopy);
     memset(s, 0, sizeof(*s));
 }
@@ -313,13 +410,11 @@ static int snap_memory(Snap *s, Snap *base) {
     }
     s->pieces = pieces;
     s->pg = calloc(pieces, sizeof(uint8_t *));
-    cls = malloc(pieces);
-    if (s->pg == NULL || cls == NULL) {
-        free(cls);
+    if (s->pg == NULL) {
         snap_free(s);
         return -1;
     }
-    /* which pieces need a copy */
+    /* store changed pieces in 256 KB slabs with zero-run RLE (falls back to system memory if C heap is full) */
     for (k = 0; k < s->parts; k++) {
         const SPart *p = &s->part[k];
         for (j = 0; j * CH < p->n; j++) {
@@ -328,40 +423,41 @@ static int snap_memory(Snap *s, Snap *base) {
             uint8_t c;
             if (base != NULL && p->base >= 0) {
                 bq = base_piece(s, k, j);
-                c = (bq == NULL ? is_zero(m, n) : memcmp(m, bq, n) == 0) ? 1 : 2; /* 1: as the base */
+                if (bq == NULL) {
+                    c = is_zero(m, n) ? 1 : 2;
+                } else {
+                    uint8_t bbuf[CH];
+                    rle_unpack(bq, bbuf, n);
+                    c = memcmp(m, bbuf, n) == 0 ? 1 : 2;
+                }
             } else {
                 c = is_zero(m, n) ? 0 : 2;
             }
-            cls[p->first + j] = c;
-            stored += c == 2;
-        }
-    }
-    s->pool = stored != 0 ? malloc((size_t)stored * CH) : NULL;
-    if (stored != 0 && s->pool == NULL) {
-        free(cls);
-        snap_free(s);
-        return -1;
-    }
-    stored = 0;
-    for (k = 0; k < s->parts; k++) {
-        const SPart *p = &s->part[k];
-        for (j = 0; j * CH < p->n; j++) {
-            uint32_t n = p->n - j * CH < CH ? p->n - j * CH : CH;
-            uint8_t c = cls[p->first + j];
             if (c == 0) {
                 s->nZero++;
             } else if (c == 1) {
                 s->pg[p->first + j] = base_piece(s, k, j) == NULL ? NULL : SAME;
                 s->nSame++;
             } else {
-                uint8_t *q = s->pool + (size_t)stored++ * CH;
-                memcpy(q, p->at + j * CH, n);
+                uint8_t tmp[CH + 64];
+                uint32_t plen = rle_pack(m, n, tmp);
+                uint32_t pay = plen < n ? plen : n;
+                uint16_t hdr = plen < n ? (uint16_t)plen : 0;
+                uint8_t *q = slab_alloc(s, 2u + pay);
+                if (q == NULL) {
+                    snap_free(s);
+                    return -1;
+                }
+                q[0] = (uint8_t)(hdr & 0xFFu);
+                q[1] = (uint8_t)(hdr >> 8);
+                memcpy(q + 2, hdr != 0 ? tmp : m, pay);
                 s->pg[p->first + j] = q;
                 s->nStored++;
             }
         }
     }
-    free(cls);
+    (void)stored;
+    (void)cls;
     s->us = (uint32_t)(sceKernelGetProcessTimeWide() - t0);
     return 0;
 }
@@ -409,7 +505,7 @@ static void loader(void) {
             if (q == NULL) {
                 memset(p->at + j * CH, 0, n);
             } else {
-                memcpy(p->at + j * CH, q, n);
+                rle_unpack(q, p->at + j * CH, n);
             }
         }
     }
@@ -477,9 +573,10 @@ static void free_mem(unsigned *userKb, unsigned *cHeapKb) {
 static void snap_say(const char *what, const Snap *s) {
     unsigned user, cheap;
     free_mem(&user, &cheap);
-    Vita_Log("session: %s at blank %u: %u pieces of 4 KB (%u zero, %u as at the start, %u stored = %u KB), %u blocks outside "
+    Vita_Log("session: %s at blank %u: %u pieces of 4 KB (%u zero, %u as at the start, %u stored = %u KB -> %u KB in %u slabs, %u sys), %u blocks outside "
              "the heap (%u KB, %u kept for a snapshot), stack %u KB; %u.%03u ms; free: C heap %u KB, system %u KB\n",
-             what, gPortVBlanks, s->pieces, s->nZero, s->nSame, s->nStored, s->nStored * (CH >> 10), s->blocks, s->blockBytes >> 10,
+             what, gPortVBlanks, s->pieces, s->nZero, s->nSame, s->nStored, s->nStored * (CH >> 10), s->poolBytes >> 10,
+             s->nSlabs, s->sysSlabs, s->blocks, s->blockBytes >> 10,
              sBlockDead, s->stackN >> 10, s->us / 1000, s->us % 1000, cheap, user);
 }
 
