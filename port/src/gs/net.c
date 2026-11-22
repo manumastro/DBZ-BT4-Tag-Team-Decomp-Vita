@@ -3127,6 +3127,9 @@ void Port_NetBeginTick(unsigned tick) {
         ranked_outcome(tick);
         return;
     }
+#ifdef PORT_VITA
+    gPortResim = 0; /* warp_tick() set gPortResim = 1; delay-only path never cleared it, muting all SE in snd_se.c */
+#endif
     sample_local(tick);
     if (sLagMs != 0) {
         SDL_Delay((Uint32)sLagMs); /* (a crude stand-in for a slow line: everything this copy sends is late) */
