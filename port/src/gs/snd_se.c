@@ -812,3 +812,21 @@ int sceSifCallRpc(void *client, int fno, int mode, void *send, int sendSize, voi
     if (sStream != NULL) { SDL_UnlockAudioStream(sStream); }
     return 0;
 }
+
+#ifdef PORT_VITA
+/* Stop stale SE voices and clear paused/zero-volume bank state across an in-process session exchange. */
+void Port_SeResync(void) {
+    int i;
+    if (sStream != NULL) { SDL_LockAudioStream(sStream); }
+    for (i = 0; i < VOICES; i++) {
+        sVoices[i].on = 0;
+    }
+    for (i = 0; i < 8; i++) {
+        sBanks[i].paused = 0;
+        if (sBanks[i].volume == 0.0f) {
+            sBanks[i].volume = 1.0f;
+        }
+    }
+    if (sStream != NULL) { SDL_UnlockAudioStream(sStream); }
+}
+#endif

@@ -522,6 +522,18 @@ int Port_PadRead(int socket, unsigned char *data) {
         extern unsigned Vita_TouchPad(void);
         btn |= Vita_TouchPad();
     }
+    /* Online sessions run Save_PortKeys with kConsole (PC default: L2 = Ki Charge, L1 = Guard/Dash) for determinism,
+       whereas offline Vita uses kNormal (L1 = Ki Charge, L2 = Guard/Dash). Swap L1 <-> L2 on the handheld pad during
+       an online fight (before net.c sends it) so the player keeps Vita Normal controls with zero desync. */
+    if (socket == 0 && !ds) {
+        extern int gVitaSimExact;
+        extern int Port_NetSession(void);
+        extern int BtlSeq_IsFighting(void);
+        if (gVitaSimExact && Port_NetSession() && BtlSeq_IsFighting()) {
+            unsigned l1 = (btn & B_L1) != 0, l2 = (btn & B_L2) != 0;
+            btn = (btn & ~(B_L1 | B_L2)) | (l1 ? B_L2 : 0) | (l2 ? B_L1 : 0);
+        }
+    }
     clash_pad(socket, &btn, pad.lx, pad.ly);
     stick_shape(&pad.lx, &pad.ly);
     stick_shape(&pad.rx, &pad.ry);

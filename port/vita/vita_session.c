@@ -632,6 +632,7 @@ static void conditions(int on) {
 /* ---- the session ---- */
 extern void Gs_StateKeep(void), Gs_StateBack(void);                       /* gs_core.c (PORT_VITA) */
 extern void Port_AdxResync(void);                                         /* snd_adx.c */
+extern void Port_SeResync(void);                                          /* snd_se.c */
 extern void Port_NetSessionBegin(int role, const char *address, int port); /* net.c */
 extern void Port_NetSessionEnd(void);
 
@@ -713,6 +714,7 @@ void Port_SessionPoll(void) {
         }
         /* a session begins: this is the game's first blank again */
         Port_AdxResync();
+        Port_SeResync();
         Vita_Log("session: the game starts again for the session (%u ms after it was asked for)\n",
                  (unsigned)((sceKernelGetProcessTimeWide() - sT0) / 1000));
         sBegan = 1;
@@ -789,6 +791,7 @@ void Port_SessionPoll(void) {
             conditions(0);
             Gs_StateBack();
             Port_AdxResync();
+            Port_SeResync();
             snap_free(&sOwn);
             {
                 extern void Vita_TboSessionBack(void); /* vita_tbo.c (session_warm): those pictures read again now */
