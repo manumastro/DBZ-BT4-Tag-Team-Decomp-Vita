@@ -390,6 +390,7 @@ int Port_PresentationSplitDrawing(int change) { return 0; }
 int Port_PresentationSplitActor(int pane) { return pane != 0; }
 /* (port/src/gs/mods.c) */
 int Mods_SplitScreen(void) { return 0; }
+int Mods_WantCamera(void) { return 0; }
 int Port_ModernHudActive(void) { return 0; }
 /* (the PC's Tag Team menu's film: Port_TagMenuMovieBegin is in port/vita/vita_tagmovie.c) */
 
