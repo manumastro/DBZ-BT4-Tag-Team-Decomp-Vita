@@ -1513,6 +1513,20 @@ void Vita_VBlank(unsigned vblanks) {
                             logf_("vita:   snapneon: %u images (%u qwc) summed in NEON; check mismatches: %u\n",
                                   gVitaSnapNeonN[0], gVitaSnapNeonN[1], gVitaSnapNeonN[2]);
                         }
+                        {
+                            extern int gVitaFxCull, gVitaVifNeon;
+                            extern unsigned gVitaFxCullN[4], gVitaVifNeonN[4];
+                            if (gVitaFxCull != 0) {
+                                logf_("vita:   fxcull: %u tri degen, %u tri alpha0/black, %u spr degen, %u spr outside scissor\n",
+                                      gVitaFxCullN[0], gVitaFxCullN[1], gVitaFxCullN[2], gVitaFxCullN[3]);
+                            }
+                            if (gVitaVifNeon != 0) {
+                                logf_("vita:   vifneon: %u V4-32, %u V4-16, %u V4-8 vecs in NEON; check mismatches: %u\n",
+                                      gVitaVifNeonN[0], gVitaVifNeonN[1], gVitaVifNeonN[2], gVitaVifNeonN[3]);
+                            }
+                            memset(gVitaFxCullN, 0, sizeof(gVitaFxCullN));
+                            memset(gVitaVifNeonN, 0, sizeof(gVitaVifNeonN));
+                        }
                         (void)gVitaVglCached;
                         memset(gVitaSplitMsN, 0, sizeof(gVitaSplitMsN));
                         memset(gVitaFxBoxN, 0, sizeof(gVitaFxBoxN));
@@ -2487,6 +2501,15 @@ static void read_settings(void) {
         } else if (strcmp(line, "vglcached") == 0) { /* vglUseCachedMem(GL_TRUE) before vglInit: 0 off (default), 1 on */
             extern int gVitaVglCached;
             gVitaVglCached = atoi(eq) != 0;
+        } else if (strcmp(line, "fxcull") == 0) { /* early culling of invisible primitives in tri_run/spr_run: 0 off (default), 1 on, 2 soak B, 3 check */
+            extern int gVitaFxCull;
+            gVitaFxCull = atoi(eq);
+        } else if (strcmp(line, "vifneon") == 0) { /* ARM NEON UNPACK for V4-32/V4-16/V4-8 + prefetch: 0 off (default), 1 on, 2 soak B, 3 check */
+            extern int gVitaVifNeon;
+            gVitaVifNeon = atoi(eq);
+        } else if (strcmp(line, "pffast2") == 0) { /* skip per-op diagnostic counter in vita_ps2float_a.S when ps2float=1: 0 off (default), 1 on */
+            extern int gVitaPfFast2;
+            gVitaPfFast2 = atoi(eq) != 0;
         } else if (strcmp(line, "stl4") == 0) { /* the state of the call before for four register sets: 0 off, 1 on, 2 soak B, 3 a check */
             extern int gVitaStL4;
             gVitaStL4 = atoi(eq);

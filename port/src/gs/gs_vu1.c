@@ -201,6 +201,18 @@ static const uint8_t *vview(uint32_t a, uint32_t n, int *stable) {
 }
 #endif
 
+#ifdef PORT_VITA
+#include <arm_neon.h>
+/* bt3.txt vifneon: ARM NEON UNPACK for hot V4-32, V4-16, V4-8 formats + prefetch.
+   0 off (default), 1 on, 2 soak B, 3 check (bit-exact compare against C). */
+int gVitaVifNeon = 0;
+unsigned gVitaVifNeonN[4]; /* (the log) V4-32 vecs, V4-16 vecs, V4-8 vecs, mode-3 mismatches */
+static inline int vifneon_mode(void) {
+    extern int gVitaAbSide;
+    return gVitaVifNeon == 2 ? (gVitaAbSide == 1) : gVitaVifNeon == 3 ? 3 : gVitaVifNeon != 0;
+}
+#endif
+
 /* Words of data an UNPACK command with these parameters is followed by. */
 uint32_t GsVu1_UnpackWords(uint32_t cmd, uint32_t num) {
     uint32_t vn = (cmd >> 2) & 3, vl = cmd & 3, n = num ? num : 256;
@@ -249,6 +261,27 @@ __attribute__((hot)) void GsVu1_Unpack(uint32_t cmd, uint32_t num, uint32_t imm,
                     lz_settle(a0, span, 0);
                 }
             }
+            {
+                int vnm = wl == cl && words == 4 && (addr & 0x3FF) + n <= 1024 ? vifneon_mode() : 0;
+                if (vnm != 0) {
+                    uint32_t *o = (uint32_t *)(void *)&vu.mem[(addr & 0x3FF) * 16];
+                    for (k = 0; k + 2 <= n; k += 2, src += 32, o += 8) {
+                        __builtin_prefetch(src + 64);
+                        vst1q_u32(o,     vreinterpretq_u32_u8(vld1q_u8(src)));
+                        vst1q_u32(o + 4, vreinterpretq_u32_u8(vld1q_u8(src + 16)));
+                    }
+                    if (k < n) {
+                        vst1q_u32(o, vreinterpretq_u32_u8(vld1q_u8(src)));
+                        src += 16;
+                    }
+                    gVitaVifNeonN[0] += n;
+                    if (vnm == 3 && memcmp(&vu.mem[(addr & 0x3FF) * 16], data, n * 16) != 0) {
+                        gVitaVifNeonN[3]++;
+                    }
+                    gVitaUnpack[0] += n;
+                    return;
+                }
+            }
             for (k = 0; k < n; k++) {
                 uint32_t *o = (uint32_t *)(void *)&vu.mem[(addr & 0x3FF) * 16];
                 if (words == 4) {
@@ -290,6 +323,62 @@ __attribute__((hot)) void GsVu1_Unpack(uint32_t cmd, uint32_t num, uint32_t imm,
             }
             return;
         }
+#ifdef PORT_VITA
+        if (comps == 4 && (vl == 1 || vl == 2) && (addr & 0x3FF) + n <= 1024) {
+            int vnm = vifneon_mode();
+            if (vnm != 0) {
+                uint32_t *o = (uint32_t *)(void *)&vu.mem[(addr & 0x3FF) * 16];
+                const uint8_t *s0 = src;
+                if (vl == 1) {
+                    for (k = 0; k < n; k++, src += 8, o += 4) {
+                        __builtin_prefetch(src + 64);
+                        uint8x8_t raw = vld1_u8(src);
+                        uint32x4_t v = usn ? vmovl_u16(vreinterpret_u16_u8(raw))
+                                           : vreinterpretq_u32_s32(vmovl_s16(vreinterpret_s16_u8(raw)));
+                        vst1q_u32(o, v);
+                    }
+                    gVitaVifNeonN[1] += n;
+                } else {
+                    for (k = 0; k < n; k++, src += 4, o += 4) {
+                        uint32_t w;
+                        uint8x8_t raw;
+                        uint32x4_t v;
+                        __builtin_prefetch(src + 64);
+                        memcpy(&w, src, 4);
+                        raw = vreinterpret_u8_u32(vdup_n_u32(w));
+                        v = usn ? vmovl_u16(vget_low_u16(vmovl_u8(raw)))
+                                : vreinterpretq_u32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vreinterpret_s8_u8(raw)))));
+                        vst1q_u32(o, v);
+                    }
+                    gVitaVifNeonN[2] += n;
+                }
+                if (vnm == 3) {
+                    const uint8_t *sp = s0;
+                    uint32_t *op = (uint32_t *)(void *)&vu.mem[(addr & 0x3FF) * 16];
+                    for (k = 0; k < n; k++, op += 4) {
+                        uint32_t ref[4];
+                        if (vl == 1) {
+                            for (c = 0; c < 4; c++) {
+                                uint16_t w;
+                                memcpy(&w, sp + c * 2, 2);
+                                ref[c] = usn ? (uint32_t)w : (uint32_t)(int32_t)(int16_t)w;
+                            }
+                            sp += 8;
+                        } else {
+                            for (c = 0; c < 4; c++) {
+                                ref[c] = usn ? (uint32_t)sp[c] : (uint32_t)(int32_t)(int8_t)sp[c];
+                            }
+                            sp += 4;
+                        }
+                        if (memcmp(op, ref, 16) != 0) {
+                            gVitaVifNeonN[3]++;
+                        }
+                    }
+                }
+                return;
+            }
+        }
+#endif
         for (k = 0; k < n; k++) {
             uint32_t out[4] = {0, 0, 0, 0};
             if (vl == 0) {

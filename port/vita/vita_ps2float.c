@@ -28,6 +28,7 @@ int gVitaPfFast = 1;          /* bt3.txt pffast (default 1 since the console run
                                  ps2float is 0 (ps2float.py's gate: no call of the entry points, offline play at the
                                  default build's speed); 0 every operation through the entry points as before */
 int gVitaPfGate = 1;          /* what the pieces look at: 0 their own instruction, anything else the entry point */
+int gVitaPfFast2 = 0;         /* bt3.txt pffast2: 1 skips per-op diagnostic counter in vita_ps2float_a.S when ps2float=1 */
 unsigned gVitaPfCount[8];     /* operations done, by entry point: add sub mul div f2u u2f (the report's ps2float line) */
 
 /* RefVu0_LtBits (src/port/vu0_a.c): a < b as sign and magnitude (+0 == -0) */

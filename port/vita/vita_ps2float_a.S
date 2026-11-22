@@ -33,11 +33,14 @@
 	.thumb_func;                                                \
 	.p2align 2;                                                 \
 PortPF_##name:                                                      \
+	ldr	r2, .Lfast2;                                        \
+	ldr	r2, [r2];                                           \
+	cbnz	r2, 1f;                                             \
 	ldr	r2, .Lcount;                                        \
 	ldr	r3, [r2, (idx) * 4];                                \
 	add	r3, r3, #1;                                         \
 	str	r3, [r2, (idx) * 4];                                \
-	ldr	r2, .Lmode;                                         \
+1:	ldr	r2, .Lmode;                                         \
 	ldr	r2, [r2];                                           \
 	mrs	r4, APSR
 
@@ -172,3 +175,5 @@ PF_HEAD(u2f, 5)
 	.word	gVitaPfCount
 .Lmode:
 	.word	gVitaPs2Float
+.Lfast2:
+	.word	gVitaPfFast2
