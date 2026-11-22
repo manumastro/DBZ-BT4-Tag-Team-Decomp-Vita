@@ -333,8 +333,13 @@ void Port_NetRules(int *type, int *dp, int *time) {
 
 /* With automatic delay, the lobby's rollback choice selects the delay profile. */
 static int auto_delay(int rttMs, int relayed, int rollback) {
-    const NetTimingProfile profile = sOptRoll == -2 ? NET_TIMING_AUTO :
-                                     rollback > 0 ? NET_TIMING_ROLLBACK : NET_TIMING_DELAY;
+    const NetTimingProfile profile =
+#ifdef PORT_VITA
+        rollback > 0 ? (sOptRoll == -2 ? NET_TIMING_AUTO : NET_TIMING_ROLLBACK) : NET_TIMING_DELAY;
+#else
+        sOptRoll == -2 ? NET_TIMING_AUTO :
+        rollback > 0 ? NET_TIMING_ROLLBACK : NET_TIMING_DELAY;
+#endif
     if (rttMs < 0) rttMs = relayed ? 300 : 200;
     return NetTiming_DelayFrames(rttMs, rules_speed(), profile);
 }
@@ -2317,8 +2322,17 @@ static void net_start(int role, const char *host, const char *join) {
             }
 #endif
         } else if (sAutoDelay) {
+#ifdef PORT_VITA
+            sTimingQuality = NetTiming_Summarize(&sTimingProbes);
+            sSetupRtt = sTimingQuality.median;
+            {
+                int rttForDelay = sTimingQuality.p90 > sSetupRtt ? sTimingQuality.p90 : sSetupRtt;
+                sDelay = auto_delay(rttForDelay, relayed, sRollMax);
+            }
+#else
             sSetupRtt = NetTiming_Summarize(&sTimingProbes).median;
             sDelay = auto_delay(sSetupRtt, relayed, sRollMax);
+#endif
         }
         if (!sAutoDelay && relayed && getenv("BT3_NET_DELAY") == NULL) {
             const int floor = relay_delay_floor(sSetupRtt, rules_speed(), sRollMax);
@@ -2385,8 +2399,8 @@ static void net_start(int role, const char *host, const char *join) {
 #ifdef PORT_VITA
     {
         extern void Vita_Log(const char *fmt, ...);
-        Vita_Log("net: timing: mode=%d relayed=%d rtt=%d speed=%d delay=%d roll=%d adaptive=%d\n",
-                 sMode, sFromLobby && Port_LobbyRelayed(), sSetupRtt, rules_speed(), sDelay, sRollMax, sAdaptive);
+        Vita_Log("net: timing: mode=%d relayed=%d rtt=%d p90=%d speed=%d delay=%d roll=%d adaptive=%d\n",
+                 sMode, sFromLobby && Port_LobbyRelayed(), sSetupRtt, sTimingQuality.p90, rules_speed(), sDelay, sRollMax, sAdaptive);
     }
 #endif
     if (sMode != 3 && !sDataBad && !sFpHeard && fp_required()) {

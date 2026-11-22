@@ -853,14 +853,19 @@ void Vita_VBlank(unsigned vblanks) {
                advances by 1000/speed of a screen blank a game blank, so some game blanks do not wait */
             extern int Vita_NetPaceMilli(void);
             static unsigned acc;
-            int sp = Vita_NetPaceMilli();
-            if (sp > 1000) {
-                acc += 1000000u / (unsigned)sp;
-                nextVc += acc / 1000u;
-                acc %= 1000u;
-            } else {
-                nextVc++;
+            if (gVitaNetWarp) {
+                nextVc = vc;
                 acc = 0;
+            } else {
+                int sp = Vita_NetPaceMilli();
+                if (sp > 1000) {
+                    acc += 1000000u / (unsigned)sp;
+                    nextVc += acc / 1000u;
+                    acc %= 1000u;
+                } else {
+                    nextVc++;
+                    acc = 0;
+                }
             }
         }
 #else
