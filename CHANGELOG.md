@@ -2,6 +2,15 @@
 
 The changes of the PS Vita port of BT4. BT4decomp's own, for the PC: [docs/port/CHANGELOG-BT4decomp.md](docs/port/CHANGELOG-BT4decomp.md).
 
+## v1.5.1 (2026-11-23)
+
+- **Fixed: 1 vs 1 and general microstutters / texture upload stalls introduced in v1.5**: reverted `vglcached`
+  (`vglUseCachedMem(GL_TRUE)`), `splitms`, and `fxbox` defaults to `0`, keeping the 6 pure CPU/NEON speed-ups
+  (`upneon`, `postskip`, `snapneon`, `fxcull`, `vifneon`, `pffast2`). Verified on console (`v15_stutter` batch:
+  1 vs 1 heavy stages 4/12/15/19 at 29.68 fps / 24.7 min, `4+ blanks` -83% to 0.15/2s, `>33 ms` -66% to 0.73/2s,
+  `vitaGL` texture upload max 7 ms vs 1,999 ms; 1 vs 1 heavy specials `hx0` 29.78 fps; 2 vs 2 `hx2` 28.98 fps,
+  `4+ blanks` -21%, 0 crashes).
+
 ## v1.5 (2026-11-22)
 
 - **Online play, first version (1 vs 1, Vita vs PC or Vita vs Vita)**: main menu > Tenkaichi Budokai Online, on
